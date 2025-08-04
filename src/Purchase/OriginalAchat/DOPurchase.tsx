@@ -1,0 +1,2117 @@
+import { useEffect, useState, useMemo, forwardRef } from 'react';
+import axios from 'axios';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  MaterialReactTable,
+  useMaterialReactTable,
+  type MRT_ColumnDef,
+} from 'material-react-table';
+import {
+  Box, IconButton, Tooltip, Button, Dialog,
+  DialogActions, DialogContent, DialogTitle, TextField,
+  Divider, Typography, Autocomplete, Link
+} from '@mui/material';
+
+import Snackbar from '@mui/material/Snackbar';
+import MuiAlert, { AlertProps } from '@mui/material/Alert';
+
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import AddIcon from '@mui/icons-material/Add';
+import ImportExportIcon from '@mui/icons-material/ImportExport';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import SharePointIcon from '@mui/icons-material/Share';
+
+import EmailIcon from '@mui/icons-material/Email';
+import * as XLSX from 'xlsx';
+import Backdrop from '@mui/material/Backdrop';
+
+import LinearProgress from '@mui/material/LinearProgress';
+import Logo from '../../ui-component/Logo';
+
+type Supplier = {
+  id_client: number;
+  client_name: string;
+  TYPE_SUPPLIER?: string;
+};
+
+type User = {
+  id_user: number;
+  name?: string;
+  name_user?: string;
+  email?: string;
+};
+
+
+type DOPuchase = {
+  id_achat: number;
+  carat?: number;
+  cut?: string;
+  color?: string;
+  clarity?: string;
+  shape?: string;
+  measurements?: string;
+  depth_percent?: number;
+  Usr?: number;
+  table_percent?: number;
+  girdle?: string;
+  culet?: string;
+  polish?: string;
+  symmetry?: string;
+  fluorescence?: string;
+  certificate_number?: string;
+  certificate_lab?: string;
+  certificate_url?: string;
+  laser_inscription?: string;
+  price_per_carat?: number;
+  total_price?: number;
+  origin_country?: string;
+  comment?: string;
+  image_url?: string;
+  video_url?: string;
+  Comment_Achat?: string;
+  DocumentNo?: string;
+  IsApprouved?: string;
+  Approval_Date?: string;
+  ApprouvedBy?: string;
+  attachmentUrl?: string;
+  Date_Achat?: string;
+  Brand?: number;
+  supplier?: Supplier | null;
+  user?: User;
+  CODE_EXTERNAL?: string;
+  comment_edit?: string;
+  sharepoint_url?: string;
+  MakingCharge?: number;
+  ShippingCharge?: number;
+  TravelExpesenes?: number;
+  Rate?: number;
+  Total_Price_LYD?: number;
+  SellingPrice?: number;
+  Design_art?: string;
+};
+
+type Product = {
+    id_famille: number;
+    desig_famille: string;
+};
+
+
+type DistributionPurchase = {
+  distributionID: number;
+  ps: number;
+  Weight: number;
+  distributionDate: string;
+  usr: number;
+  PurchaseID: number;
+};
+
+type Ps = {
+  Id_point: number;
+  name_point: string;
+  Email: string;
+};
+
+const initialBoxeState: DOPuchase = {
+  id_achat: 0,
+  carat: undefined,
+  cut: '',
+  color: '',
+  clarity: '',
+  shape: '',
+  measurements: '',
+  depth_percent: undefined,
+  Usr: 0,
+  table_percent: undefined,
+  girdle: '',
+  culet: '',
+  polish: '',
+  symmetry: '',
+  fluorescence: '',
+  certificate_number: '',
+  certificate_lab: '',
+  certificate_url: '',
+  laser_inscription: '',
+  price_per_carat: undefined,
+  total_price: undefined,
+  origin_country: '',
+  comment: '',
+  image_url: '',
+  video_url: '',
+  Comment_Achat: '',
+  DocumentNo: '',
+  IsApprouved: '',
+  Approval_Date: '',
+  ApprouvedBy: '',
+  attachmentUrl: '',
+  Date_Achat: new Date().toISOString().slice(0, 10),
+  Brand: undefined,
+  supplier: null,
+  CODE_EXTERNAL: '',
+  comment_edit: '',
+  sharepoint_url: '',
+  MakingCharge: undefined,
+  ShippingCharge: undefined,
+  TravelExpesenes: undefined,
+  Rate: undefined,
+  Total_Price_LYD: undefined,
+  SellingPrice: undefined,
+  Design_art: '',
+};
+
+const Alert = forwardRef<HTMLDivElement, AlertProps>(
+  (props, ref) => <MuiAlert elevation={6} ref={ref} variant="filled" {...props} />
+);
+
+const DOPurchase = () => {
+  let ps: string | null = null;
+    let Cuser: string | null = null;
+    const userStr = localStorage.getItem('user');
+    if (userStr) {
+        try {
+            const userObj = JSON.parse(userStr);
+            ps = userObj.ps ?? localStorage.getItem('ps');
+            Cuser = userObj.Cuser ?? localStorage.getItem('Cuser');
+        } catch {
+            ps = localStorage.getItem('ps');
+            Cuser = localStorage.getItem('Cuser');
+        }
+    } else {
+        ps = localStorage.getItem('ps');
+        Cuser = localStorage.getItem('Cuser');
+    }
+
+  const [data, setData] = useState<DOPuchase[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openDialog, setOpenDialog] = useState(false);
+  const [editOPurchase, setEditOPurchase] = useState<DOPuchase | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [errors, setErrors] = useState<any>({});
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean,
+    message: string,
+    severity: 'success' | 'error' | 'info' | 'warning',
+    actionType?: string
+  }>({ open: false, message: '', severity: 'success' });
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [Productsdata, setProductsdata] = useState<Product[]>([]);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [attachmentDialog, setAttachmentDialog] = useState<{ open: boolean, row: DOPuchase | null }>({ open: false, row: null });
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailProgress, setEmailProgress] = useState(0);
+  const [distributionDialog, setDistributionDialog] = useState<{ open: boolean, purchase: DOPuchase | null }>({ open: false, purchase: null });
+  const [distributions, setDistributions] = useState<DistributionPurchase[]>([]);
+  const [newDistribution, setNewDistribution] = useState<{ ps: number; distributionDate: string }>({ ps: 0, distributionDate: new Date().toISOString().slice(0, 10) });
+  const [loadingDistributions, setLoadingDistributions] = useState(false);
+  const [psList, setPsList] = useState<Ps[]>([]);
+  const [pendingDeleteDist, setPendingDeleteDist] = useState<DistributionPurchase | null>(null);
+  const [distributionReady, setDistributionReady] = useState(false);
+  const [distributionErrors, setDistributionErrors] = useState<{ ps?: string }>({});
+  const [pendingDistribution, setPendingDistribution] = useState(false);
+  const [showNotif, setShowNotif] = useState(true);
+  const [showOnlyNotDistributed, setShowOnlyNotDistributed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; row: DOPuchase | null }>({
+    open: false,
+    row: null,
+  });
+  const [costDialog, setCostDialog] = useState<{ open: boolean, row: DOPuchase | null }>({ open: false, row: null });
+  const [costFields, setCostFields] = useState<{ MakingCharge?: number; ShippingCharge?: number; TravelExpesenes?: number; Rate?: number; Total_Price_LYD?: number }>({});
+
+  const navigate = useNavigate();
+  const apiIp = process.env.REACT_APP_API_IP;
+  const apiUrl = `http://${apiIp}/DOpurchases`;
+
+  const fetchData = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return navigate("/");
+
+    try {
+      const response = await axios.get<DOPuchase[]>(`${apiUrl}/all`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setData(response.data);
+    } catch (error: any) {
+      if (error.response?.status === 401) navigate("/");
+      else setSnackbar({ open: true, message: "Error loading data", severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSuppliers = async () => {
+    const apiUrlsuppliers = `http://${apiIp}/suppliers`;
+    const token = localStorage.getItem('token');
+    try {
+      setLoadingSuppliers(true);
+      const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const goldSuppliers = res.data.filter(supplier =>
+        supplier.TYPE_SUPPLIER?.toLowerCase().includes('diamond')
+      );
+      setSuppliers(goldSuppliers);
+    } catch (error) {
+      setSnackbar({ open: true, message: 'Failed to fetch suppliers', severity: 'error' });
+    } finally {
+      setLoadingSuppliers(false);
+    }
+  };
+
+  const fetchAllDistributions = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const res = await axios.get('http://102.213.182.8:9000/Dpurchases/all', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setDistributions(res.data.filter((d: any) => d.PurchaseType === 'Diamond Purchase'));
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to load distributions', severity: 'error' });
+    }
+  };
+
+
+  const apiUrlProducts = `http://${apiIp}/products`;
+  
+      const fetchDataProducts = async () => {
+          const token = localStorage.getItem('token');
+          if (!token) return navigate("/");
+  
+          try {
+              const response = await axios.get<Product[]>(`${apiUrlProducts}/all`, {
+                  headers: { Authorization: `Bearer ${token}` }
+              });
+              setProductsdata(response.data);
+          } catch (error: any) {
+              if (error.response?.status === 401) navigate("/");
+             
+          } finally {
+              setLoading(false);
+          }
+      };
+
+
+  useEffect(() => {
+    fetchData();
+    fetchSuppliers();
+    fetchDataProducts(); // <-- Add this
+  }, [navigate]);
+
+  useEffect(() => {
+    const fetchPsList = async () => {
+      const token = localStorage.getItem('token');
+      try {
+        const res = await axios.get('http://102.213.182.8:9000/ps/all', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setPsList(res.data);
+      } catch {
+        setSnackbar({ open: true, message: 'Failed to load points of sale', severity: 'error' });
+      }
+    };
+    fetchPsList();
+  }, []);
+
+  useEffect(() => {
+    fetchAllDistributions();
+  }, []);
+
+  const handleEdit = (row: DOPuchase) => {
+    setEditOPurchase({
+      ...row,
+      supplier: suppliers.find(s => s.id_client === row.Brand) || null
+    });
+    setIsEditMode(true);
+    setOpenDialog(true);
+  };
+
+  const handleAddNew = () => {
+    setEditOPurchase(initialBoxeState);
+    setIsEditMode(false);
+    setOpenDialog(true);
+  };
+
+  const handleCloseDialog = () => {
+    setOpenDialog(false);
+    setEditOPurchase(null);
+    setErrors({});
+  };
+
+  const validateForm = () => {
+    const newErrors: any = {};
+    if (!editOPurchase?.Design_art) newErrors.Design_art = 'Required';
+    if (!editOPurchase?.carat && editOPurchase?.carat !== 0) newErrors.carat = 'Required';
+    if (!editOPurchase?.cut) newErrors.cut = 'Required';
+    if (!editOPurchase?.color) newErrors.color = 'Required';
+    if (!editOPurchase?.clarity) newErrors.clarity = 'Required';
+    if (!editOPurchase?.shape) newErrors.shape = 'Required';
+    if (!editOPurchase?.measurements) newErrors.measurements = 'Required';
+    if (!editOPurchase?.depth_percent && editOPurchase?.depth_percent !== 0) newErrors.depth_percent = 'Required';
+    if (!editOPurchase?.table_percent && editOPurchase?.table_percent !== 0) newErrors.table_percent = 'Required';
+    if (!editOPurchase?.girdle) newErrors.girdle = 'Required';
+    if (!editOPurchase?.culet) newErrors.culet = 'Required';
+    if (!editOPurchase?.polish) newErrors.polish = 'Required';
+    if (!editOPurchase?.symmetry) newErrors.symmetry = 'Required';
+    if (!editOPurchase?.fluorescence) newErrors.fluorescence = 'Required';
+    if (!editOPurchase?.certificate_number) newErrors.certificate_number = 'Required';
+    if (!editOPurchase?.certificate_lab) newErrors.certificate_lab = 'Required';
+    if (!editOPurchase?.certificate_url) newErrors.certificate_url = 'Required';
+    if (!editOPurchase?.laser_inscription) newErrors.laser_inscription = 'Required';
+    if (!editOPurchase?.price_per_carat && editOPurchase?.price_per_carat !== 0) newErrors.price_per_carat = 'Required';
+    if (!editOPurchase?.total_price && editOPurchase?.total_price !== 0) newErrors.total_price = 'Required';
+    if (!editOPurchase?.origin_country) newErrors.origin_country = 'Required';
+    if (!editOPurchase?.Date_Achat) newErrors.Date_Achat = 'Required';
+    if (!editOPurchase?.supplier) newErrors.supplier = 'Required';
+    if (!editOPurchase?.SellingPrice && editOPurchase?.SellingPrice !== 0) newErrors.SellingPrice = 'Required';
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSave = async () => {
+    if (!validateForm() || !editOPurchase) return;
+    const token = localStorage.getItem('token');
+
+    // Format dates
+    const formatDate = (dateStr?: string) => {
+      if (!dateStr) return null;
+      return dateStr.slice(0, 10);
+    };
+    const formatDateTime = (dateStr?: string) => {
+      if (!dateStr) return null;
+      return dateStr.length > 10 ? dateStr.slice(0, 19).replace('T', ' ') : `${dateStr.slice(0, 10)} 00:00:00`;
+    };
+
+    // Prepare data
+    const payload = {
+      ...editOPurchase,
+      Brand: editOPurchase.supplier?.id_client,
+      Usr: Cuser,
+      Date_Achat: formatDate(editOPurchase.Date_Achat),
+      Approval_Date: formatDateTime(editOPurchase.Approval_Date),
+    };
+
+    try {
+      if (isEditMode) {
+        await axios.put(`${apiUrl}/Update/${editOPurchase.id_achat}`, payload, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSnackbar({ open: true, message: 'Purchase updated successfully', severity: 'success' });
+      } else {
+        const { id_achat, supplier, ...purchaseData } = payload;
+        await axios.post(`${apiUrl}/Add`, purchaseData, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSnackbar({ open: true, message: 'Purchase added successfully', severity: 'success' });
+      }
+      await fetchData();
+      handleCloseDialog();
+    } catch (error: any) {
+      setSnackbar({ open: true, message: error.response?.data?.message || 'Save failed', severity: 'error' });
+    }
+  };
+
+  const handleDelete = async (row: DOPuchase) => {
+    // Instead of deleting immediately, show confirmation Snackbar
+    setConfirmDelete({ open: true, row });
+  };
+
+  const handleRequestApproval = async (row: DOPuchase) => {
+    const email = 'hasni.zied@gmail.com';
+    if (!email) return;
+    setSendingEmail(true);
+    setEmailProgress(10);
+    try {
+      setEmailProgress(20);
+      const payload = {
+        id_achat: row.id_achat,
+        email,
+        purchaseInfo: {
+          Comment_Achat: row.Comment_Achat,
+          Date_Achat: row.Date_Achat,
+          carat: row.carat,
+          Supplier: suppliers.find(s => s.id_client === row.Brand)?.client_name || '',
+          DocumentNo: row.DocumentNo,
+          certificate_number: row.certificate_number,
+          certificate_lab: row.certificate_lab,
+          total_price: row.total_price,
+          price_per_carat: row.price_per_carat,
+          shape: row.shape,
+          color: row.color,
+          clarity: row.clarity,
+          cut: row.cut,
+        }
+      };
+      setEmailProgress(40);
+      const token = localStorage.getItem('token');
+      setEmailProgress(60);
+      await axios.post(`http://${apiIp}/DOpurchases/send-approval`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEmailProgress(90);
+      setSnackbar({ open: true, message: 'Approval email sent!', severity: 'success' });
+      setEmailProgress(100);
+      setTimeout(() => setSendingEmail(false), 500);
+      setTimeout(() => setEmailProgress(0), 1000);
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.response?.data?.message || 'Failed to send approval email', severity: 'error' });
+      setEmailProgress(0);
+      setSendingEmail(false);
+    }
+  };
+
+
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    return date.toLocaleString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: '2-digit',
+    });
+  };
+
+
+
+
+  const handleExportExcel = () => {
+    const headers = [
+      "ID Achat", "Carat", "Cut", "Color", "Clarity", "Shape", "Measurements", "Depth %", "Table %", "Girdle", "Culet", "Polish", "Symmetry", "Fluorescence", "Certificate #", "Certificate Lab", "Certificate URL", "Laser Inscription", "Price/Carat", "Total Price", "Origin Country", "Comment", "Image URL", "Video URL", "Comment Achat", "Document No", "Is Approved", "Approval Date", "Approved By", "Attachment", "Date Achat", "Supplier"
+    ];
+    const rows = data.map(boxe => [
+      boxe.id_achat,
+      boxe.carat,
+      boxe.cut,
+      boxe.color,
+      boxe.clarity,
+      boxe.shape,
+      boxe.measurements,
+      boxe.depth_percent,
+      boxe.table_percent,
+      boxe.girdle,
+      boxe.culet,
+      boxe.polish,
+      boxe.symmetry,
+      boxe.fluorescence,
+      boxe.certificate_number,
+      boxe.certificate_lab,
+      boxe.certificate_url,
+      boxe.laser_inscription,
+      boxe.price_per_carat,
+      boxe.total_price,
+      boxe.origin_country,
+      boxe.comment,
+      boxe.image_url,
+      boxe.video_url,
+      boxe.Comment_Achat,
+      boxe.DocumentNo,
+      boxe.IsApprouved,
+      boxe.Approval_Date,
+      boxe.ApprouvedBy,
+      boxe.attachmentUrl,
+      boxe.Date_Achat,
+      suppliers.find(s => s.id_client === boxe.Brand)?.client_name || boxe.Brand || '',
+    ]);
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "purchases");
+    XLSX.writeFile(workbook, "diamond_purchases.xlsx");
+    setSnackbar({ open: true, message: 'Excel exported', severity: 'info' });
+  };
+
+  // --- Attachment logic ---
+  const handleOpenAttachmentDialog = (row: DOPuchase) => {
+    setAttachmentDialog({ open: true, row });
+    setAttachment(null);
+  };
+
+  const handleCloseAttachmentDialog = () => {
+    setAttachmentDialog({ open: false, row: null });
+    setAttachment(null);
+  };
+
+  const handleAttachmentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setAttachment(e.target.files[0]);
+    }
+  };
+
+  const handleUploadAttachment = async () => {
+    if (!attachment || !attachmentDialog.row) {
+      setSnackbar({ open: true, message: 'No file or purchase selected', severity: 'warning' });
+      return;
+    }
+    setUploading(true);
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('file', attachment);
+    formData.append('id_achat', String(attachmentDialog.row.id_achat));
+
+    try {
+      await axios.post(
+        `${apiUrl}/upload-attachment`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      setSnackbar({ open: true, message: 'Attachment uploaded successfully', severity: 'success' });
+      setAttachment(null);
+      setAttachmentDialog({ open: false, row: null });
+      await fetchData();
+    } catch (error: any) {
+      setSnackbar({ open: true, message: error.response?.data?.message || 'Upload failed', severity: 'error' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleConfirmDistribution = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      // Find if a distribution already exists for this purchase
+      const existingDist = distributions.find(
+        (d) => d.PurchaseID === distributionDialog.purchase?.id_achat
+      );
+
+      if (existingDist) {
+        // Update the existing distribution
+        await axios.put(`http://${apiIp}/Dpurchases/Update/${existingDist.distributionID}`, {
+          PurchaseID: distributionDialog.purchase?.id_achat,
+          ps: newDistribution.ps,
+          distributionDate: newDistribution.distributionDate,
+          Weight: 1,
+          PurchaseType: 'Diamond Purchase',
+          usr: Cuser,
+          distributionISOK: false,
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSnackbar({ open: true, message: 'Distribution updated successfully', severity: 'success' });
+      } else {
+        // Add a new distribution
+        await axios.post('http://102.213.182.8:9000/Dpurchases/Add', {
+          PurchaseID: distributionDialog.purchase?.id_achat,
+          ps: newDistribution.ps,
+          distributionDate: newDistribution.distributionDate,
+          Weight: 1,
+          PurchaseType: 'Diamond Purchase',
+          usr: Cuser,
+          distributionISOK: false,
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setSnackbar({ open: true, message: 'Distributed successfully', severity: 'success' });
+      }
+
+      setDistributionDialog({ open: false, purchase: null });
+      await fetchData();
+      await fetchAllDistributions();
+    } catch (err: any) {
+      setSnackbar({ open: true, message: err.response?.data?.message || 'Distribution failed', severity: 'error' });
+    } finally {
+      setPendingDistribution(false);
+      setSnackbar(s => ({ ...s, actionType: undefined }));
+    }
+  };
+
+
+
+  const formatAmount = (value?: number) =>
+    typeof value === 'number'
+      ? value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '';
+
+
+
+  const handleOpenDistributionDialog = async (purchase: DOPuchase) => {
+    setDistributionDialog({ open: true, purchase });
+    setLoadingDistributions(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`http://${apiIp}/Dpurchases/all`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const filtered = res.data.filter(
+        (d: any) =>
+          d.PurchaseID === purchase.id_achat &&
+          d.PurchaseType === 'Diamond Purchase'
+      );
+      setDistributions(filtered);
+      setDistributionReady(filtered.some((d: any) => d.distributionISOK === true));
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to load distributions', severity: 'error' });
+    } finally {
+      setLoadingDistributions(false);
+    }
+  };
+
+  // --- Update columns definition for price group ---
+  const columns = useMemo<MRT_ColumnDef<DOPuchase>[]>(() => [
+
+    { accessorKey: 'Date_Achat', header: 'Date Achat', size: 100, Cell: ({ cell }) => formatDate(cell.getValue<string>()) },
+    {
+      accessorKey: 'Brand',
+      header: 'Brand',
+      size: 100,
+      Cell: ({ row }) => (
+        <Box sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          {suppliers.find(s => s.id_client === row.original.Brand)?.client_name || ''}
+        </Box>
+      ),
+    },
+
+
+     {
+      accessorKey: 'Design_art',
+      header: 'Product Design',
+      size: 120,
+      Cell: ({ row }) => (
+        <Box sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          {row.original.Design_art || ''}
+        </Box>
+      ),
+    },
+
+
+    {
+      accessorKey: 'user',
+      header: 'Created By',
+      size: 100,
+      Cell: ({ row }) =>
+        row.original.user?.name_user ||
+        row.original.user?.name ||
+        row.original.Usr ||
+        '',
+    },
+    {
+      header: 'Sales/Ref Code',
+      id: 'sales_ref_group',
+      size: 150,
+      Cell: ({ row }) => (
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+          <span>
+            <strong>Sales Code:</strong> {row.original.comment_edit || ''}
+          </span>
+          <span>
+            <strong>Ref. Code:</strong> {row.original.CODE_EXTERNAL || ''}
+          </span>
+        </Box>
+      ),
+      accessorFn: row => `${row.comment_edit} ${row.CODE_EXTERNAL}`,
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+
+    { accessorKey: 'id_achat', header: 'ID Achat', size: 60 },
+
+    {
+      header: 'Price',
+      id: 'price_group',
+      size: 160,
+      Cell: ({ row }) => {
+        const carat = Number(row.original.carat) || 0;
+        const pricePerCarat = Number(row.original.price_per_carat) || 0;
+        const total = carat * pricePerCarat;
+        return (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <span>
+              <span>Carat:</span> {carat ? carat.toLocaleString() : ''}
+            </span>
+            <span>
+              <span>Carat Price:</span> {pricePerCarat ? pricePerCarat.toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : ''}
+            </span>
+            <span>
+              <span>Total:</span>{' '}
+              <Box
+                component="span"
+                sx={{
+                  bgcolor: 'rgba(255, 152, 0, 0.08)',
+                  border: '1px solid rgba(255, 152, 0, 0.2)',
+                  color: 'rgb(255, 152, 0)',
+                  borderRadius: '12px',
+                  px: 1.2,
+                  py: 0.2,
+                  fontWeight: 600,
+                  fontSize: '0.98em',
+                  ml: 0.5,
+                  display: 'inline-block',
+                  minWidth: 90,
+                  textAlign: 'right',
+                }}
+              >
+                {(carat * pricePerCarat).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+              </Box>
+            </span>
+          </Box>
+        );
+      },
+      accessorFn: row => `${row.carat} ${row.price_per_carat} ${row.total_price}`,
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+    { accessorKey: 'cut', header: 'Cut', size: 80 },
+    { accessorKey: 'color', header: 'Color', size: 60 },
+    { accessorKey: 'clarity', header: 'Clarity', size: 80 },
+    { accessorKey: 'shape', header: 'Shape', size: 80 },
+    { accessorKey: 'measurements', header: 'Measurements', size: 120 },
+    { accessorKey: 'depth_percent', header: 'Depth %', size: 80 },
+    { accessorKey: 'table_percent', header: 'Table %', size: 80 },
+    { accessorKey: 'girdle', header: 'Girdle', size: 80 },
+    { accessorKey: 'culet', header: 'Culet', size: 80 },
+    { accessorKey: 'polish', header: 'Polish', size: 80 },
+    { accessorKey: 'symmetry', header: 'Symmetry', size: 80 },
+    { accessorKey: 'fluorescence', header: 'Fluorescence', size: 100 },
+    {
+      header: 'Certificate',
+      id: 'certificate_group',
+      size: 120,
+      Cell: ({ row }) => {
+        const certNum = row.original.certificate_number || '';
+        const certLab = row.original.certificate_lab || '';
+        const certUrl = row.original.certificate_url || '';
+        return (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <span>
+              <strong>No:</strong> {certNum}
+            </span>
+            <span>
+              <strong>Lab:</strong> {certLab}
+            </span>
+            <span>
+              <strong>URL:</strong>{' '}
+              {certUrl ? (
+                <Link href={certUrl} target="_blank" rel="noopener noreferrer">
+                  View
+                </Link>
+              ) : (
+                <span style={{ color: '#aaa' }}>N/A</span>
+              )}
+            </span>
+          </Box>
+        );
+      },
+      accessorFn: row => `${row.certificate_number} ${row.certificate_lab} ${row.certificate_url}`,
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+    { accessorKey: 'laser_inscription', header: 'Laser Inscription', size: 120 },
+    {
+      accessorKey: 'image_url',
+      header: 'Image',
+      size: 80,
+      Cell: ({ cell }) => cell.getValue<string>() ? (
+        <Link href={cell.getValue<string>()} target="_blank" rel="noopener noreferrer">Image</Link>
+      ) : ''
+    },
+    {
+      accessorKey: 'video_url',
+      header: 'Video',
+      size: 80,
+      Cell: ({ cell }) => cell.getValue<string>() ? (
+        <Link href={cell.getValue<string>()} target="_blank" rel="noopener noreferrer">Video</Link>
+      ) : ''
+    },
+    { accessorKey: 'Comment_Achat', header: 'Comment', size: 120 },
+    { accessorKey: 'DocumentNo', header: 'Document No', size: 120 },
+    { accessorKey: 'IsApprouved', header: 'Is Approved', size: 80 },
+    { accessorKey: 'Approval_Date', header: 'Approval Date', size: 100, Cell: ({ cell }) => formatDate(cell.getValue<string>()) },
+    { accessorKey: 'ApprouvedBy', header: 'Approved By', size: 100 },
+
+
+    {
+      header: 'Attachment',
+      id: 'attachment',
+      size: 80,
+      Cell: ({ row }) => (
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          {row.original.attachmentUrl ? (
+            <Tooltip title="Download Attachment">
+              <IconButton
+                component="a"
+                href={row.original.attachmentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                color="success"
+                size="small"
+              >
+                <AttachFileIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            // Only show upload if not approved
+            row.original.IsApprouved !== 'Accepted' && (
+              <Tooltip title="Attach File">
+                <IconButton
+                  color="primary"
+                  onClick={() => handleOpenAttachmentDialog(row.original)}
+                  size="small"
+                >
+                  <CloudUploadIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )
+          )}
+        </Box>
+      ),
+    },
+    {
+      header: 'Edit Cost',
+      id: 'edit_cost',
+      size: 80,
+      Cell: ({ row }) => (
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => {
+            setCostDialog({ open: true, row: row.original });
+            setCostFields({
+              MakingCharge: row.original.MakingCharge ?? 0,
+              ShippingCharge: row.original.ShippingCharge ?? 0,
+              TravelExpesenes: row.original.TravelExpesenes ?? 0,
+              Rate: row.original.Rate ?? 0,
+              Total_Price_LYD: row.original.Total_Price_LYD ?? 0,
+            });
+          }}
+        >
+          Edit
+        </Button>
+      ),
+    },
+    {
+      header: 'Actions',
+      id: 'actions',
+      size: 120,
+      Cell: ({ row }) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {/* Hide Edit if approved */}
+          {row.original.IsApprouved !== 'Accepted' && (
+            <Tooltip title="Edit">
+              <IconButton color="primary" onClick={() => handleEdit(row.original)} size="small">
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {/* Hide Delete if approved */}
+          {row.original.IsApprouved !== 'Accepted' && (
+            <Tooltip title="Delete">
+              <IconButton color="error" onClick={() => handleDelete(row.original)} size="small">
+                <DeleteOutlineIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {/* Show Distribute button only if IsApprouved is Accepted */}
+          {row.original.IsApprouved === 'Accepted' && (
+            <Tooltip title="Distribute">
+              <IconButton color="info" onClick={() => handleOpenDistributionDialog(row.original)} size="small">
+                <ImportExportIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          {/* Hide Request Approval if already accepted */}
+          {row.original.IsApprouved !== 'Accepted' && (
+            <Tooltip title="Request Approval">
+              <IconButton
+                color="warning"
+                onClick={() => handleRequestApproval(row.original)}
+                size="small"
+              >
+                <EmailIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      ),
+    },
+    {
+      accessorKey: 'sharepoint_url',
+      header: 'SharePoint',
+      size: 70,
+      Cell: ({ cell }) => {
+        const url = cell.getValue<string>();
+        if (!url) return null;
+
+        let isImage = false;
+        try {
+          const urlObj = new URL(url);
+          const idParam = urlObj.searchParams.get('id');
+          if (idParam && /\.(jpg|jpeg|png|gif|bmp|webp|svg|png)$/i.test(decodeURIComponent(idParam))) {
+            isImage = true;
+          }
+        } catch {
+          // fallback: check for image extension anywhere in the url
+          isImage = /\.(jpg|jpeg|png|gif|bmp|webp|svg|png)/i.test(url);
+        }
+
+        if (isImage) {
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <img
+                src={url}
+                alt="SharePoint"
+                style={{ maxWidth: 40, maxHeight: 40, borderRadius: 4, border: '1px solid #eee' }}
+              />
+              <Tooltip title="Open SharePoint Image">
+                <IconButton
+                  component="a"
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  color="primary"
+                  size="small"
+                >
+                  <SharePointIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          );
+        }
+
+        // Otherwise, show the icon link only
+        return (
+          <Tooltip title="Open SharePoint Link">
+            <IconButton
+              component="a"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              color="primary"
+              size="small"
+            >
+              <SharePointIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        );
+      },
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+    {
+      header: 'Distribution Status',
+      id: 'distribution_status',
+      size: 180,
+      Cell: ({ row }) => {
+        const distribution = distributions.find(
+          (d) => d.PurchaseID === row.original.id_achat
+        );
+        if (distribution) {
+          const ps = psList.find((ps) => ps.Id_point === distribution.ps);
+          return (
+            <Box
+              sx={{
+                display: 'inline-block',
+                px: 2,
+                py: 0.5,
+                bgcolor: 'rgba(76, 175, 80, 0.08)',
+                color: 'inherit',
+                borderRadius: '16px',
+                border: '1px solid rgba(76, 175, 80, 0.2)',
+
+                fontWeight: 600,
+                fontSize: '0.95em',
+                textAlign: 'center',
+                minWidth: 120,
+              }}
+            >
+              Distributed to {ps ? ps.name_point : `PS#${distribution.ps}`}
+            </Box>
+          );
+        }
+        return (
+          <Box
+            sx={{
+              display: 'inline-block',
+              px: 2,
+              py: 0.5,
+              bgcolor: 'rgba(255, 152, 0, 0.08)',
+              border: '1px solid rgba(255, 152, 0, 0.2)',
+              color: 'inherit',
+              borderRadius: '16px',
+              fontWeight: 600,
+              fontSize: '0.95em',
+              textAlign: 'center',
+              minWidth: 120,
+            }}
+          >
+            Not Distributed Yet
+          </Box>
+        );
+      },
+      accessorFn: row => {
+        const distribution = distributions.find(
+          (d) => d.PurchaseID === row.id_achat
+        );
+        if (distribution) {
+          const ps = psList.find((ps) => ps.Id_point === distribution.ps);
+          return `Distributed to ${ps ? ps.name_point : `PS#${distribution.ps}`}`;
+        }
+        return 'Not Distributed Yet';
+      },
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+   
+  ], [suppliers, distributions, psList]);
+
+  // Filtered data for table
+  const filteredData = useMemo(
+    () =>
+      showOnlyNotDistributed
+        ? data.filter(row => !distributions.find(d => d.PurchaseID === row.id_achat))
+        : data,
+    [data, distributions, showOnlyNotDistributed]
+  );
+
+  const table = useMaterialReactTable({
+    columns,
+    data: filteredData,
+    state: { isLoading: loading, density: 'compact' },
+    enableDensityToggle: true,
+    muiTableBodyCellProps: {
+      sx: {
+        py: 0.5,
+        px: 0.5,
+      },
+    },
+    muiTableHeadCellProps: {
+      sx: {
+        py: 0.5,
+        px: 0.5,
+      },
+    },
+    initialState: {
+      pagination: {
+        pageSize: 6,
+        pageIndex: 0
+      },
+      columnVisibility: {
+        id_achat: false,
+        carat: true,
+        cut: false,
+        color: false,
+        clarity: false,
+        shape: false,
+        certificate_number: true,
+        certificate_lab: true,
+        price_per_carat: true,
+        total_price: true,
+        origin_country: false,
+        Date_Achat: true,
+        Brand: true,
+        measurements: false,
+        depth_percent: false,
+        table_percent: false,
+        girdle: false,
+        culet: false,
+        polish: false,
+        symmetry: false,
+        fluorescence: false,
+        certificate_url: true,
+        laser_inscription: false,
+        comment: false,
+        image_url: false,
+        video_url: false,
+        Comment_Achat: false,
+        DocumentNo: false,
+        IsApprouved: false,
+        Approval_Date: false,
+        ApprouvedBy: false,
+        attachmentUrl: false,
+      }
+    }
+  });
+
+  const notDistributedRows = useMemo(
+    () =>
+      data.filter(row =>
+        !distributions.find(d => d.PurchaseID === row.id_achat)
+      ),
+    [data, distributions]
+  );
+
+  return (
+    <Box p={0.5}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+          Diamond Purchase List
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="secondary"
+            startIcon={<ImportExportIcon />}
+            onClick={handleExportExcel}
+            sx={{ borderRadius: 3, textTransform: 'none', fontWeight: 'bold', px: 3, py: 1 }}
+          >
+            Export Excel
+          </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleAddNew}
+            sx={{ borderRadius: 3, textTransform: 'none', fontWeight: 'bold', px: 3, py: 1 }}
+          >
+            New Purchase
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Notification bar just above the table */}
+      {showNotif && notDistributedRows.length > 0 && (
+        <Box
+          sx={{
+            mb: 2,
+            bgcolor: 'rgba(255, 68, 0, 0.31)',
+            color: 'inherit',
+            py: 2,
+            px: 3,
+            borderRadius: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          }}
+        >
+          <Box>
+            <strong>
+              {notDistributedRows.length} purchase{notDistributedRows.length > 1 ? 's' : ''} not distributed yet!
+            </strong>
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Button
+              variant="contained"
+              color="warning"
+              onClick={() => setShowOnlyNotDistributed(true)}
+              sx={{ borderRadius: 2, fontWeight: 'bold' }}
+              disabled={showOnlyNotDistributed}
+            >
+              Filter Not Distributed
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => setShowOnlyNotDistributed(false)}
+              sx={{ borderRadius: 2, fontWeight: 'bold' }}
+              disabled={!showOnlyNotDistributed}
+            >
+              Show All
+            </Button>
+            <Button
+              variant="contained"
+              color="inherit"
+              onClick={() => setShowNotif(false)}
+              sx={{ backgroundColor: '#f44336', borderRadius: 2, fontWeight: 'bold', ml: 2 }}
+            >
+              Dismiss
+            </Button>
+          </Box>
+        </Box>
+      )}
+
+      {sendingEmail && (
+        <Backdrop open={sendingEmail} sx={{ zIndex: 2000, color: '#fff', flexDirection: 'column' }}>
+          <Logo />
+          <Typography variant="h6" sx={{ mb: 2 }}>Sending approval email...</Typography>
+          <Box sx={{ width: 400, maxWidth: '90%' }}>
+            <LinearProgress variant="determinate" value={emailProgress} />
+          </Box>
+          <Typography variant="body2" sx={{ mt: 1 }}>{emailProgress}%</Typography>
+        </Backdrop>
+      )}
+      <MaterialReactTable table={table} />
+
+      {/* --- Edit/Add Dialog --- */}
+      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {isEditMode ? 'Edit Diamond Purchase' : 'New Diamond Purchase'}
+          <Divider sx={{ mb: 0 }} />
+        </DialogTitle>
+        <DialogContent>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+              gap: 2,
+              mt: 2,
+            }}
+          >
+            {/* Top row: Vendor, Date Achat, Origin Country */}
+            <Autocomplete
+              id="supplier-select"
+              options={suppliers}
+              autoHighlight
+              getOptionLabel={(option) => option.client_name}
+              value={editOPurchase?.supplier || null}
+              onChange={(_event, newValue) => {
+                setEditOPurchase(prev => ({
+                  ...prev!,
+                  supplier: newValue
+                    ? {
+                      id_client: newValue.id_client,
+                      client_name: newValue.client_name,
+                      TYPE_SUPPLIER: newValue.TYPE_SUPPLIER
+                    }
+                    : null,
+                  Brand: newValue ? newValue.id_client : undefined
+                }));
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Supplier (Vendor)"
+                  required
+                  error={!!errors.supplier}
+                  helperText={
+                    errors.supplier}
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <TextField
+              label="Date Achat"
+              type="date"
+              fullWidth
+              required
+              value={editOPurchase?.Date_Achat || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, Date_Achat: e.target.value })}
+              error={!!errors.Date_Achat}
+              helperText={
+                errors.Date_Achat}
+              InputLabelProps={{ shrink: true }}
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <TextField
+              label="Origin Country"
+              fullWidth
+              required
+              value={editOPurchase?.origin_country || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, origin_country: e.target.value })}
+              error={!!errors.origin_country}
+              helperText={
+                errors.origin_country ||
+                ""
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+<Autocomplete
+  options={Productsdata}
+  getOptionLabel={option => option.desig_famille}
+  value={
+    Productsdata.find(p => p.desig_famille === editOPurchase?.Design_art) || null
+  }
+  onChange={(_event, newValue) => {
+    setEditOPurchase(prev => ({
+      ...prev!,
+      Design_art: newValue ? newValue.desig_famille : ''
+    }));
+  }}
+  renderInput={params => (
+    <TextField
+      {...params}
+      label="Design Art"
+      required
+      error={!!errors.Design_art}
+      helperText={errors.Design_art || "Select the product design"}
+      FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+    />
+  )}
+/>
+            <Typography variant="body2" sx={{ mb: 0, color: 'text.info' }}>
+              Carat is the standard unit of weight for diamonds and gemstones. 1 carat equals 0.2 grams.
+            </Typography>
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                label="Carat"
+                type="number"
+                fullWidth
+                required
+                value={editOPurchase?.carat ?? ''}
+                onChange={e => {
+                  const carat = Number(e.target.value);
+                  setEditOPurchase(prev => ({
+                    ...prev!,
+                    carat,
+                    total_price: carat * (prev?.price_per_carat || 0)
+                  }));
+                }}
+                error={!!errors.carat}
+                helperText={
+                  errors.carat ||
+                  (editOPurchase?.carat
+                    ? `Carat: ${Number(editOPurchase.carat).toLocaleString()}`
+                    : " ")
+                }
+                FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                sx={{ flex: 1 }}
+              />
+              <TextField
+                label="Price/Carat"
+                type="number"
+                fullWidth
+                required
+                value={editOPurchase?.price_per_carat ?? ''}
+                onChange={e => {
+                  const price_per_carat = Number(e.target.value);
+                  setEditOPurchase(prev => ({
+                    ...prev!,
+                    price_per_carat,
+                    total_price: (prev?.carat || 0) * price_per_carat
+                  }));
+                }}
+                error={!!errors.price_per_carat}
+                helperText={
+                  errors.price_per_carat ||
+                  (editOPurchase?.price_per_carat
+                    ? `Price/Carat: ${Number(editOPurchase.price_per_carat).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                    : "")
+                }
+                FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                sx={{ flex: 1 }}
+              />
+
+              <TextField
+                label="Total Price"
+                type="number"
+                fullWidth
+                required
+                value={editOPurchase?.total_price === 0 ? '' : editOPurchase?.total_price ?? ''}
+                InputProps={{ readOnly: true }}
+                error={!!errors.total_price}
+                helperText={
+                  errors.total_price ||
+                  (editOPurchase?.total_price
+                    ? `Total: ${Number(editOPurchase.total_price).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                    : "")
+                }
+                FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                sx={{ flex: 1 }}
+              />
+            </Box>
+
+
+            <TextField
+              label="Selling Price"
+              type="number"
+              fullWidth
+              sx={{ flex: 1 }}
+              required
+              value={editOPurchase?.SellingPrice ?? ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, SellingPrice: Number(e.target.value) })}
+              error={!!errors.SellingPrice}
+              helperText={
+                errors.SellingPrice ||
+                (editOPurchase?.SellingPrice
+                  ? `Selling Price: ${Number(editOPurchase.SellingPrice).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                  : "Enter the selling price for this diamond.")
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+
+            <Autocomplete
+              options={['Excellent', 'Very Good', 'Good', 'Fair', 'Poor']}
+              value={editOPurchase?.cut || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, cut: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Cut"
+                  required
+                  error={!!errors.cut}
+                  helperText={
+                    errors.cut ||
+                    "Cut grade evaluates how well a diamond’s facets interact with light. Grades are: Excellent, Very Good, Good, Fair, Poor. A higher cut grade means more brilliance and sparkle. This is a key value factor and is determined by the grading lab."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']}
+              value={editOPurchase?.color || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, color: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Color"
+                  required
+                  error={!!errors.color}
+                  helperText={
+                    errors.color ||
+                    "Color grade describes how colorless a diamond is. The GIA scale ranges from D (colorless) to Z (light yellow or brown). D-F are considered colorless, G-J near colorless. Enter the grade as shown on the certificate."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['FL', 'IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2', 'I1', 'I2', 'I3']}
+              value={editOPurchase?.clarity || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, clarity: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Clarity"
+                  required
+                  error={!!errors.clarity}
+                  helperText={
+                    errors.clarity ||
+                    "Clarity grade measures the presence of internal (inclusions) and external (blemishes) characteristics. Grades: FL (Flawless), IF (Internally Flawless), VVS1/VVS2 (Very Very Slight), VS1/VS2 (Very Slight), SI1/SI2 (Slight), I1/I2/I3 (Included)."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['Round', 'Princess', 'Oval', 'Emerald', 'Cushion', 'Pear', 'Marquise', 'Radiant', 'Asscher', 'Heart']}
+              value={editOPurchase?.shape || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, shape: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Shape"
+                  required
+                  error={!!errors.shape}
+                  helperText={
+                    errors.shape ||
+                    "The outline or form of the diamond when viewed from above. Common shapes include Round, Princess, Oval, Emerald, Cushion, Pear, Marquise, Radiant, Asscher, and Heart. Shape is a matter of style and preference."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <TextField
+              label="Measurements"
+              fullWidth
+              required
+              value={editOPurchase?.measurements || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, measurements: e.target.value })}
+              error={!!errors.measurements}
+              helperText={
+                errors.measurements ||
+                "The physical dimensions of the diamond, usually in millimeters (mm). Format: Length × Width × Depth (e.g., 6.45 x 6.42 x 4.03 mm). These are found on the grading certificate and are important for verifying the stone."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <TextField
+              label="Depth %"
+              type="number"
+              fullWidth
+              required
+              value={editOPurchase?.depth_percent || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, depth_percent: Number(e.target.value) })}
+              error={!!errors.depth_percent}
+              helperText={
+                errors.depth_percent ||
+                "Depth percentage is the ratio of the diamond’s height (from table to culet) to its average diameter, expressed as a percentage. It affects brilliance and is typically between 58% and 63% for round diamonds."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <TextField
+              label="Table %"
+              type="number"
+              fullWidth
+              required
+              value={editOPurchase?.table_percent || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, table_percent: Number(e.target.value) })}
+              error={!!errors.table_percent}
+              helperText={
+                errors.table_percent ||
+                "Table percentage is the width of the diamond’s top facet (table) divided by its average diameter. It influences how light enters and exits the stone. Typical values for round diamonds are 53%–60%."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <Autocomplete
+              options={['Thin', 'Medium', 'Thick', 'Thin - Medium', 'Medium - Thick']}
+              value={editOPurchase?.girdle || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, girdle: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Girdle"
+                  required
+                  error={!!errors.girdle}
+                  helperText={
+                    errors.girdle ||
+                    "The girdle is the outer edge or perimeter of the diamond, separating the crown from the pavilion. Its thickness can be described as Thin, Medium, Thick, etc. Girdle thickness affects durability and mounting."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['None', 'Small', 'Medium', 'Large']}
+              value={editOPurchase?.culet || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, culet: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Culet"
+                  required
+                  error={!!errors.culet}
+                  helperText={
+                    errors.culet ||
+                    "The culet is the small facet at the bottom tip of the diamond. It is graded as None, Small, Medium, Large, etc. A large culet can appear as a visible dot; 'None' or 'Small' is preferred for most stones."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['Excellent', 'Very Good', 'Good', 'Fair', 'Poor']}
+              value={editOPurchase?.polish || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, polish: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Polish"
+                  required
+                  error={!!errors.polish}
+                  helperText={
+                    errors.polish ||
+                    "Polish refers to the smoothness and luster of the diamond's surface. It affects the diamond's brilliance and is graded as Excellent, Very Good, Good, Fair, or Poor."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['Excellent', 'Very Good', 'Good', 'Fair', 'Poor']}
+              value={editOPurchase?.symmetry || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, symmetry: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Symmetry"
+                  required
+                  error={!!errors.symmetry}
+                  helperText={
+                    errors.symmetry ||
+                    "Symmetry assesses the precision of the diamond’s cut, including the alignment and placement of facets. Grades: Excellent, Very Good, Good, Fair, Poor. Better symmetry means more sparkle and value."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              options={['None', 'Faint', 'Medium', 'Strong']}
+              value={editOPurchase?.fluorescence || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, fluorescence: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Fluorescence"
+                  required
+                  error={!!errors.fluorescence}
+                  helperText={
+                    errors.fluorescence ||
+                    "Fluorescence describes a diamond’s visible reaction to ultraviolet (UV) light. Grades: None, Faint, Medium, Strong. Strong fluorescence can sometimes make a diamond appear hazy or milky."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            {/* Certification */}
+            <TextField
+              label="Certificate #"
+              fullWidth
+              required
+              value={editOPurchase?.certificate_number || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, certificate_number: e.target.value })}
+              error={!!errors.certificate_number}
+              helperText={
+                errors.certificate_number ||
+                "The unique identification number assigned to the diamond by the grading laboratory (e.g., GIA 1234567890). This number is used to verify the diamond’s authenticity and details online."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <Autocomplete
+              options={['GIA', 'IGI', 'HRD', 'AGS', 'Other']}
+              value={editOPurchase?.certificate_lab || ''}
+              onChange={(_e, v) => setEditOPurchase({ ...editOPurchase!, certificate_lab: v || '' })}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Certificate Lab"
+                  required
+                  error={!!errors.certificate_lab}
+                  helperText={
+                    errors.certificate_lab ||
+                    "The gemological laboratory that issued the grading certificate. GIA (Gemological Institute of America), IGI (International Gemological Institute), HRD, and AGS are internationally recognized labs."
+                  }
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <TextField
+              label="Certificate URL"
+              fullWidth
+              required
+              value={editOPurchase?.certificate_url || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, certificate_url: e.target.value })}
+              error={!!errors.certificate_url}
+              helperText={
+                errors.certificate_url ||
+                "A direct link to the digital version of the grading certificate (PDF or web page). This is important for verification, export, and resale. Ensure the link is accessible and matches the certificate number."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            {/* Laser Inscription */}
+            <TextField
+              label="Laser Inscription"
+              fullWidth
+              required
+              value={editOPurchase?.laser_inscription || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, laser_inscription: e.target.value })}
+              error={!!errors.laser_inscription}
+              helperText={
+                errors.laser_inscription ||
+                "A unique number or code inscribed on the diamond’s girdle using a laser. This matches the certificate and helps with identification, security, and anti-theft measures. Enter 'None' if not inscribed."
+              }
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+
+
+
+            {/* New fields: External Code and Edit Comment */}
+            <TextField
+              label="External Code"
+              fullWidth
+              value={editOPurchase?.CODE_EXTERNAL || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, CODE_EXTERNAL: e.target.value })}
+              helperText="External reference code for this diamond (if any)."
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <TextField
+              label="Edit Comment"
+              fullWidth
+              multiline
+              minRows={2}
+              value={editOPurchase?.comment_edit || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, comment_edit: e.target.value })}
+              helperText="Internal comment or edit note for this record."
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            <TextField
+              label="SharePoint URL"
+              fullWidth
+              value={editOPurchase?.sharepoint_url || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, sharepoint_url: e.target.value })}
+              helperText="Optional: Link to the related SharePoint document or item."
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog} color="secondary">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} color="primary">
+            {isEditMode ? 'Save Changes' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* --- Attachment Dialog --- */}
+      <Dialog open={attachmentDialog.open} onClose={handleCloseAttachmentDialog}>
+        <DialogTitle>
+          Upload Attachment
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <Button
+              variant="outlined"
+              component="label"
+              startIcon={<CloudUploadIcon />}
+              color="primary"
+              sx={{ textTransform: 'none', fontWeight: 'bold' }}
+              disabled={uploading}
+            >
+              {attachment ? attachment.name : 'Choose File'}
+              <input
+                type="file"
+                hidden
+                onChange={handleAttachmentChange}
+              />
+            </Button>
+            {attachment && (
+              <Button
+                variant="contained"
+                color="success"
+                onClick={handleUploadAttachment}
+                disabled={uploading}
+                sx={{ textTransform: 'none', fontWeight: 'bold' }}
+              >
+                {uploading ? 'Uploading...' : 'Send'}
+              </Button>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseAttachmentDialog} color="secondary" disabled={uploading}>
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* --- Distribution Dialog --- */}
+      <Dialog open={distributionDialog.open} onClose={() => setDistributionDialog({ open: false, purchase: null })}>
+        <DialogTitle>Distribute Product</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1, minWidth: 300 }}>
+            <Autocomplete
+              options={psList}
+              getOptionLabel={option => option.name_point}
+              value={psList.find(ps => ps.Id_point === newDistribution.ps) || null}
+              onChange={(_e, v) => {
+                setNewDistribution(nd => ({ ...nd, ps: v ? v.Id_point : 0 }));
+                setDistributionErrors({});
+              }}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Point of Sale"
+                  required
+                  error={!!distributionErrors.ps}
+                  helperText={distributionErrors.ps}
+                />
+              )}
+            />
+            <TextField
+              label="Distribution Date"
+              type="date"
+              value={newDistribution.distributionDate}
+              onChange={e => setNewDistribution(nd => ({ ...nd, distributionDate: e.target.value }))}
+              InputLabelProps={{ shrink: true }}
+              required
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDistributionDialog({ open: false, purchase: null })} color="secondary">
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+              let hasError = false;
+              if (!newDistribution.ps) {
+                setDistributionErrors({ ps: 'Point of Sale is required' });
+                hasError = true;
+              } else {
+                setDistributionErrors({});
+              }
+              if (hasError || !distributionDialog.purchase || !newDistribution.distributionDate) return;
+
+              setPendingDistribution(true);
+              setSnackbar({
+                open: true,
+                message: 'Are you ready to distribute?',
+                severity: 'warning',
+                actionType: 'distributionConfirm'
+              });
+            }}
+            color="primary"
+            variant="contained"
+            disabled={distributionReady}
+          >
+            Distribute
+          </Button>
+          {distributionReady && (
+            <Typography color="error" sx={{ mt: 1 }}>
+              This product has already been distributed and cannot be distributed again.
+            </Typography>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* --- Edit Cost Dialog --- */}
+      <Dialog
+        open={costDialog.open}
+        onClose={() => setCostDialog({ open: false, row: null })}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Edit Cost Details</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, mt: 1 }}>
+            {/* Fields on the left */}
+            <Box sx={{ flex: 1, minWidth: 240, maxWidth: 400, display: 'flex', flexDirection: 'column', gap: 2 }}>
+
+
+              <Typography variant="h6" sx={{ mb: 0.75, fontWeight: 'bold', color: 'primary.main' }}>
+                Charges :
+                <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
+              </Typography>
+
+
+              <TextField
+                label="Making Charge"
+                type="number"
+                value={costFields.MakingCharge ?? ''}
+                onChange={e => setCostFields(f => ({ ...f, MakingCharge: Number(e.target.value) }))}
+                fullWidth
+              />
+              <TextField
+                label="Shipping Charge"
+                type="number"
+                value={costFields.ShippingCharge ?? ''}
+                onChange={e => setCostFields(f => ({ ...f, ShippingCharge: Number(e.target.value) }))}
+                fullWidth
+              />
+              <TextField
+                label="Travel Expenses"
+                type="number"
+                value={costFields.TravelExpesenes ?? ''}
+                onChange={e => setCostFields(f => ({ ...f, TravelExpesenes: Number(e.target.value) }))}
+                fullWidth
+              />
+              <TextField
+                label="Rate"
+                type="number"
+                value={costFields.Rate ?? ''}
+                onChange={e => setCostFields(f => ({ ...f, Rate: Number(e.target.value) }))}
+                fullWidth
+              />
+
+            </Box>
+            {/* Totals Box on the right */}
+            <Box
+              sx={{
+                mt: { xs: 2, md: 0 },
+                p: 2,
+                minWidth: 340,
+                maxWidth: 420,
+                fontSize: 14,
+                border: '2px solid rgba(76, 175, 80, 0.3)',
+                color: 'inherit',
+                backgroundColor: 'rgba(76, 175, 80, 0.10)',
+                borderRadius: 3,
+                mx: 'auto',
+                flex: 1,
+                alignSelf: 'flex-start'
+              }}
+            >
+              <Typography variant="h5">
+                Carat: <b>{costDialog.row?.carat ?? 0} ct</b>
+              </Typography>
+              <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <b>Total Price (USD):</b>{' '}
+                {((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0)).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+              </Typography>
+              <Typography variant="body2">
+                <b>Total Price (LYD):</b>{' '}
+                {((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0) * (costFields.Rate ?? 0)).toLocaleString(undefined, { style: 'currency', currency: 'LYD' })}
+              </Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
+                Add Charges:
+              </Typography>
+              {[
+                { label: 'Making Charge', value: costFields.MakingCharge },
+                { label: 'Shipping Charge', value: costFields.ShippingCharge },
+                { label: 'Travel Expenses', value: costFields.TravelExpesenes }
+              ].map((item) => (
+                <Typography variant="body2" key={item.label} sx={{ ml: 1 }}>
+                  {item.label}: {formatAmount(item.value)} USD × {formatAmount(costFields.Rate)} = {formatAmount((item.value ?? 0) * (costFields.Rate ?? 0))} LYD
+                </Typography>
+              ))}
+              <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
+              <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                Grand Total (USD): {(
+                  ((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0)) +
+                  (costFields.MakingCharge ?? 0) +
+                  (costFields.ShippingCharge ?? 0) +
+                  (costFields.TravelExpesenes ?? 0)
+                ).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                Grand Total (LYD): {(
+                  // (TotalPriceUSD + allChargesUSD) * Rate
+                  (
+                    ((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0)) +
+                    (costFields.MakingCharge ?? 0) +
+                    (costFields.ShippingCharge ?? 0) +
+                    (costFields.TravelExpesenes ?? 0)
+                  ) * (costFields.Rate ?? 0)
+                ).toLocaleString(undefined, { style: 'currency', currency: 'LYD' })}
+              </Typography>
+              <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
+
+
+
+
+              <Button sx={{ position: 'revert' }} variant='contained' onClick={() => { }} color="success">
+                Generate Journal
+              </Button>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCostDialog({ open: false, row: null })} color="secondary">
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+
+              if (!costDialog.row) return;
+             
+              const token = localStorage.getItem('token');
+              try {
+                await axios.put(`${apiUrl}/Update/${costDialog.row.id_achat}`, {
+                  ...costDialog.row,
+                  ...costFields,
+                }, {
+                  headers: { Authorization: `Bearer ${token}` }
+                });
+                setSnackbar({ open: true, message: 'Cost updated', severity: 'success' });
+                await fetchData();
+              } catch {
+                setSnackbar({ open: true, message: 'Failed to update cost', severity: 'error' });
+              }
+              setCostDialog({ open: false, row: null });
+            }}
+            color="primary"
+            variant="contained"
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for all alerts */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={snackbar.actionType === 'distributionConfirm' ? null : 6000}
+        onClose={() => {
+          setSnackbar({ open: false, message: '', severity: 'success', actionType: undefined });
+          setPendingDistribution(false);
+        }}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => {
+            setSnackbar({ open: false, message: '', severity: 'success', actionType: undefined });
+            setPendingDistribution(false);
+          }}
+          severity={snackbar.severity}
+          icon={pendingDistribution ? <ImportExportIcon /> : undefined}
+          sx={{ width: '100%' }}
+          action={
+            snackbar.actionType === 'distributionConfirm' ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', mt: 2 }}>
+                <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    size="small"
+                    onClick={async () => {
+                      await handleConfirmDistribution();
+                      setSnackbar({ open: false, message: '', severity: 'success', actionType: undefined });
+                      setPendingDistribution(false);
+                    }}
+                  >
+                    OK
+                  </Button>
+                  <Button
+                    variant="contained"
+                    color="info"
+                    size="small"
+                    onClick={() => {
+                      setSnackbar({ open: false, message: '', severity: 'success', actionType: undefined });
+                      setPendingDistribution(false);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </Box>
+              </Box>
+            ) : null
+          }
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+
+      {/* Snackbar for delete confirmation */}
+      <Snackbar
+        open={confirmDelete.open}
+        onClose={() => setConfirmDelete({ open: false, row: null })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          severity="warning"
+          sx={{ width: '100%' }}
+          action={
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <Button
+                color="error"
+                sx={{ bgcolor: '#f44336', color: '#fff' }}
+                size="small"
+                onClick={async () => {
+                  if (confirmDelete.row) {
+                    // Actually delete now
+                    setSnackbar({ open: true, message: 'Deleting...', severity: 'info' });
+                    const token = localStorage.getItem('token');
+                    try {
+                      await axios.delete(`${apiUrl}/Delete/${confirmDelete.row.id_achat}`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                      });
+                      setSnackbar({ open: true, message: 'Purchase deleted successfully', severity: 'success' });
+                      await fetchData();
+                    } catch {
+                      setSnackbar({ open: true, message: 'Delete failed', severity: 'error' });
+                    }
+                  }
+                  setConfirmDelete({ open: false, row: null });
+                }}
+              >
+                OK
+              </Button>
+              <Button
+                sx={{ bgcolor: '#fff', color: '#000' }}
+                color="inherit"
+                size="small"
+                onClick={() => setConfirmDelete({ open: false, row: null })}
+              >
+                Cancel
+              </Button>
+            </Box>
+          }
+        >
+          Are you sure you want to delete this purchase?
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+export default DOPurchase;
