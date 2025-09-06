@@ -39,6 +39,7 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import Logo from '../ui-component/Logo2';
 import GeneralSettings from '../Setup/GS/GeneralSettings';
 import HRSettings from '../Setup/HR/HRSettings';
+import EmployeeProfile from '../HR/Setting/EmployeeProfile';
 import FinanceSettings from '../Setup/Finance/FinanceSettings';
 import SCSSettings from '../Setup/SCS/SCSSettings';
 import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
@@ -73,7 +74,7 @@ const showReceiveProducts = hasRole('Receive Products');
 const showInvoices = hasRole('General Invoices');
 const showInventory = hasRole('inventory');
 const showcashbook = hasRole('Cash Book');
-const showHR = hasRole('HR');
+const showHR = hasRole('User');
 const showFin = hasRole('Finance');
 
 const showSales = hasRole('Sales Settings');
@@ -108,6 +109,11 @@ const NAVIGATION: Navigation = [
       showHR && {
         segment: 'hrSetting',
         title: 'HR Settings',
+        icon: <PeopleAltIcon />,
+      },
+      showHR && {
+        segment: 'employeeprofile',
+        title: 'Employee Profile',
         icon: <PeopleAltIcon />,
       },
       showFin && {
@@ -417,6 +423,7 @@ const realRoutes = [
   '/home',
   '/setting/generals',
   '/setting/hrSetting',
+  '/setting/employeeprofile',
   '/setting/finSetting',
   '/setting/spySetting',
   '/receiveProducts/goldPurchase',
@@ -580,6 +587,8 @@ function getPageComponent(pathname: string) {
       return <DashboardPage />;
     case '/setting/hrSetting':
       return <HRSettings />;
+    case '/setting/employeeprofile':
+      return <EmployeeProfile />;
     case '/setting/finSetting':
       return <FinanceSettings />;
     case '/setting/spySetting':

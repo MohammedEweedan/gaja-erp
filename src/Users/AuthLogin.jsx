@@ -23,134 +23,34 @@ import Logo from '../ui-component/Logo';
 
 function AuthLogin({ ...others }) {
   const [is_not_found, setis_not_found] = useState('');
-  const [verificationError, setVerificationError] = useState('');
   const history = useNavigate();
   const [checked, setChecked] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [loginStep, setLoginStep] = useState(1); // 1 = credentials, 2 = verification
-  const [verificationCode, setVerificationCode] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
-  const [userData, setUserData] = useState(null);
-  const [isSendingCode, setIsSendingCode] = useState(false);
 
   const handleClickShowPassword = () => setShowPassword((show) => !show);
   const handleMouseDownPassword = (event) => event.preventDefault();
 
-  // Generate a random 6-digit code
-  const generateVerificationCode = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString();
-  };
-
-  // Send WhatsApp message with verification code
-  const sendWhatsAppVerification = async (phoneNumber, code, setIsSendingCode) => {
-    // First validate the phone number (should be in E.164 format without '+' or spaces)
-    const cleanedPhone = phoneNumber.replace(/\D/g, ''); // Remove all non-digit characters
-
-    if (!/^\d{11,15}$/.test(cleanedPhone)) {
-      console.error("Invalid phone number format. Must be 11-15 digits in E.164 format.");
-      throw new Error("Invalid phone number format");
-    }
-
-    try {
-      setIsSendingCode(true);
- 
-      const token = process.env.REACT_APP_WHATSAPP_TOKEN;
-      if (!token) throw new Error('WhatsApp API token is not set in environment variables.');
- 
-      const response = await axios.post(
-        'https://graph.facebook.com/v22.0/657226780814634/messages',
-        {
-          messaging_product: "whatsapp",
-          to: cleanedPhone,
-          type: "template",
-          template: {
-            name: "verification_code",
-            language: { code: "en_US" },
-            components: [
-              {
-                type: "body",
-                parameters: [
-                  { type: "text", text: code }
-                ]
-              },
-              {
-                type: "button",
-                sub_type: "url",
-                index: 0,
-                parameters: [
-                  { type: "text", text: "verify-link" }
-                ]
-              }
-            ]
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      console.log("WhatsApp API response:", response.data);
-    } catch (error) {
-      if (error.response) {
-        console.error("WhatsApp API error:", JSON.stringify(error.response.data, null, 2));
-      } else {
-        console.error("Error sending WhatsApp message:", error.message);
-      }
-      throw error;
-    } finally {
-      setIsSendingCode(false);
-    }
-  };
-
-  async function verifyCredentials(email, password) {
+  async function SignIn(email, password) {
     try {
       const res = await axios.post("http://102.213.182.8:9000/api/login", { email, password });
 
       if (res.data.token) {
-        // Store user data temporarily (don't login yet)
-        setUserData({
-          token: res.data.token,
-          email,
-          user: res.data.user
-        });
-
-        // Generate and send verification code
-        const code = generateVerificationCode();
-        setGeneratedCode(code);
-
-        // Send WhatsApp message (assuming phone number is available in user data)
-        await sendWhatsAppVerification(res.data.user.name, code, setIsSendingCode);
-
-        // Move to verification step
-        setLoginStep(2);
+        localStorage.setItem('user', JSON.stringify({
+          id: email,
+          ps: res.data.user.ps,
+          Cuser: res.data.user.id_user,
+          roles: res.data.user.Action_user,
+          name_user: res.data.user.name_user
+        }));
+      
+        history("/home", { state: { id:email   , ps: res.data.user.ps,Cuser:res.data.user.id_user } });
       } else {
         setis_not_found("Login failed: Token is missing!");
       }
     } catch (e) {
-      console.log(e);
-      // Store only a string, not the Error object, to avoid React rendering issues
-      const msg = e && e.response && e.response.data && (e.response.data.message || e.response.data.error)
-        ? e.response.data.message || e.response.data.error
-        : (e && e.message) ? e.message : "Login or Password is wrong. Please try again!";
-      setis_not_found(msg);
-    }
-  }
 
-  function handleVerification() {
-    if (verificationCode === generatedCode) {
-      // Code matches - complete login
-      localStorage.setItem('token', userData.token);
-      history("/home", {
-        state: {
-          id: userData.email,
-          ps: userData.user.ps,
-          Cuser: userData.user.id_user
-        }
-      });
-    } else {
-      setVerificationError("Invalid verification code. Please try again.");
+      console.log(e)
+      setis_not_found("Login or Password is wrong. Please try again!");
     }
   }
 
@@ -193,160 +93,108 @@ function AuthLogin({ ...others }) {
                     <Logo />
                     <h1 className="h4 text-gray-900 mb-4">Welcome Back!</h1>
                   </div>
-
-                  {loginStep === 1 ? (
-                    <Formik
-                      onSubmit={(values, actions) => {
-                        setTimeout(() => {
-                          verifyCredentials(values.email, values.password);
-                          actions.setSubmitting(false);
-                        }, 500);
-                      }}
-                      initialValues={{
-                        email: '',
-                        password: '',
-                      }}
-                      validationSchema={Yup.object().shape({
-                        email: Yup.string().email('Must be a valid email').max(255).required('Email is required'),
-                        password: Yup.string().max(255).required('Password is required')
-                      })}
-                    >
-                      {({ errors, handleBlur, handleChange, handleSubmit, isSubmitting, touched, values }) => (
-                        <form noValidate onSubmit={handleSubmit} {...others}>
-                          <FormControl fullWidth error={Boolean(touched.email && errors.email)} sx={{ mb: 2 }}>
-                            <InputLabel htmlFor="outlined-adornment-email-login">Email Address / Username</InputLabel>
-                            <OutlinedInput
-                              id="outlined-adornment-email-login"
-                              type="email"
-                              value={values.email}
-                              name="email"
-                              onBlur={handleBlur}
-                              onChange={handleChange}
-                              label="Email Address / Username"
-                            />
-                            {touched.email && errors.email && (
-                              <FormHelperText error>
-                                {errors.email}
-                              </FormHelperText>
-                            )}
-                          </FormControl>
-
-                          <FormControl fullWidth error={Boolean(touched.password && errors.password)}>
-                            <InputLabel htmlFor="outlined-adornment-password-login">Password</InputLabel>
-                            <OutlinedInput
-                              id="outlined-adornment-password-login"
-                              type={showPassword ? 'text' : 'password'}
-                              value={values.password}
-                              name="password"
-                              onBlur={handleBlur}
-                              onChange={handleChange}
-                              endAdornment={
-                                <InputAdornment position="end">
-                                  <IconButton
-                                    aria-label="toggle password visibility"
-                                    onClick={handleClickShowPassword}
-                                    onMouseDown={handleMouseDownPassword}
-                                    edge="end"
-                                  >
-                                    {showPassword ? <Visibility /> : <VisibilityOff />}
-                                  </IconButton>
-                                </InputAdornment>
-                              }
-                              label="Password"
-                            />
-                            {touched.password && errors.password && (
-                              <FormHelperText error>
-                                {errors.password}
-                              </FormHelperText>
-                            )}
-                          </FormControl>
-
-                          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mt: 1 }}>
-                            <FormControlLabel
-                              control={
-                                <Checkbox checked={checked} onChange={(e) => setChecked(e.target.checked)} color="primary" />
-                              }
-                              label="Remember me"
-                            />
-                            <Typography variant="subtitle1" color="secondary" sx={{ textDecoration: 'none', cursor: 'pointer' }}>
-                              Forgot Password?
-                            </Typography>
-                          </Stack>
-
-                          {errors.submit && (
-                            <Box sx={{ mt: 3 }}>
-                              <FormHelperText error>{errors.submit}</FormHelperText>
-                            </Box>
+                  <Formik
+                    onSubmit={(values, actions) => {
+                      setTimeout(() => {
+                        SignIn(values.email, values.password);
+                        actions.setSubmitting(false);
+                      }, 500);
+                    }}
+                    initialValues={{
+                      email: '',
+                      password: '',
+                    }}
+                    validationSchema={Yup.object().shape({
+                      email: Yup.string().email('Must be a valid email').max(255).required('Email is required'),
+                      password: Yup.string().max(255).required('Password is required')
+                    })}
+                  >
+                    {({ errors, handleBlur, handleChange, handleSubmit, isSubmitting, touched, values }) => (
+                      <form noValidate onSubmit={handleSubmit} {...others}>
+                        <FormControl fullWidth error={Boolean(touched.email && errors.email)} sx={{ mb: 2 }}>
+                          <InputLabel htmlFor="outlined-adornment-email-login">Email Address / Username</InputLabel>
+                          <OutlinedInput
+                            id="outlined-adornment-email-login"
+                            type="email"
+                            value={values.email}
+                            name="email"
+                            onBlur={handleBlur}
+                            onChange={handleChange}
+                            label="Email Address / Username"
+                          />
+                          {touched.email && errors.email && (
+                            <FormHelperText error>
+                              {errors.email}
+                            </FormHelperText>
                           )}
+                        </FormControl>
 
-                          <Box sx={{ mt: 2 }}>
-                            <AnimateButton>
-                              <Button
-                                disableElevation
-                                disabled={isSubmitting || isSendingCode}
-                                fullWidth
-                                size="large"
-                                type="submit"
-                                variant="contained"
-                                color="secondary"
-                              >
-                                {isSubmitting ? 'Signing in...' : 'Sign in'}
-                              </Button>
-                            </AnimateButton>
+                        <FormControl fullWidth error={Boolean(touched.password && errors.password)}>
+                          <InputLabel htmlFor="outlined-adornment-password-login">Password</InputLabel>
+                          <OutlinedInput
+                            id="outlined-adornment-password-login"
+                            type={showPassword ? 'text' : 'password'}
+                            value={values.password}
+                            name="password"
+                            onBlur={handleBlur}
+                            onChange={handleChange}
+                            endAdornment={
+                              <InputAdornment position="end">
+                                <IconButton
+                                  aria-label="toggle password visibility"
+                                  onClick={handleClickShowPassword}
+                                  onMouseDown={handleMouseDownPassword}
+                                  edge="end"
+                                >
+                                  {showPassword ? <Visibility /> : <VisibilityOff />}
+                                </IconButton>
+                              </InputAdornment>
+                            }
+                            label="Password"
+                          />
+                          {touched.password && errors.password && (
+                            <FormHelperText error>
+                              {errors.password}
+                            </FormHelperText>
+                          )}
+                        </FormControl>
+
+                        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1} sx={{ mt: 1 }}>
+                          <FormControlLabel
+                            control={
+                              <Checkbox checked={checked} onChange={(e) => setChecked(e.target.checked)} color="primary" />
+                            }
+                            label="Remember me"
+                          />
+                          <Typography variant="subtitle1" color="secondary" sx={{ textDecoration: 'none', cursor: 'pointer' }}>
+                            Forgot Password?
+                          </Typography>
+                        </Stack>
+
+                        {errors.submit && (
+                          <Box sx={{ mt: 3 }}>
+                            <FormHelperText error>{errors.submit}</FormHelperText>
                           </Box>
-                        </form>
-                      )}
-                    </Formik>
-                  ) : (
-                    <div>
-                      <Typography variant="h6" gutterBottom>
-                        Verify Your Identity
-                      </Typography>
-                      <Typography variant="body1" gutterBottom>
-                        We've sent a 6-digit verification code to your WhatsApp number. Please enter it below.
-                      </Typography>
+                        )}
 
-                      <FormControl fullWidth sx={{ mt: 3 }}>
-                        <InputLabel htmlFor="verification-code">Verification Code</InputLabel>
-                        <OutlinedInput
-                          id="verification-code"
-                          type="text"
-                          value={verificationCode}
-                          onChange={(e) => setVerificationCode(e.target.value)}
-                          label="Verification Code"
-                          inputProps={{ maxLength: 6 }}
-                        />
-                      </FormControl>
-
-                      {verificationError && (
-                        <Typography color="error" variant="body2" sx={{ mt: 1 }}>
-                          {verificationError}
-                        </Typography>
-                      )}
-
-                      <Box sx={{ mt: 2 }}>
-                        <Button
-                          fullWidth
-                          variant="contained"
-                          color="primary"
-                          onClick={handleVerification}
-                        >
-                          Verify
-                        </Button>
-                      </Box>
-
-                      <Box sx={{ mt: 2 }}>
-                        <Button
-                          fullWidth
-                          variant="outlined"
-                          color="secondary"
-                          onClick={() => setLoginStep(1)}
-                        >
-                          Back to Login
-                        </Button>
-                      </Box>
-                    </div>
-                  )}
+                        <Box sx={{ mt: 2 }}>
+                          <AnimateButton>
+                            <Button
+                              disableElevation
+                              disabled={isSubmitting}
+                              fullWidth
+                              size="large"
+                              type="submit"
+                              variant="contained"
+                              color="secondary"
+                            >
+                              {isSubmitting ? 'Signing in...' : 'Sign in'}
+                            </Button>
+                          </AnimateButton>
+                        </Box>
+                      </form>
+                    )}
+                  </Formik>
 
                   <hr />
                   <small className="form-text text-muted-warning fst-italic text-danger">

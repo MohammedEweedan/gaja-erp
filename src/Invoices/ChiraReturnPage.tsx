@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, TextField, Button } from '@mui/material';
 import axios from 'axios';
 
-const apiIp = '102.213.182.8:9000';
+const apiIp = process.env.REACT_APP_API_IP;
 
 interface ChiraReturnPageProps {
     id_fact: string;

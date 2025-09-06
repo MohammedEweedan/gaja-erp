@@ -312,7 +312,7 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
   };
 
 
-  const apiIp = process.env.REACT_APP_API_IP;
+  const apiIp = `${process.env.REACT_APP_API_IP}`;
   let ps: string | null = null;
   let Cuser: string | null = null;
   const userStr = localStorage.getItem('user');
