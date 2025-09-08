@@ -51,7 +51,7 @@ const Positions = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [errors, setErrors] = useState<any>({});
   const navigate = useNavigate();
-  const apiUrl = "http://102.213.182.8:9000/positions";
+  const apiUrl = "http://localhost:9000/positions";
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');

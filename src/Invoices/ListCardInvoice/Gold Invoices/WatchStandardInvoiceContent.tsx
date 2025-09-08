@@ -69,8 +69,8 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(({ data, n
     // Filter pdata by num_fact at the top of the component
     const [pdata, setPData] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
-    const apiUrlinv = "http://102.213.182.8:9000/invoices";
-    const apiUrlWatches = "http://102.213.182.8:9000/WOpurchases";
+    const apiUrlinv = "http://localhost:9000/invoices";
+    const apiUrlWatches = "http://localhost:9000/WOpurchases";
 
 
 
@@ -159,7 +159,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(({ data, n
         // eslint-disable-next-line
     }, [pdata, typeinv]);
 
-    const API_BASEImage = 'http://102.213.182.8:9000/images';
+    const API_BASEImage = 'http://localhost:9000/images';
 
 
 

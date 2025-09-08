@@ -57,10 +57,10 @@ type SupplierSettlement = {
     discount_by_vendor?: number; // Add discount_by_vendor for all settlements
 };
 
-const apiUrlPayments = 'http://102.213.182.8:9000/Suppliersettlement';
-const apiUrlPurchases = 'http://102.213.182.8:9000/WOpurchases';
-const apiUrlVendors = 'http://102.213.182.8:9000/vendors';
-const apiUrlBrands = 'http://102.213.182.8:9000/suppliers';
+const apiUrlPayments = 'http://localhost:9000/Suppliersettlement';
+const apiUrlPurchases = 'http://localhost:9000/WOpurchases';
+const apiUrlVendors = 'http://localhost:9000/vendors';
+const apiUrlBrands = 'http://localhost:9000/suppliers';
 
 const VendorAccountStatement = () => {
     // Filters
@@ -145,7 +145,7 @@ const VendorAccountStatement = () => {
 
     // Fetch suppliers for dialog (copy logic from VendorsSettlment)
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "http://102.213.182.8:9000/suppliers";
+        const apiUrlsuppliers = "http://localhost:9000/suppliers";
         const token = localStorage.getItem('token');
         try {
             const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {

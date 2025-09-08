@@ -45,7 +45,7 @@ const CustomersReports = () => {
         const token = localStorage.getItem('token');
         const ps = localStorage.getItem('ps');
         try {
-            const res = await axios.get(`http://102.213.182.8:9000/invoices/allDetailsPC`, {
+            const res = await axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
                 headers: { Authorization: `Bearer ${token}` },
                 params: {
                     ps: ps,

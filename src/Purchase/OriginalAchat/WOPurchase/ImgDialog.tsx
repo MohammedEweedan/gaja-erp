@@ -14,7 +14,7 @@ interface ImgDialogProps {
     id_achat: number | null;
 }
 
-const API_BASE = 'http://102.213.182.8:9000/images'; // Adjust if needed
+const API_BASE = 'http://localhost:9000/images'; // Adjust if needed
 
 const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
     const [images, setImages] = useState<string[]>([]);

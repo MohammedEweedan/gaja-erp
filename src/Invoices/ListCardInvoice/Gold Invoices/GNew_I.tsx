@@ -337,7 +337,7 @@ type Sm = {
     Status: boolean;
 };
 
-const API_BASEImage = 'http://102.213.182.8:9000/images';
+const API_BASEImage = 'http://localhost:9000/images';
 
 // Helper to fetch image as blob with auth
 const fetchImageWithAuth = async (url: string, token: string) => {
@@ -428,7 +428,7 @@ const DNew_I = () => {
     const [customers, setCustomers] = useState<Client[]>([]);
 
     const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrlcustomers = `http://${apiIp}/customers`;
+    const apiUrlcustomers = `http://localhost:9000/customers`;
 
     const fetchCustomers = async () => {
         const token = localStorage.getItem('token');
@@ -446,7 +446,7 @@ const DNew_I = () => {
 
 
     const fetchSms = async () => {
-        const apiUrlsm = "http://102.213.182.8:9000/sm";
+        const apiUrlsm = "http://localhost:9000/sm";
         const token = localStorage.getItem('token');
         try {
             const res = await axios.get<Sm[]>(`${apiUrlsm}/all`, {
@@ -488,7 +488,7 @@ const DNew_I = () => {
         if (!token) return navigate("/");
 
         try {
-            const response = await axios.get<InventoryItem[]>("http://102.213.182.8:9000/Inventory/allActive", {
+            const response = await axios.get<InventoryItem[]>("http://localhost:9000/Inventory/allActive", {
                 headers: { Authorization: `Bearer ${token}` },
                 params: { ps, type_supplier: typeParam }
             });

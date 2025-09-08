@@ -53,7 +53,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
     const [selectedCustomer, setSelectedCustomer] = useState<Client | null>(null);
 
     const apiIp = process.env.REACT_APP_API_IP;
-    const API_BASEImage = 'http://102.213.182.8:9000/images';
+    const API_BASEImage = 'http://localhost:9000/images';
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
     const [imageBlobUrls, setImageBlobUrls] = useState<Record<string, string[]>>({});
     let ps: string | null = null;
@@ -71,7 +71,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
 
 
     const apiUrlcustomers = `http://${apiIp}/customers`;
-    const apiUrlRevenue = "http://102.213.182.8:9000/Revenue";
+    const apiUrlRevenue = "http://localhost:9000/Revenue";
 
 
     // Fetch customers
@@ -205,7 +205,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
         const token = localStorage.getItem('token');
         if (!token) return;
         // Only fetch invoices for selected customer
-        axios.get(`http://102.213.182.8:9000/invoices/allDetailsPC`, {
+        axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,
@@ -252,7 +252,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
             return;
         }
         const token = localStorage.getItem('token');
-        axios.get(`http://102.213.182.8:9000/invoices/allDetailsPC`, {
+        axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,
@@ -1354,7 +1354,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
                             }
                             const token = localStorage.getItem('token');
                             if (!token) return;
-                            axios.get(`http://102.213.182.8:9000/invoices/allDetailsPC`, {
+                            axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
                                 headers: { Authorization: `Bearer ${token}` },
                                 params: {
                                     ps: ps,

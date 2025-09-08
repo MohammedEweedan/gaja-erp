@@ -159,7 +159,7 @@ const Revenue = (props: Props) => {
 
 
 
-    const apiUrl = "http://102.213.182.8:9000/Revenue";
+    const apiUrl = "http://localhost:9000/Revenue";
     const apiUrlAccounts = `http://${apiIp}/Accounts`;
 
     const showSnackbar = (message: string, severity: SnackbarState['severity']) => {

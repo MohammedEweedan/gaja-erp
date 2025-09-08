@@ -61,7 +61,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
 
 
 
-    const apiUrlusers = `http://102.213.182.8:9000/users`;
+    const apiUrlusers = `http://localhost:9000/users`;
     const [users, setUsers] = useState<Users[]>([]);
     const fetchUsers = async () => {
         const token = localStorage.getItem('token');
@@ -86,7 +86,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
     }, []);
 
 
-    const API_BASEImage = 'http://102.213.182.8:9000/images';
+    const API_BASEImage = 'http://localhost:9000/images';
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
     const [imageBlobUrls, setImageBlobUrls] = useState<Record<string, string[]>>({});
     let ps: string | null = null;
@@ -163,7 +163,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
     useEffect(() => {
         setLoading(true);
         const token = localStorage.getItem('token');
-        axios.get(`http://102.213.182.8:9000/invoices/allDetailsP`, {
+        axios.get(`http://localhost:9000/invoices/allDetailsP`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,

@@ -54,7 +54,7 @@ interface Props {
   Type?: string;
 }
 
-const API_BASEImage = 'http://102.213.182.8:9000/images';
+const API_BASEImage = 'http://localhost:9000/images';
 
 // Helper to fetch image as blob with auth
 const fetchImageWithAuth = async (url: string, token: string) => {
@@ -94,7 +94,7 @@ const WInventory = (props: Props) => {
   const [carouselIndex, setCarouselIndex] = useState<Record<string, number>>({});
 
   const navigate = useNavigate();
-  const apiUrl = "http://102.213.182.8:9000/Inventory";
+  const apiUrl = "http://localhost:9000/Inventory";
 
   const fetchData = useCallback(async () => {
     const token = localStorage.getItem('token');

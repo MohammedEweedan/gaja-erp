@@ -12,7 +12,7 @@ interface AttchWatchFilesProps {
   token: string;
 
 }
-const apiUrl = "http://102.213.182.8:9000";
+const apiUrl = "http://localhost:9000";
 const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, id_achat, onUploadSuccess, token }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);

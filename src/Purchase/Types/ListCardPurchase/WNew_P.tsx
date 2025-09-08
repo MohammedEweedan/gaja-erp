@@ -198,10 +198,10 @@ const WNew_p = (props: NewPProps) => {
         ps = localStorage.getItem('ps');
         Cuser = localStorage.getItem('Cuser');
     }
-    const apiUrl = "http://102.213.182.8:9000/purchases";
+    const apiUrl = "http://localhost:9000/purchases";
 
 
-    const API_BASEImage = 'http://102.213.182.8:9000/images'; // Adjust if needed
+    const API_BASEImage = 'http://localhost:9000/images'; // Adjust if needed
     const [images, setImages] = useState<string[]>([]);
     const [carouselIndex, setCarouselIndex] = useState(0); // Add carousel index state
 
@@ -373,7 +373,7 @@ const WNew_p = (props: NewPProps) => {
     };
 
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "http://102.213.182.8:9000/suppliers";
+        const apiUrlsuppliers = "http://localhost:9000/suppliers";
         const token = localStorage.getItem('token');
         try {
             setLoadingSuppliers(true);
@@ -401,7 +401,7 @@ const WNew_p = (props: NewPProps) => {
 
         try {
             const response = await axios.get(
-                `http://102.213.182.8:9000/Dpurchases/ProductDetails`,
+                `http://localhost:9000/Dpurchases/ProductDetails`,
                 {
                     headers: { Authorization: `Bearer ${token}` },
                     params: { distributionID, type }
@@ -675,7 +675,7 @@ const WNew_p = (props: NewPProps) => {
 
 
                 await axios.put(
-                    `http://102.213.182.8:9000/Dpurchases/UpdateStatus/${distribution.distributionID}`,
+                    `http://localhost:9000/Dpurchases/UpdateStatus/${distribution.distributionID}`,
                     { DistributionISOK: true },
                     { headers: { Authorization: `Bearer ${token}` } }
                 ).catch((error) => {
@@ -738,7 +738,7 @@ const WNew_p = (props: NewPProps) => {
         setDeleteDialog({ open: false, purchaseId: null, purchaseNum: null });
     };
 
-    const apiUrlProducts = "http://102.213.182.8:9000/products";
+    const apiUrlProducts = "http://localhost:9000/products";
 
     const fetchDataProducts = async () => {
         const token = localStorage.getItem('token');

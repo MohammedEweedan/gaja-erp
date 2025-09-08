@@ -251,7 +251,7 @@ const WOPurchase = () => {
   const [imgDialogOpen, setImgDialogOpen] = useState(false);
   const [imgDialogIdAchat, setImgDialogIdAchat] = useState<number | null>(null);
   const navigate = useNavigate();
-  const apiUrl = "http://102.213.182.8:9000/WOpurchases";
+  const apiUrl = "http://localhost:9000/WOpurchases";
 
 
   const fetchData = async () => {
@@ -272,7 +272,7 @@ const WOPurchase = () => {
   };
 
   const fetchSuppliers = async () => {
-    const apiUrlsuppliers = "http://102.213.182.8:9000/suppliers";
+    const apiUrlsuppliers = "http://localhost:9000/suppliers";
     const token = localStorage.getItem('token');
     try {
       setLoadingSuppliers(true);
@@ -292,7 +292,7 @@ const WOPurchase = () => {
 
 
   const fetchVendors = async () => {
-    const apiUrlVendors = "http://102.213.182.8:9000/vendors";
+    const apiUrlVendors = "http://localhost:9000/vendors";
     const token = localStorage.getItem('token');
     try {
       setLoadingSuppliers(true);
@@ -315,7 +315,7 @@ const WOPurchase = () => {
   const fetchAllDistributions = async () => {
     const token = localStorage.getItem('token');
     try {
-      const res = await axios.get('http://102.213.182.8:9000/Dpurchases/all', {
+      const res = await axios.get('http://localhost:9000/Dpurchases/all', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDistributions(res.data.filter((d: any) => d.PurchaseType === 'Watche Purchase'));
@@ -334,7 +334,7 @@ const WOPurchase = () => {
     const fetchPsList = async () => {
       const token = localStorage.getItem('token');
       try {
-        const res = await axios.get('http://102.213.182.8:9000/ps/all', {
+        const res = await axios.get('http://localhost:9000/ps/all', {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPsList(res.data);
@@ -513,7 +513,7 @@ const WOPurchase = () => {
     const usr = Cuser;
     // Optionally add Is_view if your backend supports it
     try {
-      await fetch('http://102.213.182.8:9000/ApprovalRequests/create', {
+      await fetch('http://localhost:9000/ApprovalRequests/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -569,7 +569,7 @@ const WOPurchase = () => {
       setEmailProgress(40);
       const token = localStorage.getItem('token');
       setEmailProgress(60);
-      await axios.post("http://102.213.182.8:9000/WOpurchases/send-approval", payload, {
+      await axios.post("http://localhost:9000/WOpurchases/send-approval", payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmailProgress(90);
@@ -635,7 +635,7 @@ const WOPurchase = () => {
           existingDist.ps !== newDistribution.ps ||
           existingDist.distributionDate?.slice(0, 10) !== newDistribution.distributionDate
         ) {
-          await axios.put(`http://102.213.182.8:9000/Dpurchases/Update/${existingDist.distributionID}`, {
+          await axios.put(`http://localhost:9000/Dpurchases/Update/${existingDist.distributionID}`, {
             PurchaseID: distributionDialog.purchase?.id_achat,
             ps: newDistribution.ps,
             distributionDate: newDistribution.distributionDate,
@@ -652,7 +652,7 @@ const WOPurchase = () => {
         }
       } else {
         // Add a new distribution
-        await axios.post('http://102.213.182.8:9000/Dpurchases/Add', {
+        await axios.post('http://localhost:9000/Dpurchases/Add', {
           PurchaseID: distributionDialog.purchase?.id_achat,
           ps: newDistribution.ps,
           distributionDate: newDistribution.distributionDate,
@@ -683,7 +683,7 @@ const WOPurchase = () => {
     try {
       const token = localStorage.getItem('token');
       // Fetch all distributions for this purchase
-      const res = await axios.get(`http://102.213.182.8:9000/Dpurchases/all`, {
+      const res = await axios.get(`http://localhost:9000/Dpurchases/all`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       // Filter for this purchase and type
@@ -1096,7 +1096,7 @@ const WOPurchase = () => {
             setLoading(true);
             const token = localStorage.getItem('token');
             try {
-              const res = await axios.get(`http://102.213.182.8:9000/images/list/${id_achat}`, {
+              const res = await axios.get(`http://localhost:9000/images/list/${id_achat}`, {
                 headers: { Authorization: `Bearer ${token}` },
               });
               let images = res.data;
@@ -1108,7 +1108,7 @@ const WOPurchase = () => {
               if (imgUrl) {
                 // If not absolute, prepend API base
                 if (!/^https?:\/\//i.test(imgUrl)) {
-                  imgUrl = `http://102.213.182.8:9000/images/${imgUrl}`;
+                  imgUrl = `http://localhost:9000/images/${imgUrl}`;
                 }
                 // Always append token as query param
                 if (token) {

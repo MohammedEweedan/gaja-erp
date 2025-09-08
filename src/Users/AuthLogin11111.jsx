@@ -32,18 +32,12 @@ function AuthLogin({ ...others }) {
 
   async function SignIn(email, password) {
     try {
-      const res = await axios.post(
-        "http://102.213.182.8:9000/api/login",
-        { email, password },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+      const res = await axios.post("http://localhost:9000/api/login", { email, password });
 
       if (res.data.token) {
-        localStorage.setItem('token', res.data.token);
 
+         localStorage.setItem('token', res.data.token);
 
-
-        // Option 1: Use localStorage (persists after refresh)
         localStorage.setItem('user', JSON.stringify({
           id: email,
           ps: res.data.user.ps,
@@ -51,17 +45,14 @@ function AuthLogin({ ...others }) {
           roles: res.data.user.Action_user,
           name_user: res.data.user.name_user
         }));
-        history("/home");
-
-        // Option 2: Use React Router state (does NOT persist after refresh)
-        // history("/home", { state: { id: email, ps: res.data.user.ps, Cuser: res.data.user.id_user } });
-
+      
+        history("/home", { state: { id:email   , ps: res.data.user.ps,Cuser:res.data.user.id_user } });
       } else {
         setis_not_found("Login failed: Token is missing!");
       }
     } catch (e) {
 
-      console.log(e)
+   
       setis_not_found("Login or Password is wrong. Please try again!");
     }
   }

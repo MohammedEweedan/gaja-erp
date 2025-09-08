@@ -160,10 +160,11 @@ const Expenses = (props: Props) => {
             const res = await axios.get<Employee[]>(`${apiUrlemployee}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            setEmployees(res.data);
+            // Ensure employees is always an array
+            setEmployees(Array.isArray(res.data) ? res.data : []);
         } catch (error) {
-            console.error("Error fetching customers:", error);
-            showSnackbar("Failed to fetch customers", 'error');
+            console.error("Error fetching employees:", error);
+            showSnackbar("Failed to fetch employees", 'error');
         } finally {
             setLoadingCustomers(false);
         }
@@ -193,7 +194,7 @@ const Expenses = (props: Props) => {
 
 
 
-    const apiUrl = "http://102.213.182.8:9000/Expense";
+    const apiUrl = "http://102.213.182.8:8000/Expense";
     const apiUrlAccounts = `http://${apiIp}/Accounts`;
 
     const showSnackbar = (message: string, severity: SnackbarState['severity']) => {

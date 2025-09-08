@@ -109,7 +109,7 @@ const VendorsSettlment = () => {
 
 
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "http://102.213.182.8:9000/suppliers";
+        const apiUrlsuppliers = "http://localhost:9000/suppliers";
         const token = localStorage.getItem('token');
         try {
 
@@ -129,7 +129,7 @@ const VendorsSettlment = () => {
 
 
     const fetchVendors = async () => {
-        const apiUrlVendors = "http://102.213.182.8:9000/vendors";
+        const apiUrlVendors = "http://localhost:9000/vendors";
         const token = localStorage.getItem('token');
         try {
 
