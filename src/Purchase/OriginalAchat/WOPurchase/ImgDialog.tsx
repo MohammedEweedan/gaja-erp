@@ -3,10 +3,26 @@ import { Dialog, DialogTitle, DialogContent, Typography, Button, Box } from '@mu
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { AttachFile } from '@mui/icons-material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import { Camera as CameraComponent } from 'react-camera-pro';
+import Webcam from 'react-webcam';
 import axios from 'axios';
 import Snackbar from '@mui/material/Snackbar';
 import MuiAlert from '@mui/material/Alert';
+
+// Convert base64/URLEncoded data to a File object
+const dataURLtoFile = (dataurl: string, filename: string): File => {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1];
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    
+    while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+    }
+    
+    return new File([u8arr], filename, { type: mime });
+};
+
 
 interface ImgDialogProps {
     open: boolean;
@@ -24,7 +40,7 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
     const [zoomImg, setZoomImg] = useState<string | null>(null);
     const [showCamera, setShowCamera] = useState(false);
     const [cameraSize, setCameraSize] = useState<{ width: number; height: number }>({ width: 640, height: 480 });
-    const cameraRef = React.useRef<any>(null);
+    const webcamRef = React.useRef<Webcam>(null);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
     const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
 
@@ -268,45 +284,34 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
                     </Box>
                     <Box sx={{ width: '100%', maxWidth: 640, height: 480, mb: 2, borderRadius: 2, overflow: 'hidden', boxShadow: 2, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Box sx={{ width: '100%', height: '100%' }}>
-                            <CameraComponent
-                                ref={cameraRef}
-                                aspectRatio={4 / 3}
-                                errorMessages={{
-                                    noCameraAccessible: "No camera accessible",
-                                    permissionDenied: "Permission denied",
-                                    switchCamera: "Switch camera",
-                                    canvas: "Canvas not supported"
-                                }}
+                            <Webcam
+                                ref={webcamRef}
+                                width={cameraSize.width}
+                                height={cameraSize.height}
                             />
                         </Box>
                     </Box>
                     <Box mt={2} display="flex" gap={2}>
-                        <Button variant="contained" color="primary" onClick={async () => {
-                            if (cameraRef.current) {
-                                const photo = cameraRef.current.takePhoto();
-                                // Resize base64 image using canvas
-                                const resizedBase64 = await resizeBase64Img(photo, cameraSize.width, cameraSize.height);
-                                // Convert base64 to File
-                                fetch(resizedBase64)
-                                    .then(res => res.blob())
-                                    .then(blob => {
-                                        const file = new File([blob], `photo_${Date.now()}.png`, { type: 'image/png' });
-                                        setSelectedFile(file);
+                        <Button 
+                            variant="contained" 
+                            color="primary" 
+                            onClick={() => {
+                                if (webcamRef.current) {
+                                    const imageSrc = webcamRef.current.getScreenshot();
+                                    if (imageSrc) {
+                                        setSelectedFile(dataURLtoFile(imageSrc, 'capture.jpg'));
                                         setShowCamera(false);
-                                    });
-                            }
-                        }}>
+                                    }
+                                }
+                            }}
+                        >
                             Capture
                         </Button>
-                        <Button variant="outlined" onClick={() => setShowCamera(false)}>Cancel</Button>
-                        <Button variant="text" onClick={() => {
-                            if (cameraRef.current && cameraRef.current.devices && cameraRef.current.devices.length > 1) {
-                                const currentIdx = cameraRef.current.devices.findIndex((d: any) => d.deviceId === cameraRef.current.deviceId);
-                                const nextIdx = (currentIdx + 1) % cameraRef.current.devices.length;
-                                cameraRef.current.setDeviceId(cameraRef.current.devices[nextIdx].deviceId);
-                            }
-                        }}>
-                            Switch Camera
+                        <Button 
+                            variant="outlined" 
+                            onClick={() => setShowCamera(false)}
+                        >
+                            Cancel
                         </Button>
                     </Box>
                 </Box>

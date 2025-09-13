@@ -25,10 +25,11 @@ import Divider from '@mui/material/Divider';
 import Container from '@mui/material/Container';
 import Link from '@mui/material/Link';
 import { useNavigate } from 'react-router-dom';
-import Logo from '../ui-component/Logo';
+import { useTranslation } from 'react-i18next';
+import Header from '../components/Header/Header';
 
 function AuthLogin({ ...others }) {
-  // --- keep funcs & state exactly as you had ---
+  const { t } = useTranslation();
   const [is_not_found, setis_not_found] = useState('');
   const history = useNavigate();
   const [checked, setChecked] = useState(true);
@@ -59,159 +60,190 @@ function AuthLogin({ ...others }) {
         );
         history('/home');
       } else {
-        setis_not_found('Login failed: Token is missing!');
+        setis_not_found(t('login.tokenMissing'));
       }
     } catch (e) {
-      console.log('testtttttttttttttttt', e);
-      setis_not_found('Login or Password is wrong. Please try again!');
+      console.log('Login error:', e);
+      setis_not_found(t('login.loginFailed'));
     }
   }
 
   return (
-    <Box sx={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', bgcolor: (t) => t.palette.background.default }}>
-      <Container maxWidth="sm">
-        <Paper
-          elevation={8}
-          sx={{
-            p: { xs: 3, sm: 5 },
-            borderRadius: 3,
-            border: '1px solid',
-            borderColor: 'divider',
-            boxShadow: (t) => t.shadows[8],
-            bgcolor: (t) => t.palette.background.paper,
-          }}
-        >
-          {/* Header / Logo */}
-          <Stack spacing={1} alignItems="center" textAlign="center" sx={{ mb: 2 }}>
-            {/* Use your existing Logo component */}
-            <Logo />
-            <Typography variant="h6" fontWeight={800} sx={{ mt: 1 }}>
-              Welcome Back
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Sign in to continue to GAJA ERP
-            </Typography>
-          </Stack>
-
-          {/* Form */}
-          <Formik
-            onSubmit={(values, actions) => {
-              setTimeout(() => {
-                SignIn(values.email, values.password);
-                actions.setSubmitting(false);
-              }, 500);
+    <>
+      {/* Header Component */}
+      <Header />
+      
+      {/* Login Content */}
+      <Box sx={{ 
+        minHeight: 'calc(100vh - 80px)', // Adjust for header height
+        display: 'flex', 
+        alignItems: 'center', 
+        bgcolor: (t) => t.palette.background.default,
+        pt: 2 
+      }}>
+        <Container maxWidth="sm">
+          <Paper
+            elevation={8}
+            sx={{
+              p: { xs: 3, sm: 5 },
+              borderRadius: 3,
+              border: '1px solid',
+              borderColor: 'divider',
+              boxShadow: (t) => t.shadows[8],
+              bgcolor: (t) => t.palette.background.paper,
             }}
-            initialValues={{ email: '', password: '' }}
-            validationSchema={Yup.object().shape({
-              email: Yup.string().email('Must be a valid email').max(255).required('Email is required'),
-              password: Yup.string().max(255).required('Password is required'),
-            })}
           >
-            {({ errors, handleBlur, handleChange, handleSubmit, isSubmitting, touched, values }) => (
-              <Box component="form" noValidate onSubmit={handleSubmit} {...others}>
-                <Stack spacing={2.5}>
-                  <FormControl fullWidth error={Boolean(touched.email && errors.email)}>
-                    <InputLabel htmlFor="outlined-adornment-email-login">Email address</InputLabel>
-                    <OutlinedInput
-                      id="outlined-adornment-email-login"
-                      type="email"
-                      value={values.email}
-                      name="email"
-                      onBlur={handleBlur}
-                      onChange={handleChange}
-                      label="Email address"
-                      startAdornment={
-                        <InputAdornment position="start">
-                          <EmailOutlined fontSize="small" />
-                        </InputAdornment>
-                      }
-                    />
-                    {touched.email && errors.email && <FormHelperText error>{errors.email}</FormHelperText>}
-                  </FormControl>
+            {/* Header */}
+            <Stack spacing={1} alignItems="center" textAlign="center" sx={{ mb: 3 }}>
+              <Typography variant="h5" fontWeight={700} sx={{ mt: 1 }}>
+                {t('login.welcome')}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t('login.signInToContinue')}
+              </Typography>
+            </Stack>
 
-                  <FormControl fullWidth error={Boolean(touched.password && errors.password)}>
-                    <InputLabel htmlFor="outlined-adornment-password-login">Password</InputLabel>
-                    <OutlinedInput
-                      id="outlined-adornment-password-login"
-                      type={showPassword ? 'text' : 'password'}
-                      value={values.password}
-                      name="password"
-                      onBlur={handleBlur}
-                      onChange={handleChange}
-                      startAdornment={
-                        <InputAdornment position="start">
-                          <LockOutlined fontSize="small" />
-                        </InputAdornment>
-                      }
-                      endAdornment={
-                        <InputAdornment position="end">
-                          <IconButton
-                            aria-label="toggle password visibility"
-                            onClick={handleClickShowPassword}
-                            onMouseDown={handleMouseDownPassword}
-                            edge="end"
-                          >
-                            {showPassword ? <Visibility /> : <VisibilityOff />}
-                          </IconButton>
-                        </InputAdornment>
-                      }
-                      label="Password"
-                    />
-                    {touched.password && errors.password && <FormHelperText error>{errors.password}</FormHelperText>}
-                  </FormControl>
+            {/* Form */}
+            <Formik
+              onSubmit={(values, actions) => {
+                setTimeout(() => {
+                  SignIn(values.email, values.password);
+                  actions.setSubmitting(false);
+                }, 500);
+              }}
+              initialValues={{ email: '', password: '' }}
+              validationSchema={Yup.object().shape({
+                email: Yup.string()
+                  .email(t('login.email') + ' must be valid')
+                  .max(255)
+                  .required(t('login.email') + ' is required'),
+                password: Yup.string()
+                  .max(255)
+                  .required(t('login.password') + ' is required'),
+              })}
+            >
+              {({ errors, handleBlur, handleChange, handleSubmit, isSubmitting, touched, values }) => (
+                <Box component="form" noValidate onSubmit={handleSubmit} {...others}>
+                  <Stack spacing={2.5}>
+                    <FormControl fullWidth error={Boolean(touched.email && errors.email)}>
+                      <InputLabel htmlFor="outlined-adornment-email-login">
+                        {t('login.email')}
+                      </InputLabel>
+                      <OutlinedInput
+                        id="outlined-adornment-email-login"
+                        type="email"
+                        value={values.email}
+                        name="email"
+                        onBlur={handleBlur}
+                        onChange={handleChange}
+                        label={t('login.email')}
+                        startAdornment={
+                          <InputAdornment position="start">
+                            <EmailOutlined fontSize="small" />
+                          </InputAdornment>
+                        }
+                      />
+                      {touched.email && errors.email && <FormHelperText error>{errors.email}</FormHelperText>}
+                    </FormControl>
 
-                  <Stack direction="row" alignItems="center" justifyContent="space-between">
-                    <FormControlLabel
-                      control={<Checkbox checked={checked} onChange={(e) => setChecked(e.target.checked)} color="primary" />}
-                      label="Remember me"
-                    />
-                    <Link component="button" type="button" underline="hover" sx={{ fontSize: 14 }}
-                      onClick={() => console.log('Forgot Password clicked')}
-                    >
-                      Forgot password?
-                    </Link>
+                    <FormControl fullWidth error={Boolean(touched.password && errors.password)}>
+                      <InputLabel htmlFor="outlined-adornment-password-login">
+                        {t('login.password')}
+                      </InputLabel>
+                      <OutlinedInput
+                        id="outlined-adornment-password-login"
+                        type={showPassword ? 'text' : 'password'}
+                        value={values.password}
+                        name="password"
+                        onBlur={handleBlur}
+                        onChange={handleChange}
+                        startAdornment={
+                          <InputAdornment position="start">
+                            <LockOutlined fontSize="small" />
+                          </InputAdornment>
+                        }
+                        endAdornment={
+                          <InputAdornment position="end">
+                            <IconButton
+                              aria-label={t('login.togglePassword')}
+                              onClick={handleClickShowPassword}
+                              onMouseDown={handleMouseDownPassword}
+                              edge="end"
+                            >
+                              {showPassword ? <Visibility /> : <VisibilityOff />}
+                            </IconButton>
+                          </InputAdornment>
+                        }
+                        label={t('login.password')}
+                      />
+                      {touched.password && errors.password && <FormHelperText error>{errors.password}</FormHelperText>}
+                    </FormControl>
+
+                    <Stack direction="row" alignItems="center" justifyContent="space-between">
+                      <FormControlLabel
+                        control={
+                          <Checkbox 
+                            checked={checked} 
+                            onChange={(e) => setChecked(e.target.checked)} 
+                            color="primary" 
+                          />
+                        }
+                        label={t('login.rememberMe')}
+                      />
+                      <Link 
+                        component="button" 
+                        type="button" 
+                        underline="hover" 
+                        sx={{ fontSize: 14 }}
+                        onClick={() => console.log('Forgot Password clicked')}
+                      >
+                        {t('login.forgotPassword')}
+                      </Link>
+                    </Stack>
+
+                    <AnimateButton>
+                      <Button
+                        disableElevation
+                        disabled={isSubmitting}
+                        fullWidth
+                        size="large"
+                        type="submit"
+                        variant="contained"
+                        color="primary"
+                      >
+                        {isSubmitting ? t('login.signingIn') : t('login.signIn')}
+                      </Button>
+                    </AnimateButton>
                   </Stack>
+                </Box>
+              )}
+            </Formik>
 
-                  <AnimateButton>
-                    <Button
-                      disableElevation
-                      disabled={isSubmitting}
-                      fullWidth
-                      size="large"
-                      type="submit"
-                      variant="contained"
-                      color="primary"
-                    >
-                      {isSubmitting ? 'Signing in…' : 'Sign in'}
-                    </Button>
-                  </AnimateButton>
-                </Stack>
-              </Box>
-            )}
-          </Formik>
+            <Divider sx={{ my: 3 }} />
 
-          <Divider sx={{ my: 3 }} />
+            {/* Helper text / notices */}
+            <Stack spacing={1} textAlign="center">
+              <Typography variant="body2" color="error.main" sx={{ minHeight: 20 }}>
+                {is_not_found}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {t('login.privacyNotice')}
+              </Typography>
+            </Stack>
+          </Paper>
 
-          {/* Helper text / notices */}
-          <Stack spacing={1} textAlign="center">
-            <Typography variant="body2" color="error.main" sx={{ minHeight: 20 }}>
-              {is_not_found}
+          {/* Footer */}
+          <Stack spacing={0.25} alignItems="center" sx={{ mt: 3 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t('footer.createdBy')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              We'll never share your email and password with anyone else.
+              {t('footer.copyright')} <Link href="https://gaja.ly/" target="_blank" rel="noopener">gaja.ly</Link>
             </Typography>
           </Stack>
-        </Paper>
-
-        {/* footer */}
-        <Stack spacing={0.25} alignItems="center" sx={{ mt: 3 }}>
-          <Typography variant="caption" color="text.secondary">This Portal was created by IT Dept.</Typography>
-          <Typography variant="caption" color="text.secondary">
-            ©2025 Copyright: <Link href="https://gaja.ly/" target="_blank" rel="noopener">gaja.ly</Link>
-          </Typography>
-        </Stack>
-      </Container>
-    </Box>
+        </Container>
+      </Box>
+    </>
   );
 }
 

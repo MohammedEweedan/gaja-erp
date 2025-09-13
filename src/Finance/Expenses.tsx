@@ -194,7 +194,7 @@ const Expenses = (props: Props) => {
 
 
 
-    const apiUrl = "http://102.213.182.8:9000/Expense";
+    const apiUrl = "http://localhost:9000/Expense";
     const apiUrlAccounts = `http://${apiIp}/Accounts`;
 
     const showSnackbar = (message: string, severity: SnackbarState['severity']) => {

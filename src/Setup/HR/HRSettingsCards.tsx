@@ -1,10 +1,13 @@
 import * as React from 'react';
-import Box from '@mui/material/Box';
-import Card from '@mui/material/Card';
-import CardContent from '@mui/material/CardContent';
-import Typography from '@mui/material/Typography';
-import CardActionArea from '@mui/material/CardActionArea';
-import Button from '@mui/material/Button';
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
+  CardActionArea,
+  Button,
+  Divider,
+} from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 
 import WorkOutlineIcon from '@mui/icons-material/WorkOutline';
@@ -16,75 +19,82 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import LeaderboardIcon from '@mui/icons-material/Leaderboard';
 
 import Positions from './Pages/Positions';
-import { Divider } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
 import EmployeeProfile from '../../../src/HR/Setting/EmployeeProfile';
+import { useTheme } from '@mui/material/styles';
+import { useTranslation } from 'react-i18next';
 
-const cards = [
-  {
-    id: 1,
-    title: 'Positions',
-    description: 'Set up the positions for all employees',
-    icon: <WorkOutlineIcon fontSize="large" />,
-    component: <Positions />,
-  },
-  {
-    id: 2,
-    title: 'Employee Profile',
-    description: 'Set up the employee profile.',
-    icon: <AccountBalanceIcon fontSize="large" />,
-    component: <EmployeeProfile />,
-  },
-  {
-    id: 3,
-    title: 'Bank Accounts',
-    description: 'Set up the bank accounts for all employees.',
-    icon: <AccountBalanceWalletIcon fontSize="large" />,
-    component: <div>Bank Accounts Page</div>,
-  },
-  {
-    id: 4,
-    title: 'Certificates',
-    description: 'Set up the certificates for all employees.',
-    icon: <WorkspacePremiumIcon fontSize="large" />,
-    component: <div>Certificates Page</div>,
-  },
-  {
-    id: 5,
-    title: 'Specialities',
-    description: 'Set up the specialities for all employees.',
-    icon: <PsychologyAltIcon fontSize="large" />,
-    component: <div>Specialities Page</div>,
-  },
-  {
-    id: 6,
-    title: 'Contracts Types',
-    description: 'Set up the contracts types for all employees.',
-    icon: <AssignmentIcon fontSize="large" />,
-    component: <div>Contracts Types Page</div>,
-  },
-  {
-    id: 7,
-    title: 'Positions Levels',
-    description: 'Set up the positions levels.',
-    icon: <LeaderboardIcon fontSize="large" />,
-    component: <div>Positions Levels Page</div>,
-  },
-  {
-    id: 8,
-    title: 'Cost Centers',
-    description: 'Set up the cost centers for all employees.',
-    icon: <LeaderboardIcon fontSize="large" />,
-    component: <div>Cost Centers</div>,
-  },
-];
-
-function HRSettingsCards() {
+const HRSettingsCards: React.FC = () => {
   const [selectedCard, setSelectedCard] = React.useState<number | null>(null);
+  const theme = useTheme();
+  const { t } = useTranslation();
+
+  const accent = (theme.palette as any)?.gaja?.[500] ?? '#b7a27d';
+
+  const cards = React.useMemo(
+    () => [
+      {
+        id: 1,
+        title: t('hr.settings.positions.title'),
+        description: t('hr.settings.positions.desc'),
+        icon: <WorkOutlineIcon fontSize="large" />,
+        component: <Positions />,
+      },
+      {
+        id: 2,
+        title: t('hr.settings.employeeProfile.title'),
+        description: t('hr.settings.employeeProfile.desc'),
+        icon: <AccountBalanceIcon fontSize="large" />,
+        component: <EmployeeProfile />,
+      },
+      {
+        id: 3,
+        title: t('hr.settings.bankAccounts.title'),
+        description: t('hr.settings.bankAccounts.desc'),
+        icon: <AccountBalanceWalletIcon fontSize="large" />,
+        component: <div>Bank Accounts Page</div>,
+      },
+      {
+        id: 4,
+        title: t('hr.settings.certificates.title'),
+        description: t('hr.settings.certificates.desc'),
+        icon: <WorkspacePremiumIcon fontSize="large" />,
+        component: <div>Certificates Page</div>,
+      },
+      {
+        id: 5,
+        title: t('hr.settings.specialities.title'),
+        description: t('hr.settings.specialities.desc'),
+        icon: <PsychologyAltIcon fontSize="large" />,
+        component: <div>Specialities Page</div>,
+      },
+      {
+        id: 6,
+        title: t('hr.settings.contractsTypes.title'),
+        description: t('hr.settings.contractsTypes.desc'),
+        icon: <AssignmentIcon fontSize="large" />,
+        component: <div>Contracts Types Page</div>,
+      },
+      {
+        id: 7,
+        title: t('hr.settings.positionsLevels.title'),
+        description: t('hr.settings.positionsLevels.desc'),
+        icon: <LeaderboardIcon fontSize="large" />,
+        component: <div>Positions Levels Page</div>,
+      },
+      {
+        id: 8,
+        title: t('hr.settings.costCenters.title'),
+        description: t('hr.settings.costCenters.desc'),
+        icon: <LeaderboardIcon fontSize="large" />,
+        component: <div>Cost Centers Page</div>,
+      },
+    ],
+    [t],
+  );
 
   if (selectedCard !== null) {
     return (
-      <Box sx={{ p: 3, ml: -3,mt: -3  }}>
+      <Box sx={{ p: 3, ml: -3, mt: -3 }}>
         <Box
           sx={{
             display: 'flex',
@@ -109,10 +119,8 @@ function HRSettingsCards() {
               },
             }}
           >
-            Back
+            {t('common.back')}
           </Button>
-
-         
         </Box>
 
         <Divider sx={{ mb: 0, borderColor: 'grey.600', borderBottomWidth: 2 }} />
@@ -127,26 +135,60 @@ function HRSettingsCards() {
       sx={{
         width: '100%',
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 2fr))',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
         gap: 2,
         pt: 5,
       }}
     >
       {cards.map((card, index) => (
-        <Card key={card.id}>
+        <Card
+          key={card.id}
+          elevation={0}
+          sx={{
+            borderRadius: 3,
+            bgcolor: 'background.paper',
+            border: '1px solid',
+            borderColor: theme.palette.divider,
+            overflow: 'hidden',
+            transition: 'transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease',
+            '&:hover': {
+              transform: 'translateY(-2px)',
+              boxShadow: 6,
+              borderColor: accent,
+            },
+            '&:focus-within': {
+              outline: `2px solid ${accent}`,
+              outlineOffset: 2,
+            },
+          }}
+        >
           <CardActionArea
             onClick={() => setSelectedCard(index)}
             sx={{
               height: '100%',
-              '&:hover': {
-                backgroundColor: 'action.hover',
-              },
+              p: 2,
+              borderRadius: 3,
+              '& .MuiTouchRipple-root': { opacity: 0.2 },
             }}
           >
-            <CardContent sx={{ height: '100%' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                {card.icon}
-                <Typography variant="h5" component="div">
+            <CardContent sx={{ display: 'grid', gap: 1.25 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                <Box
+                  aria-hidden
+                  sx={{
+                    color: accent,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {card.icon}
+                </Box>
+                <Typography
+                  variant="h6"
+                  component="div"
+                  sx={{ color: accent, fontWeight: 700, lineHeight: 1.2 }}
+                >
                   {card.title}
                 </Typography>
               </Box>
@@ -159,6 +201,6 @@ function HRSettingsCards() {
       ))}
     </Box>
   );
-}
+};
 
 export default HRSettingsCards;

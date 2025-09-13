@@ -1,10 +1,4 @@
-// material-ui
-import { useTheme } from '@mui/material/styles';
-
-// ==============================|| LOGO SVG ||============================== //
-
 const Logo2 = () => {
-  const theme = useTheme();
   const logo = '/banner-logo.png';
 
   return (

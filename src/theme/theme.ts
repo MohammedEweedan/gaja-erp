@@ -1,61 +1,75 @@
-import { createTheme } from '@mui/material/styles';
-import { PaletteMode } from '@mui/material';
+// src/theme/theme.ts
+import { createTheme, PaletteMode, Theme, ThemeOptions } from '@mui/material/styles';
 
+// ✅ Extend MUI Palette to include gaja
 declare module '@mui/material/styles' {
-  interface Theme {
-    custom: {
-      colors: {
-        gaja: {
-          50: string;
-          100: string;
-          200: string;
-          300: string;
-          400: string;
-          500: string;
-          600: string;
-          700: string;
-          800: string;
-          900: string;
-        };
-      };
+  interface Palette {
+    gaja: {
+      50: string;
+      100: string;
+      200: string;
+      300: string;
+      400: string;
+      500: string;
+      600: string;
+      700: string;
+      800: string;
+      900: string;
     };
   }
-  interface ThemeOptions {
-    custom?: {
-      colors?: {
-        gaja?: {
-          50?: string;
-          100?: string;
-          200?: string;
-          300?: string;
-          400?: string;
-          500?: string;
-          600?: string;
-          700?: string;
-          800?: string;
-          900?: string;
-        };
-      };
+
+  interface PaletteOptions {
+    gaja?: {
+      50?: string;
+      100?: string;
+      200?: string;
+      300?: string;
+      400?: string;
+      500?: string;
+      600?: string;
+      700?: string;
+      800?: string;
+      900?: string;
     };
   }
 }
 
-export const getDesignTokens = (mode: PaletteMode) => ({
+/**
+ * Design tokens for the theme.
+ * Includes: palette, direction, global typography, and component overrides.
+ */
+export const getDesignTokens = (
+  mode: PaletteMode,
+  direction: 'ltr' | 'rtl' = 'ltr',
+): ThemeOptions => ({
+  direction,
   palette: {
     mode,
+    gaja: {
+      50: '#334d68',
+      100: '#b7a27d',
+      200: '#334d68',
+      300: '#b7a27d',
+      400: '#b7a27d',
+      500: '#b7a27d',
+      600: '#334d68',
+      700: '#b7a27d',
+      800: '#334d68',
+      900: '#b7a27d',
+    },
     ...(mode === 'light'
       ? {
-          // Light mode
+          // 🌞 Light mode
           primary: {
             main: '#b7a27d',
-            light: '#d4c4a9',
-            dark: '#8f7d5e',
+            light: '#b7a27d',
+            dark: '#b7a27d',
             contrastText: '#fff',
           },
           secondary: {
-            main: '#334d68',
-            light: '#5b7188',
-            dark: '#233547',
+            main: '#b7a27d',
+            light: '#b7a27d',
+            dark: '#b7a27d',
             contrastText: '#fff',
           },
           background: {
@@ -69,17 +83,17 @@ export const getDesignTokens = (mode: PaletteMode) => ({
           },
         }
       : {
-          // Dark mode
+          // 🌙 Dark mode
           primary: {
             main: '#b7a27d',
-            light: '#d4c4a9',
-            dark: '#8f7d5e',
+            light: '#b7a27d',
+            dark: '#b7a27d',
             contrastText: 'rgba(0, 0, 0, 0.87)',
           },
           secondary: {
-            main: '#5b7188',
-            light: '#7f8d9f',
-            dark: '#3f4d5f',
+            main: '#b7a27d',
+            light: '#b7a27d',
+            dark: '#b7a27d',
             contrastText: '#fff',
           },
           background: {
@@ -93,48 +107,47 @@ export const getDesignTokens = (mode: PaletteMode) => ({
           },
         }),
   },
+
+  // 🔥 Global typography: heavier & slightly larger
   typography: {
-    fontFamily: '"HSN_Razan_Regular", "Roboto", "Helvetica", "Arial", sans-serif',
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 700,
-      lineHeight: 1.2,
-      letterSpacing: '-0.01562em',
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 700,
-      lineHeight: 1.2,
-      letterSpacing: '-0.00833em',
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 600,
-      lineHeight: 1.2,
-      letterSpacing: '0em',
-    },
-    h4: {
-      fontSize: '1.5rem',
-      fontWeight: 600,
-      lineHeight: 1.2,
-      letterSpacing: '0.00735em',
-    },
-    button: {
-      textTransform: 'none' as const,
-      fontWeight: 500,
-    },
+    // Use Arabic-friendly fonts when RTL (make sure to load them)
+    fontFamily:
+      direction === 'rtl'
+        ? '"Cairo", "Tajawal", "Noto Kufi Arabic", "Roboto", "Helvetica", "Arial", sans-serif'
+        : '"Roboto", "Helvetica", "Arial", sans-serif',
+
+    fontWeightRegular: 500,
+    fontWeightMedium: 700,
+    fontWeightBold: 800,
+
+    h1: { fontWeight: 900, letterSpacing: 0.3 },
+    h2: { fontWeight: 900, letterSpacing: 0.3 },
+    h3: { fontWeight: 800, letterSpacing: 0.25 },
+    h4: { fontWeight: 800, letterSpacing: 0.2, fontSize: '1.6rem' },
+    h5: { fontWeight: 800, letterSpacing: 0.2, fontSize: '1.25rem' },
+    h6: { fontWeight: 700, letterSpacing: 0.15 },
+
+    subtitle1: { fontWeight: 700 },
+    subtitle2: { fontWeight: 700 },
+    body1: { fontWeight: 600, fontSize: '0.98rem' },
+    body2: { fontWeight: 600, fontSize: '0.92rem' },
+    button: { fontWeight: 800, textTransform: 'none', letterSpacing: 0.3 },
+    overline: { fontWeight: 700, letterSpacing: 0.8 },
+    caption: { fontWeight: 600 },
   },
+
   components: {
+    // Buttons
     MuiButton: {
       defaultProps: {
         disableElevation: true,
       },
       styleOverrides: {
-        root: () => ({
+        root: {
           borderRadius: 8,
           padding: '8px 16px',
-          textTransform: 'none' as const,
-          fontWeight: 500,
+          fontWeight: 700, // heavier by default for visual punch
+          textTransform: 'none',
           '&:hover': {
             transform: 'translateY(-1px)',
             boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
@@ -142,7 +155,7 @@ export const getDesignTokens = (mode: PaletteMode) => ({
           '&:active': {
             transform: 'translateY(0)',
           },
-        }),
+        },
         contained: {
           boxShadow: 'none',
           '&:hover': {
@@ -151,6 +164,8 @@ export const getDesignTokens = (mode: PaletteMode) => ({
         },
       },
     },
+
+    // Inputs
     MuiInputBase: {
       styleOverrides: {
         root: {
@@ -158,28 +173,34 @@ export const getDesignTokens = (mode: PaletteMode) => ({
         },
       },
     },
-  },
-  custom: {
-    colors: {
-      gaja: {
-        50: '#334d68',
-        100: '#b7a27d',
-        200: '#334d68',
-        300: '#b7a27d',
-        400: '#b7a27d',
-        500: '#b7a27d',
-        600: '#334d68',
-        700: '#b7a27d',
-        800: '#334d68',
-        900: '#b7a27d',
+
+    // 🧭 Drawer/Navigation labels (ListItemText primary)
+    MuiListItemText: {
+      styleOverrides: {
+        primary: {
+          fontWeight: 800,
+          fontSize: '1rem', // bump for prominence
+          letterSpacing: '0.3px',
+        },
       },
     },
   },
 });
 
-// Export the theme creation function
-export const createCustomTheme = (mode: PaletteMode) => {
-  return createTheme(getDesignTokens(mode));
-};
+/**
+ * Factory to create the theme.
+ * Pass the current direction from i18n: createCustomTheme(mode, i18n.dir() as 'ltr' | 'rtl')
+ */
+export const createCustomTheme = (
+  mode: PaletteMode,
+  direction: 'ltr' | 'rtl' = 'ltr',
+): Theme => {
+  const options = getDesignTokens(mode, direction);
+  const theme = createTheme(options);
 
-export default getDesignTokens;
+  // Ensure custom palette key exists on runtime theme
+  (theme.palette as any).gaja =
+    (options.palette as any)?.gaja ?? (theme.palette as any).gaja;
+
+  return theme;
+};

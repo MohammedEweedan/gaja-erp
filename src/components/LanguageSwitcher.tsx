@@ -1,104 +1,61 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { useLanguage } from '../contexts/LanguageContext';
-import { IconButton, Menu, MenuItem, Typography, Box, styled } from '@mui/material';
-import LanguageIcon from '@mui/icons-material/Language';
-import { useTheme } from '@mui/material/styles';
+import { IconButton, Tooltip, styled, Box } from '@mui/material';
 
-const StyledIconButton = styled(IconButton)(({ theme }) => ({
-  color: theme.palette.text.primary,
+const PillIconButton = styled(IconButton)(({ theme }) => ({
+  // GAJA gold; fallback
+  color: (theme.palette as any)?.gaja?.[100] ?? '#b7a27d',
+  borderRadius: 999,
+  height: 32,
+  minWidth: 48,
+  lineHeight: 1,
+  fontWeight: 800,
+  fontSize: 16,
+  letterSpacing: '0.64px',
+  textTransform: 'uppercase',
+  padding: theme.spacing(0.5, 1),
   '&:hover': {
     backgroundColor: theme.palette.action.hover,
   },
 }));
 
 const LanguageSwitcher: React.FC = () => {
-  const { t } = useTranslation();
   const { language, changeLanguage, isRTL } = useLanguage();
-  const theme = useTheme();
-  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
-  const open = Boolean(anchorEl);
 
-  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
-    setAnchorEl(event.currentTarget);
+  const nextLang = language === 'ar' ? 'en' : 'ar';
+  const tooltip = language === 'ar' ? 'Switch to English' : 'التبديل إلى العربية';
+
+  const handleToggle = () => changeLanguage(nextLang);
+
+  // Language configuration with flags
+  const languageConfig = {
+    ar: {
+      flag: '🇱🇾',
+      label: 'AR'
+    },
+    en: {
+      flag: '🇬🇧', 
+      label: 'EN'
+    }
   };
 
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleLanguageChange = (lng: string) => {
-    changeLanguage(lng);
-    handleClose();
-  };
-
-  const languages = [
-    { code: 'en', name: 'English' },
-    { code: 'ar', name: 'العربية' },
-  ];
+  const currentConfig = languageConfig[language as keyof typeof languageConfig];
 
   return (
-    <Box>
-      <StyledIconButton
-        aria-label={t('header.changeLanguage')}
-        aria-controls="language-menu"
-        aria-haspopup="true"
-        onClick={handleClick}
-        size="large"
-        sx={{ ml: 1 }}
+    <Tooltip title={tooltip} placement={isRTL ? 'left' : 'right'}>
+      <PillIconButton
+        onClick={handleToggle}
       >
-        <LanguageIcon />
-        <Typography 
-          variant="body2" 
-          sx={{ 
-            ml: 0.5, 
-            textTransform: 'uppercase',
-            color: 'text.primary'
-          }}
-        >
-          {language}
-        </Typography>
-      </StyledIconButton>
-      <Menu
-        id="language-menu"
-        anchorEl={anchorEl}
-        open={open}
-        onClose={handleClose}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: isRTL ? 'left' : 'right',
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: isRTL ? 'right' : 'left',
-        }}
-        PaperProps={{
-          style: {
-            marginTop: theme.spacing(1),
-          },
-        }}
-      >
-        {languages.map((lang) => (
-          <MenuItem
-            key={lang.code}
-            onClick={() => handleLanguageChange(lang.code)}
-            selected={language === lang.code}
-            sx={{ 
-              direction: lang.code === 'ar' ? 'rtl' : 'ltr',
-              minWidth: 120,
-              '&.Mui-selected': {
-                backgroundColor: theme.palette.action.selected,
-                '&:hover': {
-                  backgroundColor: theme.palette.action.hover,
-                },
-              },
-            }}
-          >
-            {lang.name}
-          </MenuItem>
-        ))}
-      </Menu>
-    </Box>
+        <Box sx={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: 0.5,
+          fontSize: 'inherit'
+        }}>
+          <span style={{ fontSize: '20' }}>{currentConfig.flag}</span>
+        </Box>
+      </PillIconButton>
+    </Tooltip>
   );
 };
 

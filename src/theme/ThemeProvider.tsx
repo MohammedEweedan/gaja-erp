@@ -36,11 +36,12 @@ export const CustomThemeProvider: React.FC<CustomThemeProviderProps> = ({ childr
   );
 
   const theme = useMemo(() => {
-    const themeOptions = getDesignTokens(mode);
-    const theme = createTheme(themeOptions as ThemeOptions);
-    
-    // Add any additional theme overrides here if needed
-    return theme;
+    const tokens = getDesignTokens(mode);
+    const baseTheme = createTheme(tokens as ThemeOptions);
+    // Re-attach custom palette keys that MUI may strip during palette creation
+    (baseTheme as any).palette.gaja = (tokens as any).palette.gaja;
+
+    return baseTheme;
   }, [mode]);
 
   return (

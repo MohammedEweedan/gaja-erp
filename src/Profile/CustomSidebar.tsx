@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { List, ListItemButton, ListItemIcon, ListItemText, Collapse, Divider, Box, IconButton } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
+import { useTranslation } from 'react-i18next';
 import { ExpandLess, ExpandMore } from '@mui/icons-material';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
@@ -29,6 +31,14 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
     const location = useLocation();
     const navigate = useNavigate();
     const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+    const theme = useTheme();
+    const { t } = useTranslation();
+
+    // Accent color from theme: gold in dark mode, navy in light mode
+    const gaja = (theme.palette as any)?.gaja as Record<string, string> | undefined;
+    const accent = theme.palette.mode === 'dark'
+        ? (gaja?.[100] ?? '#b7a27d')
+        : (gaja?.[50] ?? '#334d68');
 
     // Helper to get the full path for a segment
     const getPath = (segment: string | undefined, parent?: string) => {
@@ -43,7 +53,7 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
         return items.map((item, idx) => {
             if (item.kind === 'header') {
                 return (
-                    <ListItemText key={(item.title ?? 'header') + idx} primary={item.title} sx={{ pl: 2, pt: 2, fontWeight: 700 }} />
+                    <ListItemText key={(item.title ?? 'header') + idx} primary={item.title ? t(item.title) : ''} sx={{ pl: 2, pt: 2, fontWeight: 700, color: accent }} />
                 );
             }
             if (item.kind === 'divider') {
@@ -54,10 +64,10 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
                 const isOpen = expanded[fullPath] || location.pathname.startsWith(fullPath);
                 return (
                     <React.Fragment key={(item.title ?? 'group') + idx}>
-                        <ListItemButton onClick={() => setExpanded(e => ({ ...e, [fullPath]: !isOpen }))} selected={location.pathname.startsWith(fullPath)}>
-                            {item.icon && <ListItemIcon>{item.icon}</ListItemIcon>}
-                            <ListItemText primary={item.title} />
-                            {isOpen ? <ExpandLess /> : <ExpandMore />}
+                        <ListItemButton onClick={() => setExpanded(e => ({ ...e, [fullPath]: !isOpen }))} selected={location.pathname.startsWith(fullPath)} sx={{ color: accent }}>
+                            {item.icon && <ListItemIcon sx={{ color: 'inherit' }}>{item.icon}</ListItemIcon>}
+                            <ListItemText primary={item.title ? t(item.title) : ''} />
+                            {isOpen ? <ExpandLess sx={{ color: 'inherit' }} /> : <ExpandMore sx={{ color: 'inherit' }} />}
                         </ListItemButton>
                         <Collapse in={isOpen} timeout="auto" unmountOnExit>
                             <List component="div" disablePadding>
@@ -74,10 +84,10 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
                     key={(item.title ?? 'item') + idx}
                     selected={location.pathname === fullPath}
                     onClick={() => navigate(fullPath)}
-                    sx={{ pl: parentPath ? 4 : 2 }}
+                    sx={{ pl: parentPath ? 4 : 2, color: accent }}
                 >
-                    {item.icon && <ListItemIcon>{item.icon}</ListItemIcon>}
-                    <ListItemText primary={item.title} />
+                    {item.icon && <ListItemIcon sx={{ color: 'inherit' }}>{item.icon}</ListItemIcon>}
+                    <ListItemText primary={item.title ? t(item.title) : ''} />
                 </ListItemButton>
             );
         });
@@ -108,23 +118,23 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
                 <IconButton
                     onClick={onToggleTheme}
                     color="inherit"
-                    aria-label="Toggle theme"
-                    sx={{ mr: 1 }}
+                    aria-label={t('sidebar.toggleTheme')}
+                    sx={{ mr: 1, color: accent }}
                 >
                     {mode === 'dark' ? (
-                        <Brightness7Icon sx={{ color: 'text.primary' }} />
+                        <Brightness7Icon sx={{ color: 'inherit' }} />
                     ) : (
-                        <Brightness4Icon sx={{ color: 'text.primary' }} />
+                        <Brightness4Icon sx={{ color: 'inherit' }} />
                     )}
                 </IconButton>
                 <IconButton
                     onClick={onLogout}
                     color="inherit"
-                    aria-label="Logout"
-                    sx={{ mr: 1 }}
+                    aria-label={t('sidebar.logout')}
+                    sx={{ mr: 1, color: accent }}
                 >
-                    <Logout sx={{ color: 'text.primary' }} />
-                    Logout
+                    <Logout sx={{ color: 'inherit' }} />
+                    {t('sidebar.logout')}
                 </IconButton>
             </Box>
         </Box>

@@ -1,4 +1,7 @@
 {
+  "app": {
+    "title": "GAJA ERP"
+  },
   "login": {
     "welcome": "Welcome Back",
     "signInToContinue": "Sign in to continue to GAJA ERP",
@@ -14,8 +17,18 @@
     "privacyNotice": "We'll never share your email and password with anyone else.",
     "logOut": "Log out"
   },
+  "dashboard": {
+    "title": "Dashboard",
+    "watchesCash": "Watches Cash",
+    "currencyBalance": "Currency Balance",
+    "lydBalance": "LYD Balance"
+  },
   "header": {
     "profile": "Profile",
+    "currentTheme": "Current Theme",
+    "currentLanguage": "Current Language",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
     "settings": "Settings",
     "messages": "Messages",
     "notifications": "Notifications",
@@ -28,5 +41,452 @@
   "footer": {
     "createdBy": "This Portal was created by IT Dept.",
     "copyright": "©2025 Copyright:"
+  },
+  "tooltip": {
+    "lightMode": "Light Mode",
+    "darkMode": "Dark Mode",
+    "logout": "Log out"
+  },
+  "aria": {
+    "toggleTheme": "Toggle theme",
+    "logout": "Log out"
+  },
+  "toast": {
+    "currentTheme": "Current Theme",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode"
+  },
+  "nav": {
+    "headers": {
+      "main": "Main Items",
+      "actions": "Actions"
+    },
+    "dashboard": "Dashboard",
+    "setting": {
+      "root": "Settings",
+      "general": "General",
+      "hr": "HR",
+      "finance": "Finance",
+      "sales": "Sales"
+    },
+    "purchase": {
+      "root": "Purchase",
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches"
+    },
+    "receive": {
+      "root": "Receive",
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches",
+      "boxes": "Boxes"
+    },
+    "invoice": {
+      "root": "Invoices",
+      "createNew": "Create New Invoice",
+      "salesReports": "Sales Reports",
+      "otherReports": "Other Reports",
+      "customersReports": "Customers Reports"
+    },
+    "inventory": {
+      "root": "Inventory",
+      "gold": "Gold Inventory",
+      "diamond": "Diamond Inventory",
+      "watches": "Watches Inventory",
+      "boxes": "Boxes Inventory"
+    },
+    "cashbook": {
+      "root": "Cash Book",
+      "deposit": "Cash Deposit",
+      "expenses": "Cash Expenses",
+      "buyCurrency": "Buy Currency",
+      "sellCurrency": "Sell Currency",
+      "reports": "Cash Book Reports"
+    },
+    "hr": {
+      "root": "Human Resources",
+      "compensations": {
+        "root": "Compensations",
+        "vacations": "Vacations",
+        "timesheets": "Time Sheets",
+        "promotions": "Promotions",
+        "warningLetter": "Warning Letter",
+        "productivity": "Productivity",
+        "transfer": "Transfer",
+        "evaluation": "Evaluation",
+        "missions": "Missions",
+        "loanEquipment": "Loan Equipment",
+        "delegation": "Delegation"
+      }
+    },
+    "logout": "Log out"
+  },
+  "analytics": {
+    "title": "Analytics Overview",
+    "sales": "Sales",
+    "revenue": "Revenue",
+    "expenses": "Expenses",
+    "purchases": "Purchases",
+    "inventory": "Inventory",
+    "salesTrend": "Sales Trend (Last 30 days)",
+    "revVsExp": "Revenue vs Expenses",
+    "posRealtime": "Point of Sale (Today)",
+    "posTodayTotal": "Today's POS Total",
+    "posTodayCount": "Today's Receipts",
+    "lyd": "LYD",
+    "posSelect": "Point of Sale",
+    "noAccessTitle": "No dashboard sections available",
+    "noAccessBody": "Your account does not have access to any analytics sections. Please contact an administrator if you believe this is an error.",
+    "noAccessButton": "Contact Administrator",
+    "posAll": "All POS (Overall)",
+    "sales30": "Sales (Last 30 days)",
+    "purchases30": "Purchases (Last 30 days)",
+    "revenue30": "Revenue (Last 30 days)",
+    "expenses30": "Expenses (Last 30 days)",
+    "profit30": "Profit (Last 30 days)",
+    "profit": "Profit",
+    "profitTrend": "Profit Trend (30 days)",
+    "stockComposition": "Stock Composition (by qty/items)",
+    "inventoryItems": "Inventory items",
+    "lowStock": "Low Stock Alerts",
+    "sku": "SKU",
+    "item": "Item",
+    "category": "Category",
+    "qty": "Qty",
+    "min": "Min",
+    "storePerformance": "Store Performance (30 days)",
+    "storeLeaderboard": "Store Leaderboard",
+    "store": "Store",
+    "topStores": "Top Stores",
+    "balances": "Balances",
+    "cash": "Cash",
+    "bank": "Bank",
+    "other": "Other",
+    "avgTicket": "Avg. ticket",
+    "insights": "Insights",
+    "ins": {
+      "profit": "Profit",
+      "salesMomentum": "Sales momentum",
+      "topStore": "Top store",
+      "stockFocus": "Stock focus",
+      "restock": "Restock",
+      "itemsBelowMin": "items below min"
+    }
+  },
+  "scs": {
+    "settings": {
+      "comingSoon": "This section is coming soon.",
+      "products": {
+        "title": "Products",
+        "desc": "Configure your products database and related settings."
+      },
+      "boxes": {
+        "title": "Boxes",
+        "desc": "Configure your Boxes database and related settings."
+      },
+      "customers": {
+        "title": "Customers",
+        "desc": "Configure your customer database and related settings."
+      },
+      "brands": {
+        "title": "Brands",
+        "desc": "Manage brand associations and brand details."
+      },
+      "itemsTypes": {
+        "title": "Items Types",
+        "desc": "Group item types logically for easier management."
+      },
+      "pos": {
+        "title": "Point of Sale",
+        "desc": "Configure Point of Sale terminals and behavior."
+      },
+      "marketingSource": {
+        "title": "Marketing Source",
+        "desc": "Configure marketing sources and attribution."
+      },
+      "sellerBonus": {
+        "title": "Seller Bonus Settings",
+        "desc": "Define rules for rewarding sellers."
+      },
+      "salesShifts": {
+        "title": "Sales Shifts",
+        "desc": "Configure work shift parameters for sales staff."
+      },
+      "tempReservations": {
+        "title": "Temporary Reservation Sessions",
+        "desc": "Generate and manage temporary routing reservations."
+      },
+      "salesApproval": {
+        "title": "Sales Approval Rules",
+        "desc": "Set conditions for validating and approving sales."
+      },
+      "discountTypes": {
+        "title": "Sales Discount Types",
+        "desc": "Configure discount categories and rules."
+      },
+      "chiraApproval": {
+        "title": "Chira Approval Conditions",
+        "desc": "Set validation rules for Chira-related transactions."
+      },
+      "reportsConfig": {
+        "title": "Reports Configuration",
+        "desc": "Customize reports and analytics settings."
+      },
+      "vendors": {
+        "title": "Vendors",
+        "desc": "Manage vendor directory and settings."
+      }
+    }
+  },
+  "common": {
+    "back": "Back",
+    "purchases": "Purchases",
+    "vendors": "Vendors",
+    "createdBy": "Created By",
+    "comment": "Comment",
+    "purchaseDate": "Purchase Date",
+    "purchaseSummary": "Purchase Summary",
+    "isClosed": "Closed?",
+    "yes": "Yes",
+    "no": "No",
+    "warningIncoming": "New arrival has come and will be received soon. Please check the distribution list.",
+    "status": "Status",
+    "received": "Received",
+    "notReceived": "Not Received",
+    "weight": "Weight",
+    "alreadyReceived": "Already Received",
+    "restToBeReceived": "Rest to be received",
+    "products": "Product",
+    "items": "Items",
+    "actions": {
+      "back": "Back",
+      "new": "New",
+      "newPurchase": "New Purchase",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saveChanges": "Save Changes",
+      "print": "Print",
+      "receive": "Receive"
+    }
+  },
+  "settings": {
+        "worksPeriod": {
+        "title": "Works Period",
+        "desc": "Create or adjust the work period for all users."
+        },
+        "usersList": {
+        "title": "Users List",
+        "desc": "List of all users."
+        },
+        "serverMail": {
+        "title": "Server Mail",
+        "desc": "Configure server mail to send messages."
+        },
+        "coaLevels": {
+        "title": "COA Levels",
+        "desc": "Levels of the chart of accounts."
+        },
+        "fingerprint": {
+        "title": "Fingerprint",
+        "desc": "Configure fingerprint system."
+        }
+    },
+    "watches": {
+    "title": "Watches Management",
+    "cards": {
+      "purchase": {
+        "title": "Watch Purchase List",
+        "desc": "View and manage all watch purchases."
+      },
+      "payment": {
+        "title": "Make Payment",
+        "desc": "Manage vendor settlements."
+      },
+      "reports": {
+        "title": "Reports",
+        "desc": "Vendor Account Statement."
+      }
+    },
+    "iso": {
+      "purchaseVerbatim": "Watch Purchase List: All records and transactions related to watch procurement should comply with ISO 9001:2015 for quality management systems. This ensures that every purchase is traceable, auditable, and meets internationally recognized standards for documentation and process control. Maintaining detailed records of suppliers, purchase orders, and product specifications is essential for both internal audits and external regulatory compliance. Additionally, organizations should implement regular reviews and updates to procurement procedures to align with evolving best practices and legal requirements in the luxury goods sector.",
+      "paymentVerbatim": "Make Payment: All payment processes must adhere to ISO 20022 for electronic data interchange between financial institutions, ensuring secure, standardized, and efficient financial transactions. This includes the use of internationally recognized payment messaging formats, robust authentication protocols, and end-to-end encryption to protect sensitive financial data. Organizations should also comply with anti-money laundering (AML) and know your customer (KYC) regulations, maintaining comprehensive records of all payment activities and regularly auditing payment workflows to detect and prevent fraudulent activities.",
+      "reportsVerbatim": "Reports: Reporting and documentation should follow the guidelines of ISO 15489 for records management, which mandates the creation, maintenance, and secure storage of all business records. Reports should be clear, accurate, and accessible for both operational decision-making and regulatory inspections. Organizations are encouraged to implement digital archiving solutions that support long-term retention, version control, and secure access to sensitive information. Regular training on records management best practices should be provided to all staff involved in reporting and documentation processes."
+    }
+  },
+   "hr": {
+    "settings": {
+      "positions": {
+        "title": "Positions",
+        "desc": "Set up the positions for all employees."
+      },
+      "employeeProfile": {
+        "title": "Employee Profile",
+        "desc": "Set up the employee profile."
+      },
+      "bankAccounts": {
+        "title": "Bank Accounts",
+        "desc": "Set up the bank accounts for all employees."
+      },
+      "certificates": {
+        "title": "Certificates",
+        "desc": "Set up the certificates for all employees."
+      },
+      "specialities": {
+        "title": "Specialities",
+        "desc": "Set up the specialities for all employees."
+      },
+      "contractsTypes": {
+        "title": "Contracts Types",
+        "desc": "Set up the contracts types for all employees."
+      },
+      "positionsLevels": {
+        "title": "Positions Levels",
+        "desc": "Set up the positions levels."
+      },
+      "costCenters": {
+        "title": "Cost Centers",
+        "desc": "Set up the cost centers for all employees."
+      }
+    }
+  },
+  "finance": {
+    "settings": {
+      "currency": {
+        "title": "Currency",
+        "desc": "Configure system currency."
+      },
+      "coa": {
+        "title": "Chart of Accounts",
+        "desc": "Configure the company chart of accounts."
+      },
+      "accountsDistribution": {
+        "title": "Account Distribution",
+        "desc": "Configure account distributions."
+      },
+      "assetsTypes": {
+        "title": "Assets Types",
+        "desc": "Configure types of assets."
+      }
+    }
+  },
+  "sales": {
+    "cards": {
+      "products": {
+        "title": "Products",
+        "desc": "Set up product database and related settings."
+      },
+      "boxes": {
+        "title": "Boxes",
+        "desc": "Set up boxes database and related settings."
+      },
+      "customers": {
+        "title": "Customers",
+        "desc": "Set up customer database."
+      },
+      "brands": {
+        "title": "Brands",
+        "desc": "Manage brands and their details."
+      },
+      "itemTypes": {
+        "title": "Item Types",
+        "desc": "Organize item types for easier management."
+      },
+      "pos": {
+        "title": "POS",
+        "desc": "Configure POS devices and behaviors."
+      },
+      "marketingSource": {
+        "title": "Marketing Source",
+        "desc": "Configure marketing sources and their behavior."
+      },
+      "sellerBonus": {
+        "title": "Seller Bonus",
+        "desc": "Define seller bonus rules."
+      },
+      "salesShifts": {
+        "title": "Sales Shifts",
+        "desc": "Configure sales staff shifts."
+      },
+      "tempReservation": {
+        "title": "Temporary Reservations",
+        "desc": "Create and manage temporary reservations."
+      },
+      "salesApproval": {
+        "title": "Sales Approval Rules",
+        "desc": "Define sales approval conditions."
+      },
+      "salesDiscount": {
+        "title": "Discount Types",
+        "desc": "Configure discount categories and rules."
+      },
+      "chiraApproval": {
+        "title": "Chira Approval",
+        "desc": "Define rules for chira approvals."
+      },
+      "reportsConfig": {
+        "title": "Reports Config",
+        "desc": "Customize analytics reports."
+      },
+      "vendors": {
+        "title": "Vendors",
+        "desc": "List of vendors"
+      }
+    }
+  },
+  "purchases": {
+    "headers": {
+      "vendors": "Vendors",
+      "purchaseRef": "Purchase Ref. No",
+      "purchaseSysNo": "Purchase Sys. No",
+      "purchaseSummary": "Purchase Summary",
+      "purchaseDate": "Purchase Date",
+      "createdBy": "Created By",
+      "isClosed": "Closed?",
+      "comment": "Comment"
+    },
+    "labels": {
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches",
+      "boxes": "Boxes",
+      "distributionWarning": "New arrival has come and will be received soon. Please check the distribution list.",
+      "distributionNo": "Distribution No:",
+      "date": "Date:",
+      "brand": "Brand:",
+      "status": "Status:",
+      "received": "Received",
+      "notReceived": "Not Received",
+      "alreadyReceived": "Already Received:",
+      "rest": "Rest:",
+      "products": "Product",
+      "items": "Items",
+      "newPurchase": "New Purchase",
+      "back": "Back",
+      "editPurchase": "Edit Purchase No:",
+      "newPurchaseNo": "New Purchase No:",
+      "referencePurchase": "Reference Purchase",
+      "dateLabel": "Date",
+      "vendor": "Choose Vendor",
+      "fullWeight": "Full Weight",
+      "netWeight": "Net Weight",
+      "productName": "Product Name",
+      "stoneColor": "Stone Color",
+      "goldColor": "Gold Color",
+      "sellingPrice": "Selling Price",
+      "currency": "Currency",
+      "exchangeRate": "Exchange Rate",
+      "costLYD": "Cost (LYD)",
+      "total": "Total",
+      "receivedShort": "Received",
+      "restShort": "Rest",
+      "numberOfItems": "Number Of Items",
+      "stickerPreview": "Sticker Preview",
+      "confirmDeletion": "Confirm Deletion",
+      "confirmDeletionMsg": "Are you sure you want to delete this product #{{num}}?",
+      "irreversible": "This action cannot be undone!"
+    }
   }
 }
