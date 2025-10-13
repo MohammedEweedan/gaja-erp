@@ -106,7 +106,7 @@ function AuthLogin({ ...others }) {
 
   async function verifyCredentials(email, password) {
     try {
-      const res = await axios.post("/api/login", { email, password });
+      const res = await axios.post("/login", { email, password });
 
       if (res.data.token) {
         // Store user data temporarily (don't login yet)

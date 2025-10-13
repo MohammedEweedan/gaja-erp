@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from "../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -115,7 +115,6 @@ const Expenses = (props: Props) => {
     const [showInvoiceForm, setShowInvoiceForm] = useState(false);
     const [editExpense, setEditExpense] = useState<Expense>(initialExpenseState);
     const [isEditMode, setIsEditMode] = useState(false);
-    const [selectedInvoiceNum, setSelectedInvoiceNum] = useState<number | null>(null);
     const [refreshFlag, setRefreshFlag] = useState(0);
     const [progress, setProgress] = useState(0);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -131,37 +130,49 @@ const Expenses = (props: Props) => {
 
     const [loadingCustomers, setLoadingCustomers] = useState(false);
 
-    const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrl = "http://localhost:9000/Expense";
-    const apiUrlAccounts = `${apiIp}/Accounts`;
+    
+    const apiUrl = "/Expense";            // Expenses backend base
+    const apiUrlAccounts = "/Accounts";    // Accounts listing
+    const customersUrl = "/customers";     // Real customers endpoint (same used in revenue)
 
     const fetchCustomers = useCallback(async () => {
         const token = localStorage.getItem('token');
+        if (!token) return;
         try {
             setLoadingCustomers(true);
-            const res = await axios.get<Client[]>(`${apiUrlAccounts}/all`, {
+            const res = await axios.get<Client[]>(`${customersUrl}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            setCustomers(res.data);
+            // Ensure unique customers & required fields
+            const unique = new Map<number, Client>();
+            res.data.forEach(c => {
+                if (c && typeof c.id_client === 'number') {
+                    unique.set(c.id_client, {
+                        id_client: c.id_client,
+                        client_name: c.client_name || '(No Name)',
+                        tel_client: c.tel_client || ''
+                    });
+                }
+            });
+            setCustomers(Array.from(unique.values()));
         } catch (error) {
             console.error("Error fetching customers:", error);
             showSnackbar("Failed to fetch customers", 'error');
         } finally {
             setLoadingCustomers(false);
         }
-    }, [apiUrlAccounts]);
+    }, [customersUrl]);
 
 
-   const apiUrlemployee = `${apiIp}/employees`;
+    const apiUrlemployee = "/employees"; // list endpoint is GET /employees
     const fetchEmployee = useCallback(async () => {
-       
         const token = localStorage.getItem('token');
+        if (!token) return;
         try {
             setLoadingCustomers(true);
-            const res = await axios.get<Employee[]>(`${apiUrlemployee}/all`, {
+            const res = await axios.get<Employee[]>(`${apiUrlemployee}/`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            // Ensure employees is always an array
             setEmployees(Array.isArray(res.data) ? res.data : []);
         } catch (error) {
             console.error("Error fetching employees:", error);
@@ -295,22 +306,9 @@ const Expenses = (props: Props) => {
         }
     };
 
-    const handleEdit = useCallback((row: Expense) => {
+    // Editing existing expenses can be re-enabled by adding an actions column and restoring a handleEdit callback.
 
-        setSelectedInvoiceNum(row.ID_transaction);
-        setEditExpense({
-            ...row,
-            Customer: row.Customer || customers.find(c => c.id_client === row.client)
-        });
-        setIsEditMode(true);
-        setShowInvoiceForm(true);
-        showSnackbar(`Editing expense #${row.ID_transaction}`, 'info');
-    }, [customers]);
-
-    const openDeleteDialog = (id: number) => {
-        setRevenueToDelete(id);
-        setDeleteDialogOpen(true);
-    };
+    // Removed unused openDeleteDialog (delete via inline action button instead)
 
     const closeDeleteDialog = () => {
         setDeleteDialogOpen(false);
@@ -322,7 +320,7 @@ const Expenses = (props: Props) => {
 
         const token = localStorage.getItem('token');
         try {
-            await axios.delete(`${apiUrl}/delete/${revenueToDelete}`, {
+            await axios.delete(`${apiUrl}/Delete/${revenueToDelete}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             showSnackbar("Expense deleted successfully", 'success');
@@ -377,7 +375,7 @@ const Expenses = (props: Props) => {
         const token = localStorage.getItem('token');
         try {
             const url = isEditMode
-                ? `${apiUrl}/update/${editExpense.ID_transaction}`
+                ? `${apiUrl}/Update/${editExpense.ID_transaction}`
                 : `${apiUrl}/Add`;
             const method = isEditMode ? 'PUT' : 'POST';
             editExpense.ps = Number(ps) || 0;
@@ -532,7 +530,7 @@ const Expenses = (props: Props) => {
             }
         },
         // ...existing code...
-    ], [dataAccounts, customers, handleEdit]);
+    ], [dataAccounts, customers, employees]);
     const table = useMaterialReactTable({
         columns,
         data,

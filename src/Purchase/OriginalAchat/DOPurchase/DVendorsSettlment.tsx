@@ -19,28 +19,35 @@ import AddIcon from '@mui/icons-material/Add';
 import ImportExportIcon from '@mui/icons-material/ImportExport';
 import * as XLSX from 'xlsx';
 import { currencyList } from '../../../constants/currencies';
-import Suppliers from '../../../Setup/SCS/Pages/Suppliers';
 import MuiAlert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
+
+type Vendor = {
+    ExtraClient_ID: number;
+    Client_Name: string;
+};
+
+type Supplier = {
+    id_client: number;
+    client_name: string;
+    TYPE_SUPPLIER?: string;
+};
 
 type SupplierSettlement = {
     id_settlement: number;
     date_settlement: string;
-    client: number;
+    client: number; // supplier id (brand)
     Debit_Money: number;
     Credit_Money: number;
     Debit_Gold: number;
     Credit_Gold: number;
     Comment: string;
-    Brand: number;
+    Brand: number; // vendor id
     Reference_number: string;
     currency: string;
-    ExchangeRate?: number; // Added ExchangeRate field
-    ExchangeRateToLYD?: number; // Added ExchangeRateToLYD field
-    vendor?: Vendor | null;
-    Paidby?: number; // Added Paidby field
-    vendorPBy?: Vendor | null;
-    
+    ExchangeRate?: number;
+    ExchangeRateToLYD?: number;
+    Paidby?: number;
 };
 
 const initialSettlementState: SupplierSettlement = {
@@ -55,25 +62,14 @@ const initialSettlementState: SupplierSettlement = {
     Brand: -1,
     Reference_number: '',
     currency: '',
-    ExchangeRate: 1, // Default value
-    ExchangeRateToLYD: 1, // Default value
+    ExchangeRate: 1,
+    ExchangeRateToLYD: 1,
     Paidby: -1,
- 
 };
-type Vendor = {
-    ExtraClient_ID: number;
-    Client_Name: string;
 
-};
-type Supplier = {
-    id_client: number;
-    client_name: string;
-    TYPE_SUPPLIER?: string;
-};
-const apiIp = process.env.REACT_APP_API_IP;
-const apiUrl = `http://${apiIp}/Suppliersettlement`;
+const apiUrl = '/Suppliersettlement';
 
-const VendorsSettlment = () => {
+const DVendorsSettlment = () => {
     const [data, setData] = useState<SupplierSettlement[]>([]);
     const [loading, setLoading] = useState(true);
     const [openDialog, setOpenDialog] = useState(false);
@@ -84,79 +80,57 @@ const VendorsSettlment = () => {
     const [vendors, setVendors] = useState<Vendor[]>([]);
     const [vendorsPby, setVendorsPby] = useState<Vendor[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'warning' | 'info' });
+
     const fetchData = useCallback(async () => {
         const token = localStorage.getItem('token');
-        if (!token) return navigate("/");
-
+        if (!token) return navigate('/');
         try {
             const response = await axios.get<SupplierSettlement[]>(`${apiUrl}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
+            // Filter to diamond brand/suppliers by TYPE_SUPPLIER diamond
             setData(response.data);
-
-
-        } catch (error: any) {
-            // if (error.response?.status === 401) navigate("/");
-            //else 
-            //alert("Error loading data");
+        } catch (error) {
         } finally {
             setLoading(false);
         }
     }, [navigate]);
 
-
-
-
-
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "/suppliers";
+        const apiUrlsuppliers = '/suppliers';
         const token = localStorage.getItem('token');
         try {
-
             const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            const goldSuppliers = res.data.filter(supplier =>
-                supplier.TYPE_SUPPLIER?.toLowerCase().includes('watche')
-            );
-            setSuppliers(goldSuppliers);
+            const diamondSuppliers = res.data.filter(s => s.TYPE_SUPPLIER?.toLowerCase().includes('diamond'));
+            setSuppliers(diamondSuppliers);
         } catch (error) {
-
-        } finally {
-
         }
     };
 
-
     const fetchVendors = async () => {
-        const apiUrlVendors = "/vendors";
+        const apiUrlVendors = '/vendors';
         const token = localStorage.getItem('token');
         try {
-
             const res = await axios.get<Vendor[]>(`${apiUrlVendors}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-
-
             setVendors(res.data);
             setVendorsPby(res.data);
         } catch (error) {
-            // setSnackbar({ open: true, message: 'Failed to fetch suppliers', severity: 'error' });
-        } finally {
-
         }
     };
-
-
 
     useEffect(() => {
         fetchData();
         fetchVendors();
         fetchSuppliers();
-    }, [navigate, fetchData]);
+    }, [fetchData]);
 
     const handleEdit = (row: SupplierSettlement) => {
-        setEditSettlement({ ...row, ExchangeRateToLYD: row.ExchangeRateToLYD ?? 1 }); // Ensure default 1 if undefined
+        setEditSettlement({ ...row, ExchangeRateToLYD: row.ExchangeRateToLYD ?? 1 });
         setIsEditMode(true);
         setOpenDialog(true);
     };
@@ -164,11 +138,11 @@ const VendorsSettlment = () => {
     const handleAddNew = () => {
         setEditSettlement({
             ...initialSettlementState,
-            date_settlement: new Date().toISOString().slice(0, 10), // Set to today's date in YYYY-MM-DD
-            ExchangeRateToLYD: 1, // Default value
-            Brand: -1, // Reset Vendor
-            client: -1, // Reset Supplier
-            Paidby: -1, // Reset Paid By
+            date_settlement: new Date().toISOString().slice(0, 10),
+            ExchangeRateToLYD: 1,
+            Brand: -1,
+            client: -1,
+            Paidby: -1,
         });
         setIsEditMode(false);
         setOpenDialog(true);
@@ -184,20 +158,15 @@ const VendorsSettlment = () => {
         const newErrors: any = {};
         if (!editSettlement?.Reference_number) newErrors.Reference_number = 'Reference Number is required';
         if (!editSettlement?.date_settlement) newErrors.date_settlement = 'Date is required';
-
-        if (!editSettlement?.client || editSettlement.client < 0) newErrors.client = 'Vendor must be selected';
-         
-        if (!editSettlement?.Brand   || editSettlement.Brand < 0) newErrors.Brand = 'Vendor must be selected';
-        if (!editSettlement?.Paidby || editSettlement.Paidby < 0) newErrors.Paidby = 'Vendor paid by must be selected';
-
+        if (!editSettlement?.client || editSettlement.client < 0) newErrors.client = 'Supplier (Brand) must be selected';
+        if (!editSettlement?.Brand || editSettlement.Brand < 0) newErrors.Brand = 'Vendor must be selected';
+        if (!editSettlement?.Paidby || editSettlement.Paidby < 0) newErrors.Paidby = 'Paid By must be selected';
         if (!editSettlement?.currency) newErrors.currency = 'Currency is required';
         if (!editSettlement?.ExchangeRate || editSettlement.ExchangeRate <= 0) newErrors.ExchangeRate = 'Exchange Rate must be a positive number';
         if (!editSettlement?.ExchangeRateToLYD || editSettlement.ExchangeRateToLYD <= 0) newErrors.ExchangeRateToLYD = 'Exchange Rate To LYD must be a positive number';
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
-
-    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' | 'warning' | 'info' });
 
     const handleSave = async () => {
         if (!validateForm() || !editSettlement) return;
@@ -220,7 +189,6 @@ const VendorsSettlment = () => {
         }
     };
 
-    // Add state for delete confirmation dialog
     const [deleteDialog, setDeleteDialog] = useState<{ open: boolean, row: SupplierSettlement | null }>({ open: false, row: null });
 
     const handleDelete = useCallback(async (row: SupplierSettlement) => {
@@ -245,29 +213,28 @@ const VendorsSettlment = () => {
 
     const handleExportExcel = () => {
         const headers = [
-            'ID', 'Reference Number', 'Date', 'Client', 'Debit Money', 'Credit Money', 'Debit Gold', 'Credit Gold', 'Comment', 'Brand', 'Currency'
+            'ID', 'Reference Number', 'Date', 'Supplier', 'Debit Money', 'Credit Money', 'Debit Gold', 'Credit Gold', 'Comment', 'Vendor', 'Currency'
         ];
         const rows = data.map(settlement => [
             settlement.id_settlement,
             settlement.Reference_number,
             settlement.date_settlement,
-            settlement.client,
+            suppliers.find(s => s.id_client === settlement.client)?.client_name || settlement.client,
             settlement.Debit_Money,
             settlement.Credit_Money,
             settlement.Debit_Gold,
             settlement.Credit_Gold,
             settlement.Comment,
-            settlement.Brand,
+            vendors.find(v => v.ExtraClient_ID === settlement.Brand)?.Client_Name || settlement.Brand,
             settlement.currency
         ]);
         const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'settlements');
-        XLSX.writeFile(workbook, 'settlements.xlsx');
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'diamond_settlements');
+        XLSX.writeFile(workbook, 'diamond_settlements.xlsx');
     };
 
     const columns = useMemo<MRT_ColumnDef<SupplierSettlement>[]>(() => [
-        //  { accessorKey: 'id_settlement', header: 'ID', size: 60 },
         {
             header: 'Ref. Number / Date',
             id: 'ref_date',
@@ -318,7 +285,6 @@ const VendorsSettlment = () => {
             Cell: ({ row }) => {
                 const debit = Number(row.original.Debit_Money) || 0;
                 const credit = Number(row.original.Credit_Money) || 0;
-              
                 const currency = row.original.currency || '';
                 return (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -332,7 +298,6 @@ const VendorsSettlment = () => {
                                 <span style={{color:'#888', fontSize:12}}>Credit:</span> {credit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currency}
                             </span>
                         )}
-                        
                     </Box>
                 );
             },
@@ -347,10 +312,8 @@ const VendorsSettlment = () => {
                 const rateLYD = Number(s.ExchangeRateToLYD) || 1;
                 const debit = Number(s.Debit_Money) || 0;
                 const credit = Number(s.Credit_Money) || 0;
-               
-                // Net USD calculation includes discount
-                const netUSD = (debit - credit ) * rateUSD;
-                const netLYD = (debit - credit ) * rateUSD * rateLYD;
+                const netUSD = (debit - credit) * rateUSD;
+                const netLYD = (debit - credit) * rateUSD * rateLYD;
                 return (
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                         <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1 }}>
@@ -369,7 +332,6 @@ const VendorsSettlment = () => {
                 );
             },
         },
-       
         {
             accessorKey: 'Paidby',
             header: 'Paid By',
@@ -379,7 +341,7 @@ const VendorsSettlment = () => {
                 return vendor ? vendor.Client_Name : cell.getValue<number>() || '';
             }
         },
-       { accessorKey: 'Comment', header: 'Comment', size: 200, Cell: ({ cell }) => (
+        { accessorKey: 'Comment', header: 'Comment', size: 200, Cell: ({ cell }) => (
             <Box sx={{ whiteSpace: 'pre-line', wordBreak: 'break-word', maxWidth: 300 }}>
                 {cell.getValue<string>()}
             </Box>
@@ -410,15 +372,12 @@ const VendorsSettlment = () => {
         data,
         state: { isLoading: loading, density: 'compact' },
         enableDensityToggle: true,
-
     });
 
-    // Add local state for rate fields as strings for smooth editing
     const [exchangeRateInput, setExchangeRateInput] = useState('');
     const [exchangeRateToLYDInput, setExchangeRateToLYDInput] = useState('');
 
     useEffect(() => {
-        // Sync local input state with editSettlement when dialog opens
         if (openDialog && editSettlement) {
             setExchangeRateInput(editSettlement.ExchangeRate !== undefined ? String(editSettlement.ExchangeRate) : '');
             setExchangeRateToLYDInput(editSettlement.ExchangeRateToLYD !== undefined ? String(editSettlement.ExchangeRateToLYD) : '');
@@ -428,8 +387,8 @@ const VendorsSettlment = () => {
     return (
         <Box p={0.5}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                <Typography  color="text.primary" variant="h5" sx={{ fontWeight: 'bold' }}>
-                    Vendor Payment List
+                <Typography color="text.primary" variant="h5" sx={{ fontWeight: 'bold' }}>
+                    Diamond Vendor Payment List
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 2 }}>
                     <Button
@@ -474,9 +433,6 @@ const VendorsSettlment = () => {
 
                 <DialogContent>
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-                        {/* Group 1: Reference Number, Date, Vendor, Supplier */}
-
-
                         <Autocomplete
                             id="vendors-select-pb"
                             options={vendorsPby}
@@ -501,12 +457,7 @@ const VendorsSettlment = () => {
                             sx={{ flex: 1, minWidth: 180 }}
                         />
 
-
                         <Box sx={{ display: 'flex', gap: 2, border: '1px solid #e0e0e0', borderRadius: 2, p: 2, mb: 2, flexWrap: 'wrap' }}>
-
-
-
-
                             <TextField
                                 label="Reference Number"
                                 fullWidth
@@ -515,7 +466,6 @@ const VendorsSettlment = () => {
                                 error={!!errors.Reference_number}
                                 helperText={errors.Reference_number}
                                 sx={{ flex: 1, minWidth: 180 }}
-                            // required
                             />
                             <TextField
                                 label="Date"
@@ -527,7 +477,6 @@ const VendorsSettlment = () => {
                                 error={!!errors.date_settlement}
                                 helperText={errors.date_settlement}
                                 sx={{ flex: 1, minWidth: 180 }}
-                            // required
                             />
                             <Autocomplete
                                 id="vendors-select"
@@ -539,7 +488,7 @@ const VendorsSettlment = () => {
                                     setEditSettlement(prev => prev && ({
                                         ...prev,
                                         Brand: newValue ? newValue.ExtraClient_ID : -1,
-                                        client: newValue ? newValue.ExtraClient_ID : -1
+                                        client: newValue ? (suppliers[0]?.id_client ?? -1) : -1
                                     }));
                                 }}
                                 renderInput={(params) => (
@@ -578,11 +527,7 @@ const VendorsSettlment = () => {
                             />
                         </Box>
 
-                        {/* Group 2: Debit/Credit Money, Currency, Exchange Rate */}
                         <Box sx={{ display: 'flex', gap: 2, border: '1px solid #e0e0e0', borderRadius: 2, p: 2, mb: 2, flexWrap: 'wrap' }}>
-
-
-
                             <TextField
                                 label="Currency"
                                 select
@@ -608,15 +553,6 @@ const VendorsSettlment = () => {
                                     setExchangeRateInput(e.target.value);
                                     setEditSettlement({ ...editSettlement!, ExchangeRate: Number(e.target.value) });
                                 }}
-                                /*
-                                onBlur={() => {
-                                    if (exchangeRateInput !== '') {
-                                        const val = Number(exchangeRateInput);
-                                        setExchangeRateInput(val.toFixed(3));
-                                        setEditSettlement({ ...editSettlement!, ExchangeRate: Number(val.toFixed(3)) });
-                                    }
-                                      
-                                }}  */
                                 sx={{ flex: 1, minWidth: 180 }}
                             />
 
@@ -634,7 +570,7 @@ const VendorsSettlment = () => {
                                 label="Debit (Money) x Exchange Rate"
                                 value={
                                     editSettlement && editSettlement.ExchangeRate && editSettlement.Debit_Money
-                                        ? ((Number(editSettlement.Debit_Money) ) * Number(editSettlement.ExchangeRate)).toFixed(2)
+                                        ? ((Number(editSettlement.Debit_Money)) * Number(editSettlement.ExchangeRate)).toFixed(2)
                                         : ''
                                 }
                                 InputProps={{ readOnly: true }}
@@ -655,14 +591,14 @@ const VendorsSettlment = () => {
                                 label="Credit (Money) x Exchange Rate"
                                 value={
                                     editSettlement && editSettlement.ExchangeRate && editSettlement.Credit_Money
-                                        ? ((Number(editSettlement.Credit_Money)  ) * Number(editSettlement.ExchangeRate)).toFixed(2)
+                                        ? ((Number(editSettlement.Credit_Money)) * Number(editSettlement.ExchangeRate)).toFixed(2)
                                         : ''
                                 }
                                 InputProps={{ readOnly: true }}
                                 fullWidth
                                 sx={{ flex: 1, minWidth: 180 }}
                             />
-                            
+
                             <TextField
                                 label="Exchange Rate To LYD"
                                 type="number"
@@ -687,10 +623,9 @@ const VendorsSettlment = () => {
                                 label="Net Amount (LYD)"
                                 value={
                                     editSettlement && editSettlement.ExchangeRateToLYD !== undefined
-                                        ? ((
-                                            (Number(editSettlement.Debit_Money) > 0
-                                                ? Number(editSettlement.Debit_Money)  
-                                                : Number(editSettlement.Credit_Money) )
+                                        ? (((Number(editSettlement.Debit_Money) > 0
+                                            ? Number(editSettlement.Debit_Money)
+                                            : Number(editSettlement.Credit_Money))
                                         ) * Number(editSettlement.ExchangeRate) * Number(editSettlement.ExchangeRateToLYD)).toFixed(2)
                                         : ''
                                 }
@@ -700,7 +635,6 @@ const VendorsSettlment = () => {
                             />
                         </Box>
 
-                        {/* Group 3: Debit/Credit Gold */}
                         <Box sx={{ display: 'flex', gap: 2, border: '1px solid #e0e0e0', borderRadius: 2, p: 2, mb: 2, flexWrap: 'wrap' }}>
                             <TextField
                                 label="Debit (Gold)"
@@ -711,7 +645,6 @@ const VendorsSettlment = () => {
                                 value={editSettlement?.Debit_Gold || ''}
                                 onChange={(e) => setEditSettlement({ ...editSettlement!, Debit_Gold: Number(e.target.value) })}
                                 sx={{ flex: 1, minWidth: 180 }}
-
                             />
                             <TextField
                                 label="Credit (Gold)"
@@ -726,7 +659,6 @@ const VendorsSettlment = () => {
                             />
                         </Box>
 
-                        {/* Group 4: Comment as TextArea */}
                         <Box sx={{ border: '1px solid #e0e0e0', borderRadius: 2, p: 2, mb: 2 }}>
                             <TextField
                                 label="Comment"
@@ -739,7 +671,7 @@ const VendorsSettlment = () => {
                         </Box>
                     </Box>
                 </DialogContent>
-                <DialogActions  >
+                <DialogActions>
                     <Button onClick={handleCloseDialog} color="secondary">
                         Cancel
                     </Button>
@@ -759,19 +691,8 @@ const VendorsSettlment = () => {
                     <Button onClick={confirmDelete} color="error">Delete</Button>
                 </DialogActions>
             </Dialog>
-
-            {/* Footer Note */}
-            <Box sx={{ mt: 4, p: 2, bgcolor: 'inherit', borderRadius: 2 }}>
-                <Typography variant="body2" color="textSecondary">
-                    <b>Note:</b> This list displays all vendor payments. Amounts are shown in the original currency, converted to USD, and then to LYD using the provided exchange rates. <br />
-                    <b>Original Currency</b> → <b>USD</b> → <b>LYD</b>.<br />
-                    <b>Vendors</b> refer to the external parties receiving payment, while <b>Brands</b> represent the associated supplier or product line. <br />
-                    Please review all exchange rates and payment details carefully. If you have questions about the conversion or the relationship between vendors and brands, contact the finance department for clarification.
-                </Typography>
-            </Box>
         </Box>
-
     );
 };
 
-export default VendorsSettlment;
+export default DVendorsSettlment;

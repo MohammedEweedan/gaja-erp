@@ -60,7 +60,7 @@ export const EmployeeCard = <T extends MinimalEmployee>({
 }: EmployeeCardProps<T>) => {
   const theme = useTheme();
   const { t } = useTranslation();
-  const accent = (theme.palette as any)?.gaja?.[100] ?? '#b7a27d';
+  const accent = (theme.palette as any)?.gaja?.[100] ?? theme.palette.text.primary;
   const posLabel = React.useMemo(() => {
     if (!e.PS) return undefined;
     if (posLabelMap instanceof Map) {

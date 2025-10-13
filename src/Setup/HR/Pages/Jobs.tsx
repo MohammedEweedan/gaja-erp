@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useNavigate } from 'react-router-dom';
 
 import {
@@ -57,7 +57,7 @@ const Jobs = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [errors, setErrors] = useState<any>({});
   const navigate = useNavigate();
-  const apiUrl = "http://localhost:9000/jobs";
+  const apiUrl = "/jobs";
   const [employeesByTitle, setEmployeesByTitle] = useState<Record<string, EmployeeLite[]>>({});
   const [empDialogOpen, setEmpDialogOpen] = useState(false);
   const [empDialogTitle, setEmpDialogTitle] = useState<string>("");

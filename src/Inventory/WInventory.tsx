@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from "../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   MaterialReactTable,
@@ -54,7 +54,7 @@ interface Props {
   Type?: string;
 }
 
-const API_BASEImage = 'http://localhost:9000/images';
+const API_BASEImage = '/images';
 
 // Helper to fetch image as blob with auth
 const fetchImageWithAuth = async (url: string, token: string) => {
@@ -94,7 +94,7 @@ const WInventory = (props: Props) => {
   const [carouselIndex, setCarouselIndex] = useState<Record<string, number>>({});
 
   const navigate = useNavigate();
-  const apiUrl = "http://localhost:9000/Inventory";
+  const apiUrl = "/Inventory";
 
   const fetchData = useCallback(async () => {
     const token = localStorage.getItem('token');
@@ -278,7 +278,31 @@ const WInventory = (props: Props) => {
     {
       accessorFn: (row) => row.Fournisseur?.client_name,
       header: 'Brand',
-      size: 80
+      size: 120,
+      Cell: ({ row }) => {
+        const brand = row.original.Fournisseur?.client_name;
+        // Safely extract watch details for nickname
+        let watch: any = undefined;
+        const dp: any = row.original.DistributionPurchase;
+        if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === 'object') {
+          watch = dp[0]?.OriginalAchatWatch;
+        } else if (dp && typeof dp === 'object') {
+          watch = dp?.OriginalAchatWatch;
+        }
+        const nickname = watch?.common_local_brand;
+        return (
+          <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {brand || '-'}
+            </Typography>
+            {nickname ? (
+              <Typography variant="caption" color="text.secondary">
+                {nickname}
+              </Typography>
+            ) : null}
+          </Box>
+        );
+      }
     },
 
 
@@ -418,7 +442,7 @@ const WInventory = (props: Props) => {
             )}
             {watch.common_local_brand && (
               <Typography variant="body2" sx={{ mb: 0.5 }}>
-                <b>Local Brand:</b> {watch.common_local_brand}
+                <b>Nickname:</b> {watch.common_local_brand}
               </Typography>
             )}
 

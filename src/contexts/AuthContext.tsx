@@ -5,6 +5,7 @@ type RawUser = {
   ps?: any;
   id_user?: any;
   Action_user?: any;
+  Roles?: any;
   name_user?: string;
 };
 
@@ -12,7 +13,7 @@ type StoredUser = {
   id: string;                 // email as id (your legacy login stores this)
   ps?: any;
   Cuser?: any;                // id_user
-  roles?: any;                // Action_user
+  roles?: any;                // Users.Roles (preferred) or legacy Action_user
   name_user?: string;
 };
 
@@ -88,7 +89,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
 
       const token: string | undefined = res?.data?.token;
-      const backendUser: RawUser | undefined = res?.data?.user;
+  const backendUser: RawUser | undefined = res?.data?.user;
 
       if (!token || !backendUser) {
         return { success: false, error: 'Invalid credentials response' };
@@ -102,7 +103,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: email,
         ps: backendUser.ps,
         Cuser: backendUser.id_user,
-        roles: backendUser.Action_user,
+        roles: (backendUser as any)?.Roles ?? backendUser.Action_user,
         name_user: backendUser.name_user,
       };
       localStorage.setItem(USER_KEY, JSON.stringify(storedUser));

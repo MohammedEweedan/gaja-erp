@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, forwardRef } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MaterialReactTable,
@@ -251,7 +251,7 @@ const WOPurchase = () => {
   const [imgDialogOpen, setImgDialogOpen] = useState(false);
   const [imgDialogIdAchat, setImgDialogIdAchat] = useState<number | null>(null);
   const navigate = useNavigate();
-  const apiUrl = "http://localhost:9000/WOpurchases";
+  const apiUrl = "/WOpurchases";
 
 
   const fetchData = async () => {
@@ -272,7 +272,7 @@ const WOPurchase = () => {
   };
 
   const fetchSuppliers = async () => {
-    const apiUrlsuppliers = "http://localhost:9000/suppliers";
+    const apiUrlsuppliers = "/suppliers";
     const token = localStorage.getItem('token');
     try {
       setLoadingSuppliers(true);
@@ -292,7 +292,7 @@ const WOPurchase = () => {
 
 
   const fetchVendors = async () => {
-    const apiUrlVendors = "http://localhost:9000/vendors";
+    const apiUrlVendors = "/vendors";
     const token = localStorage.getItem('token');
     try {
       setLoadingSuppliers(true);
@@ -315,7 +315,7 @@ const WOPurchase = () => {
   const fetchAllDistributions = async () => {
     const token = localStorage.getItem('token');
     try {
-      const res = await axios.get('http://localhost:9000/Dpurchases/all', {
+      const res = await axios.get('/Dpurchases/all', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDistributions(res.data.filter((d: any) => d.PurchaseType === 'Watche Purchase'));
@@ -334,7 +334,7 @@ const WOPurchase = () => {
     const fetchPsList = async () => {
       const token = localStorage.getItem('token');
       try {
-        const res = await axios.get('http://localhost:9000/ps/all', {
+        const res = await axios.get('/ps/all', {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPsList(res.data);
@@ -513,7 +513,7 @@ const WOPurchase = () => {
     const usr = Cuser;
     // Optionally add Is_view if your backend supports it
     try {
-      await fetch('http://localhost:9000/ApprovalRequests/create', {
+      await fetch('/ApprovalRequests/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -569,7 +569,7 @@ const WOPurchase = () => {
       setEmailProgress(40);
       const token = localStorage.getItem('token');
       setEmailProgress(60);
-      await axios.post("http://localhost:9000/WOpurchases/send-approval", payload, {
+      await axios.post("/WOpurchases/send-approval", payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmailProgress(90);
@@ -635,7 +635,7 @@ const WOPurchase = () => {
           existingDist.ps !== newDistribution.ps ||
           existingDist.distributionDate?.slice(0, 10) !== newDistribution.distributionDate
         ) {
-          await axios.put(`http://localhost:9000/Dpurchases/Update/${existingDist.distributionID}`, {
+          await axios.put(`/Dpurchases/Update/${existingDist.distributionID}`, {
             PurchaseID: distributionDialog.purchase?.id_achat,
             ps: newDistribution.ps,
             distributionDate: newDistribution.distributionDate,
@@ -652,7 +652,7 @@ const WOPurchase = () => {
         }
       } else {
         // Add a new distribution
-        await axios.post('http://localhost:9000/Dpurchases/Add', {
+        await axios.post('/Dpurchases/Add', {
           PurchaseID: distributionDialog.purchase?.id_achat,
           ps: newDistribution.ps,
           distributionDate: newDistribution.distributionDate,
@@ -683,7 +683,7 @@ const WOPurchase = () => {
     try {
       const token = localStorage.getItem('token');
       // Fetch all distributions for this purchase
-      const res = await axios.get(`http://localhost:9000/Dpurchases/all`, {
+      const res = await axios.get(`/Dpurchases/all`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       // Filter for this purchase and type
@@ -739,18 +739,23 @@ const WOPurchase = () => {
     {
       header: 'Brand',
       id: 'supplier',
-      size: 100,
-      Cell: ({ row }) => (
-        <Box sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
-          {suppliers.find(s => s.id_client === row.original.Brand)?.client_name || ''}
-        </Box>
-      ),
+      size: 140,
+      Cell: ({ row }) => {
+        const brandName = suppliers.find(s => s.id_client === row.original.Brand)?.client_name || '';
+        const nickname = row.original.common_local_brand;
+        return (
+          <Box sx={{ display: 'flex', flexDirection: 'column', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.2 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{brandName || '-'}</Typography>
+            {nickname ? (
+              <Typography variant="caption" color="text.secondary">{nickname}</Typography>
+            ) : null}
+          </Box>
+        );
+      },
     },
 
 
     
-
-    { accessorKey: 'common_local_brand', header: 'Local Brand', size: 80 },
     {
       accessorKey: 'user',
       header: 'Created By',
@@ -764,10 +769,15 @@ const WOPurchase = () => {
     {
       accessorKey: 'model',
       header: 'Model',
-      size: 120,
+      size: 100,
+      muiTableBodyCellProps: {
+        sx: { whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' },
+      },
       Cell: ({ row }) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {row.original.model}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          <Typography variant="body2" sx={{ whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere', flex: 1 }}>
+            {row.original.model}
+          </Typography>
           {row.original.IsApprouved === 'Accepted' ? (
             <Tooltip title="Approved">
               <CheckCircleIcon color="success" fontSize="small" />
@@ -784,7 +794,7 @@ const WOPurchase = () => {
     {
       header: 'Reference # / Serial #',
       id: 'reference_serial',
-      size: 160,
+      size: 120,
       Cell: ({ row }) => (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
           <span style={{ fontWeight: 500 }}>Ref: {row.original.reference_number || '-'}</span>
@@ -1096,7 +1106,7 @@ const WOPurchase = () => {
             setLoading(true);
             const token = localStorage.getItem('token');
             try {
-              const res = await axios.get(`http://localhost:9000/images/list/${id_achat}`, {
+              const res = await axios.get(`/images/list/${id_achat}`, {
                 headers: { Authorization: `Bearer ${token}` },
               });
               let images = res.data;
@@ -1108,7 +1118,7 @@ const WOPurchase = () => {
               if (imgUrl) {
                 // If not absolute, prepend API base
                 if (!/^https?:\/\//i.test(imgUrl)) {
-                  imgUrl = `http://localhost:9000/images/${imgUrl}`;
+                  imgUrl = `/images/${imgUrl}`;
                 }
                 // Always append token as query param
                 if (token) {
@@ -1125,19 +1135,31 @@ const WOPurchase = () => {
           fetchThumb();
           return () => { mounted = false; };
         }, [id_achat]);
+        // Log the image URL for debugging
+        if (thumb) {
+          console.log('WOPurchase image thumb URL:', thumb);
+        }
         return (
           <IconButton onClick={() => { setImgDialogOpen(true); setImgDialogIdAchat(id_achat); }} color="primary">
             {loading ? (
               <Box sx={{ width: 50, height: 50, bgcolor: '#eee', borderRadius: 1 }} />
             ) : thumb ? (
-              <Box component="img" src={thumb} alt="img"
+              <Box
+                component="img"
+                src={thumb}
+                alt="img"
+                onError={e => {
+                  console.error('[WOPurchase] Image failed to load:', thumb, e);
+                }}
+                onLoad={() => {
+                  console.log('[WOPurchase] Image loaded successfully:', thumb);
+                }}
                 sx={{
                   width: {
                     xs: '100%',
                     sm: '48%',
                     md: '31%',
                   },
-
                   minWidth: 120,
                   maxWidth: 200,
                   mb: 2,
@@ -1148,8 +1170,8 @@ const WOPurchase = () => {
                   display: 'flex',
                   alignItems: 'stretch',
                   transition: 'box-shadow 0.3s',
-
-                }} />
+                }}
+              />
             ) : (
               <ImageIcon />
             )}
@@ -1252,7 +1274,7 @@ const WOPurchase = () => {
   return (
     <Box p={-0.5} >
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+        <Typography color="text.primary" variant="h5" sx={{ fontWeight: 'bold' }}>
           Watch Purchase List
         </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
@@ -1320,7 +1342,7 @@ const WOPurchase = () => {
           </Box>
         </Box>
       )}
-
+ 
       {sendingEmail && (
         <Backdrop open={sendingEmail} sx={{ zIndex: 2000, color: '#fff', flexDirection: 'column' }}>
           <Logo />
@@ -1429,7 +1451,7 @@ const WOPurchase = () => {
               renderInput={params => (
                 <TextField
                   {...params}
-                  label={<span style={{ color: errors.model ? '#d32f2f' : undefined }}>Local Brand</span>}
+                  label={<span style={{ color: errors.model ? '#d32f2f' : undefined }}>Nickname</span>}
                   required
                   error={!!errors.common_local_brand}
                   sx={!!errors.common_local_brand ? { '& .MuiOutlinedInput-root': { '& fieldset': { borderColor: '#d32f2f', borderWidth: 2 } } } : {}}

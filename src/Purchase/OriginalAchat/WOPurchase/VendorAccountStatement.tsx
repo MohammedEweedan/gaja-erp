@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import {
     Box, Typography, Button, TextField, Autocomplete, MenuItem, Divider
 } from '@mui/material';
@@ -57,10 +57,10 @@ type SupplierSettlement = {
     discount_by_vendor?: number; // Add discount_by_vendor for all settlements
 };
 
-const apiUrlPayments = 'http://localhost:9000/Suppliersettlement';
-const apiUrlPurchases = 'http://localhost:9000/WOpurchases';
-const apiUrlVendors = 'http://localhost:9000/vendors';
-const apiUrlBrands = 'http://localhost:9000/suppliers';
+const apiUrlPayments = '/Suppliersettlement';
+const apiUrlPurchases = '/WOpurchases';
+const apiUrlVendors = '/vendors';
+const apiUrlBrands = '/suppliers';
 
 const VendorAccountStatement = () => {
     // Filters
@@ -145,7 +145,7 @@ const VendorAccountStatement = () => {
 
     // Fetch suppliers for dialog (copy logic from VendorsSettlment)
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "http://localhost:9000/suppliers";
+        const apiUrlsuppliers = "/suppliers";
         const token = localStorage.getItem('token');
         try {
             const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
@@ -607,7 +607,7 @@ const VendorAccountStatement = () => {
     return (
         <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', mb: 2, flexWrap: 'wrap' }}>
-                <Typography variant="h5" sx={{ fontWeight: 'bold', mr: 2, mb: { xs: 1, sm: 0 } }}>
+                <Typography color="text.primary" variant="h5" sx={{ fontWeight: 'bold', mr: 2, mb: { xs: 1, sm: 0 } }}>
                     Vendor Account Statement
                 </Typography>
 

@@ -31,7 +31,7 @@ import ApartmentIcon from '@mui/icons-material/Apartment';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import * as XLSX from 'xlsx';
-import axios from 'axios';
+import axios from "../../api";
 import { useTranslation } from 'react-i18next';
 // Components
 import { EmployeeCard } from "../../components/EmployeeCard";

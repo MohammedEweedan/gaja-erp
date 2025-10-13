@@ -112,7 +112,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       <DialogTitle>
         Complete Invoice Details
         {SelectedInvoiceNum !== undefined && (
-          <span style={{ fontWeight: 400, fontSize: 16, marginLeft: 12, color: '#888' }}>
+          <span style={{ fontWeight: 400, fontSize: 16, marginLeft: 12, color: 'var(--mui-palette-text-secondary)' }}>
             (Invoice #{SelectedInvoiceNum})
           </span>
         )}
@@ -178,7 +178,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
               }}
               renderOption={(props: any, option: Client) => (
                 <Box component="li" {...props} key={option.id_client}>
-                  <strong>{option.client_name}</strong> — <span style={{ color: 'gray' }}>{option.tel_client || 'No Phone'}</span>
+                  <strong>{option.client_name}</strong> — <span style={{ color: 'var(--mui-palette-text-secondary)' }}>{option.tel_client || 'No Phone'}</span>
                 </Box>
               )}
               renderInput={(params: any) => (
@@ -226,7 +226,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             />
           </Box>
           {/* Info Row: Invoice type and currency note */}
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, color: 'ActiveCaption', fontWeight: 500, fontSize: 15 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, color: 'text.secondary', fontWeight: 500, fontSize: 15 }}>
             <span>
               Type: {Type_Supplier} &nbsp;|&nbsp;
               Currency: {Type_Supplier.toLowerCase().includes('gold') ? 'LYD' : 'USD'}
@@ -235,15 +235,12 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             {(() => {
               const sumLYD = Number(totals.amount_lyd) + Number(totals.amount_currency_LYD) + Number(totals.amount_EUR_LYD);
               const totalUSD = Number(totals.total_remise_final);
-              
-                const exRate = sumLYD / totalUSD;
-                return (
-                  <Box sx={{ ml: 2, fontWeight: 'bold', color: 'inherit', minWidth: 120 }}>
-                    Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                  </Box>
-                );
-               
-              return null;
+              const exRate = sumLYD / totalUSD;
+              return (
+                <Box sx={{ ml: 2, fontWeight: 'bold', color: 'inherit', minWidth: 120 }}>
+                  Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                </Box>
+              );
             })()}
           </Box>
 
@@ -367,7 +364,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', my: 1 }}>
             <Box sx={{ borderBottom: '1px solid #e0e0e0', flex: 1 }} />
-            <Box sx={{ mx: 2, color: '#888', fontWeight: 500 }}>Payment Methods</Box>
+            <Box sx={{ mx: 2, color: 'text.secondary', fontWeight: 500 }}>Payment Methods</Box>
             <Box sx={{ borderBottom: '1px solid #e0e0e0', flex: 1 }} />
           </Box>
           {/* Row 3: Amount Paid (LYD) */}
@@ -415,15 +412,12 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             {(() => {
               const usdToLyd = Number(totals.amount_currency_LYD);
               const usd = Number(totals.amount_currency);
-              
-                const exRate = usdToLyd / usd;
-                return (
-                  <Box sx={{ ml: 2, fontWeight: 'bold', color: 'ActiveCaption', minWidth: 120 }}>
-                    Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                  </Box>
-                );
-             
-              return null;
+              const exRate = usdToLyd / usd;
+              return (
+                <Box sx={{ ml: 2, fontWeight: 'bold', color: 'text.secondary', minWidth: 120 }}>
+                  Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                </Box>
+              );
             })()}
           </Box>
           {/* Row 5: Amount Paid (EUR) & Equivalent Amount Paid (EUR to LYD) */}
@@ -456,15 +450,12 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             {(() => {
               const eurToLyd = Number(totals.amount_EUR_LYD);
               const eur = Number(totals.amount_EUR);
-             
-                const exRate = eurToLyd / eur;
-                return (
-                  <Box sx={{ ml: 2, fontWeight: 'bold', color: 'ActiveCaption', minWidth: 120 }}>
-                    Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
-                  </Box>
-                );
-           
-              return null;
+              const exRate = eurToLyd / eur;
+              return (
+                <Box sx={{ ml: 2, fontWeight: 'bold', color: 'text.secondary', minWidth: 120 }}>
+                  Ex. rate = {exRate.toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
+                </Box>
+              );
             })()}
           </Box>
 

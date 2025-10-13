@@ -28,7 +28,7 @@ const HRSettingsCards: React.FC = () => {
   const theme = useTheme();
   const { t } = useTranslation();
 
-  const accent = (theme.palette as any)?.gaja?.[500] ?? '#b7a27d';
+  const accent = (theme.palette as any)?.gaja?.[500] ?? theme.palette.text.primary;
 
   const cards = React.useMemo(
     () => [
@@ -133,11 +133,11 @@ const HRSettingsCards: React.FC = () => {
   return (
     <Box
       sx={{
-        width: '100%',
+        width: '95%',
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
         gap: 2,
-        pt: 5,
+        pt: 5
       }}
     >
       {cards.map((card, index) => (

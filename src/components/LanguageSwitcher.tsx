@@ -3,8 +3,8 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { IconButton, Tooltip, styled, Box } from '@mui/material';
 
 const PillIconButton = styled(IconButton)(({ theme }) => ({
-  // GAJA gold; fallback
-  color: (theme.palette as any)?.gaja?.[100] ?? '#b7a27d',
+  // Use theme accent: black (light) / white (dark)
+  color: (theme.palette as any)?.gaja?.[100] ?? theme.palette.text.primary,
   borderRadius: 999,
   height: 32,
   minWidth: 48,

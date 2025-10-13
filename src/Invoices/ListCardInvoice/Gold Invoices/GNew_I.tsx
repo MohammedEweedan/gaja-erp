@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import IconButton from '@mui/material/IconButton';
 import { useNavigate } from 'react-router-dom';
 import {
-    Box, Button, Typography, TextField
+    Box, Button, Typography, TextField, MenuItem
 } from '@mui/material';
 import CircularProgress from '@mui/material/CircularProgress';
 
@@ -337,7 +337,7 @@ type Sm = {
     Status: boolean;
 };
 
-const API_BASEImage = 'http://localhost:9000/images';
+const API_BASEImage = '/images';
 
 // Helper to fetch image as blob with auth
 const fetchImageWithAuth = async (url: string, token: string) => {
@@ -356,48 +356,48 @@ const fetchImageWithAuth = async (url: string, token: string) => {
 // Default type, can be changed based on your requirements;
 const DNew_I = () => {
 
-    const [images, setImages] = useState<Record<number, string[]>>({});
+    // const [images, setImages] = useState<Record<number, string[]>>({});
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
 
-    const fetchImages = async (id_achat: number) => {
-
+    const fetchImages = async (id_achat: number, kind?: 'diamond' | 'watch') => {
         const token = localStorage.getItem('token');
         if (!token || !id_achat) return;
-        try {
-
-
-
-
-            const res = await axios.get(`${API_BASEImage}/list/${id_achat}`, {
-                headers: { Authorization: `Bearer ${token}` },
-            }).then(
-                async (res) => {
-
-                    let urls: string[] = [];
-                    if (Array.isArray(res.data) && res.data.length > 0 && typeof res.data[0] === 'object') {
-                        urls = res.data.map((img: any) => img.url || img);
-                    } else {
-                        urls = res.data;
-                    }
-                    setImageUrls(prev => ({ ...prev, [id_achat]: urls })); // Store original URLs
-                    // Fetch all images as blobs with auth
-                    const blobUrls = await Promise.all(urls.map(url => fetchImageWithAuth(url, token)));
-                    setImages(prev => ({ ...prev, [id_achat]: blobUrls.filter((url): url is string => Boolean(url)) }));
-
-
-                }
-
-
-            );
-
-
-
-
-        } catch (err) {
-            // console.error('Error fetching images:', err);
-            //  setImages(prev => ({ ...prev, [id_achat]: [] }));
-            //  setImageUrls(prev => ({ ...prev, [id_achat]: [] }));
+        // Avoid refetch if already loaded (even empty array marks attempted)
+        if (imageUrls[id_achat]) return;
+        const tryEndpoints: string[] = [];
+        if (kind === 'diamond') {
+            tryEndpoints.push(`${API_BASEImage}/list/diamond/${id_achat}`);
+            tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`); // fallback
+        } else if (kind === 'watch') {
+            tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`);
+        } else {
+            // unknown type: attempt diamond then generic
+            tryEndpoints.push(`${API_BASEImage}/list/diamond/${id_achat}`);
+            tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`);
         }
+        for (const ep of tryEndpoints) {
+            try {
+                const res = await axios.get(ep, { headers: { Authorization: `Bearer ${token}` } });
+                let urls: string[] = [];
+                if (Array.isArray(res.data) && res.data.length > 0 && typeof res.data[0] === 'object') {
+                    urls = res.data.map((img: any) => img.url || img);
+                } else {
+                    urls = res.data;
+                }
+                // If we called diamond endpoint, prefer only DiamondPic images (filter) to avoid watch collisions
+                if (/\/diamond\//i.test(ep)) {
+                    urls = urls.filter(u => /DiamondPic/i.test(u));
+                }
+                setImageUrls(prev => ({ ...prev, [id_achat]: urls }));
+                // opportunistic auth fetch to warm cache
+                await Promise.all(urls.map(url => fetchImageWithAuth(url, token)));
+                return; // success stop
+            } catch (e) {
+                // continue to next endpoint
+            }
+        }
+        // mark as attempted with empty array to avoid loops
+        setImageUrls(prev => ({ ...prev, [id_achat]: [] }));
     };
 
 
@@ -428,7 +428,7 @@ const DNew_I = () => {
     const [customers, setCustomers] = useState<Client[]>([]);
 
     const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrlcustomers = `http://localhost:9000/customers`;
+    const apiUrlcustomers = `/customers`;
 
     const fetchCustomers = async () => {
         const token = localStorage.getItem('token');
@@ -446,7 +446,7 @@ const DNew_I = () => {
 
 
     const fetchSms = async () => {
-        const apiUrlsm = "http://localhost:9000/sm";
+        const apiUrlsm = "/sm";
         const token = localStorage.getItem('token');
         try {
             const res = await axios.get<Sm[]>(`${apiUrlsm}/all`, {
@@ -474,7 +474,48 @@ const DNew_I = () => {
 
 
     // Move typeFilter state above fetchData and useEffect
-    const [typeFilter, setTypeFilter] = useState<string>('');
+    const [typeFilter, setTypeFilter] = useState<string>('diamond');
+    // Cost range filter state
+    const [costMin, setCostMin] = useState<string>('');
+    const [costMax, setCostMax] = useState<string>('');
+    // Sidebar collapse state
+    const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+    // Brand filter state
+    const [brandFilter, setBrandFilter] = useState<string>('');
+    // Compute distinct brands from data
+    // Helper to get display brand name
+    function getBrandName(row: any): string {
+        // Try Fournisseur first
+        if (row.Fournisseur && typeof row.Fournisseur.client_name === 'string') return row.Fournisseur.client_name;
+        if (row.Fournisseur && typeof row.Fournisseur.brand_name === 'string') return row.Fournisseur.brand_name;
+        // Try diamond/watch objects
+        let dp = row.DistributionPurchase;
+        if (Array.isArray(dp) && dp.length > 0) {
+            const diamond = dp[0]?.OriginalAchatDiamond;
+            const watch = dp[0]?.OriginalAchatWatch;
+            if (diamond && typeof diamond.client_name === 'string') return diamond.client_name;
+            if (diamond && typeof diamond.brand_name === 'string') return diamond.brand_name;
+            if (watch && typeof watch.client_name === 'string') return watch.client_name;
+            if (watch && typeof watch.brand_name === 'string') return watch.brand_name;
+        } else if (dp && typeof dp === 'object') {
+            const diamond = dp.OriginalAchatDiamond;
+            const watch = dp.OriginalAchatWatch;
+            if (diamond && typeof diamond.client_name === 'string') return diamond.client_name;
+            if (diamond && typeof diamond.brand_name === 'string') return diamond.brand_name;
+            if (watch && typeof watch.client_name === 'string') return watch.client_name;
+            if (watch && typeof watch.brand_name === 'string') return watch.brand_name;
+        }
+        return '';
+    }
+
+    const distinctBrands = React.useMemo(() => {
+        const brands = new Set<string>();
+        data.forEach(row => {
+            const brand = getBrandName(row);
+            if (brand) brands.add(brand);
+        });
+        return Array.from(brands).sort();
+    }, [data]);
 
     const fetchData = useCallback(async (typeParam = typeFilter) => {
 
@@ -488,13 +529,13 @@ const DNew_I = () => {
         if (!token) return navigate("/");
 
         try {
-            const response = await axios.get<InventoryItem[]>("http://localhost:9000/Inventory/allActive", {
+            const response = await axios.get<InventoryItem[]>("/Inventory/allActive", {
                 headers: { Authorization: `Bearer ${token}` },
                 params: { ps, type_supplier: typeParam }
             });
             setData(response.data);
 
-
+ 
 
         } catch (error: any) {
             if (error.response?.status === 401) navigate("/");
@@ -505,12 +546,13 @@ const DNew_I = () => {
     }, [navigate, ps, typeFilter]);
 
     useEffect(() => {
-        fetchData();
+        fetchData('diamond');
         fetchDataINV();
         fetchCustomers();
         fetchSms();
-
-    }, [fetchData]);
+        // Intentionally not listing fetchCustomers/fetchSms/fetchDataINV since they are stable within this module
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
 
 
@@ -518,124 +560,110 @@ const DNew_I = () => {
 
     // Add state for image dialog and selected image
     const [imageDialogOpen, setImageDialogOpen] = useState(false);
-    const [selectedImage, setSelectedImage] = useState<string | null>(null);
+    // const [selectedImage, setSelectedImage] = useState<string | null>(null); // unused
     // New state for dialog image navigation
     const [dialogImageList, setDialogImageList] = useState<string[]>([]);
     const [dialogImageIndex, setDialogImageIndex] = useState(0);
 
     const handleViewImage = (row: InventoryItem) => {
-        // Find the image key for this row (id_achat or id_fact)
-        let imageKey: string | number | undefined = undefined;
-        let watch: any = undefined;
+        // Determine whether row has diamond or watch purchase to choose endpoint
         let dp: any = row.DistributionPurchase;
-        if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === 'object') {
-            watch = dp[0]?.OriginalAchatWatch;
-            imageKey = watch?.id_achat;
+        let diamond: any; let watch: any; let idAchat: any;
+        if (Array.isArray(dp) && dp.length > 0) {
+            diamond = dp[0]?.OriginalAchatDiamond; watch = dp[0]?.OriginalAchatWatch;
         } else if (dp && typeof dp === 'object') {
-            watch = dp?.OriginalAchatWatch;
-            imageKey = watch?.id_achat;
+            diamond = dp?.OriginalAchatDiamond; watch = dp?.OriginalAchatWatch;
         }
-        if (!imageKey) imageKey = row.id_fact;
-        const imageKeyStr = String(imageKey);
-        const urls = imageUrls[imageKeyStr] || [];
-        if (urls.length > 0) {
-            setSelectedImage(urls[0]);
-            setImageDialogOpen(true);
-            setDialogImageList(urls); // New: store all images for dialog navigation
-            setDialogImageIndex(0);
-        } else {
-            setSelectedImage(null);
-            setImageDialogOpen(true);
-            setDialogImageList([]);
-            setDialogImageIndex(0);
-        }
+        if (diamond?.id_achat) idAchat = diamond.id_achat; else if (watch?.id_achat) idAchat = watch.id_achat; else idAchat = row.id_fact;
+        const key = String(idAchat);
+        const urls = imageUrls[key] || [];
+        setDialogImageList(urls);
+        setDialogImageIndex(0);
+        setImageDialogOpen(true);
     };
 
     // Pagination state
     const [page, setPage] = useState(0);
-    const rowsPerPage = 6;
+    const [rowsPerPage, setRowsPerPage] = useState(3);
 
     // Add search state
     const [search, setSearch] = useState('');
 
-    // Filtered data based on search
+    // Filtered data based on search (matches all fields) and cost range
     const filteredData = data.filter(row => {
         const searchLower = search.trim().toLowerCase();
-        let referenceNumbers: string[] = [];
-        let serial_number: string[] = [];
-
-        let CODE_EXTERNAL: string[] = [];
-        const dp = row.DistributionPurchase;
-        if (Array.isArray(dp)) {
-            dp.forEach(item => {
-                if (item?.OriginalAchatWatch) {
-                    if (item.OriginalAchatWatch.reference_number) {
-                        referenceNumbers.push(item.OriginalAchatWatch.reference_number.toString().toLowerCase());
-                    }
-                    if (item.OriginalAchatWatch.DocumentNo) {
-                        serial_number.push(item.OriginalAchatWatch.DocumentNo.toString().toLowerCase());
-                    }
-                }
-                if (item?.OriginalAchatDiamond) {
-                    if (item.OriginalAchatDiamond.DocumentNo) {
-                        serial_number.push(item.OriginalAchatDiamond.DocumentNo.toString().toLowerCase());
-                    }
-                }
-            });
-        } else if (dp && typeof dp === 'object') {
-            // Type guard: ensure dp is not null and not an array
-            const dpObj = dp as Partial<DistributionPurchase>;
-            if (dpObj.OriginalAchatWatch) {
-                if (dpObj.OriginalAchatWatch.reference_number) {
-                    referenceNumbers.push(dpObj.OriginalAchatWatch.reference_number.toString().toLowerCase());
-                }
-                if (dpObj.OriginalAchatWatch.serial_number) {
-                    serial_number.push(dpObj.OriginalAchatWatch.serial_number.toString().toLowerCase());
-                }
-            }
-            if (dpObj.OriginalAchatDiamond) {
-                if (dpObj.OriginalAchatDiamond.CODE_EXTERNAL) {
-                    CODE_EXTERNAL.push(dpObj.OriginalAchatDiamond.CODE_EXTERNAL.toString().toLowerCase());
-                }
+        // Cost filter logic: check top-level and nested price fields
+        let cost = 0;
+        if (typeof row.Cost_Currency === 'number' && row.Cost_Currency > 0) cost = row.Cost_Currency;
+        else if (typeof row.Selling_Price_Currency === 'number' && row.Selling_Price_Currency > 0) cost = row.Selling_Price_Currency;
+        else {
+            // Check nested diamond/watch price fields
+            let dp = row.DistributionPurchase;
+            if (Array.isArray(dp) && dp.length > 0) {
+                const diamond = dp[0]?.OriginalAchatDiamond;
+                const watch = dp[0]?.OriginalAchatWatch;
+                if (diamond && typeof diamond.sale_price === 'number' && diamond.sale_price > 0) cost = diamond.sale_price;
+                else if (watch && typeof watch.sale_price === 'number' && watch.sale_price > 0) cost = watch.sale_price;
+            } else if (dp && typeof dp === 'object') {
+                const diamond = (dp as any).OriginalAchatDiamond;
+                const watch = (dp as any).OriginalAchatWatch;
+                if (diamond && typeof diamond.sale_price === 'number' && diamond.sale_price > 0) cost = diamond.sale_price;
+                else if (watch && typeof watch.sale_price === 'number' && watch.sale_price > 0) cost = watch.sale_price;
             }
         }
-        return (
-            searchLower === '' ||
-            (row.Design_art?.toLowerCase().includes(searchLower)) ||
-            (row.Fournisseur?.client_name?.toLowerCase().includes(searchLower)) ||
-            (row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes(searchLower)) ||
-            (row.id_fact?.toString().includes(searchLower)) ||
-            referenceNumbers.some(ref => ref.includes(searchLower)) ||
-            serial_number.some(doc => doc.includes(searchLower))
-        ) &&
-            (typeFilter === '' || (row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes(typeFilter)));
+        let min = costMin ? Number(costMin) : null;
+        let max = costMax ? Number(costMax) : null;
+        const costOk = (min === null || cost >= min) && (max === null || cost <= max);
+
+        // Type filter logic
+        const typeOk = typeFilter === '' || (row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes(typeFilter));
+
+        // Brand filter logic
+        const brandValue = getBrandName(row).toLowerCase();
+        const brandOk = brandFilter === '' || brandValue.includes(brandFilter.toLowerCase());
+
+        if (!searchLower) return typeOk && costOk && brandOk;
+
+        // Recursively flatten all values in the row object
+        function flattenValues(obj: any): string[] {
+            let values: string[] = [];
+            if (obj == null) return values;
+            if (typeof obj === 'object') {
+                for (const key in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                        values = values.concat(flattenValues(obj[key]));
+                    }
+                }
+            } else {
+                values.push(String(obj));
+            }
+            return values;
+        }
+
+        const allValues = flattenValues(row).map(v => v.toLowerCase());
+        return allValues.some(v => v.includes(searchLower)) && typeOk && costOk && brandOk;
     });
 
     const paginatedData = filteredData.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
     // Fetch images for current page and datainv (cart)
     useEffect(() => {
-        // Track which ids have been requested in this render
         const requested = new Set<string>();
         paginatedData.forEach(row => {
-            let watch: any = undefined;
             let dp: any = row.DistributionPurchase;
-            if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === 'object') {
-                watch = dp[0]?.OriginalAchatWatch;
-            } else if (dp && typeof dp === 'object') {
-                watch = dp?.OriginalAchatWatch;
-            }
-            const id_achat = watch && watch.id_achat ? watch.id_achat : null;
-            const idStr = String(id_achat);
-            if (id_achat && imageUrls[idStr] === undefined && !requested.has(idStr)) {
-                fetchImages(id_achat);
-                requested.add(idStr);
+            let diamond: any; let watch: any;
+            if (Array.isArray(dp) && dp.length > 0) { diamond = dp[0]?.OriginalAchatDiamond; watch = dp[0]?.OriginalAchatWatch; }
+            else if (dp && typeof dp === 'object') { diamond = dp?.OriginalAchatDiamond; watch = dp?.OriginalAchatWatch; }
+            const id_achat: number | null = diamond?.id_achat || watch?.id_achat || null;
+            const kind: 'diamond' | 'watch' | undefined = diamond?.id_achat ? 'diamond' : (watch?.id_achat ? 'watch' : undefined);
+            if (id_achat) {
+                const key = String(id_achat);
+                if (imageUrls[key] === undefined && !requested.has(key)) { fetchImages(id_achat, kind); requested.add(key); }
             }
         });
         datainv.forEach(inv => {
-            const idStr = String(inv.picint);
-            if (inv.picint && imageUrls[idStr] === undefined && !requested.has(idStr)) {
-                fetchImages(inv.picint);
-                requested.add(idStr);
+            if (inv.picint) {
+                const key = String(inv.picint);
+                if (imageUrls[key] === undefined && !requested.has(key)) { fetchImages(inv.picint); requested.add(key); }
             }
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -699,9 +727,12 @@ const DNew_I = () => {
                     } else if (dp && typeof dp === 'object') {
                         diamond = dp?.OriginalAchatDiamond;
                     }
-                    prix_vente = diamond && typeof diamond.sale_price === 'number' ? diamond.sale_price : 0;
-
-                    editInvoice.picint = diamond.id_achat;
+                    if (diamond) {
+                        if (typeof diamond.sale_price === 'number') prix_vente = diamond.sale_price;
+                        else if (typeof diamond.SellingPrice === 'number') prix_vente = diamond.SellingPrice; // fallback
+                        else prix_vente = 0;
+                        editInvoice.picint = diamond.id_achat;
+                    }
 
                 } else if (type.includes('watch')) {
                     let watch: any = undefined;
@@ -711,9 +742,12 @@ const DNew_I = () => {
                     } else if (dp && typeof dp === 'object') {
                         watch = dp?.OriginalAchatWatch;
                     }
-                    prix_vente = watch && typeof watch.sale_price === 'number' ? watch.sale_price : 0;
-
-                    editInvoice.picint = watch.id_achat;
+                    if (watch) {
+                        if (typeof watch.sale_price === 'number') prix_vente = watch.sale_price;
+                        else if (typeof watch.SellingPrice === 'number') prix_vente = watch.SellingPrice; // fallback
+                        else prix_vente = 0;
+                        editInvoice.picint = watch.id_achat;
+                    }
                 } else if (type.includes('gold')) {
 
 
@@ -876,7 +910,6 @@ const DNew_I = () => {
 
         setEditDialogItem(item);
         setEditDialogRemise(item.total_remise ?? 0);
-        setEditDialogIS_Gift(item.IS_GIFT ?? false);
         setEditDialogOpen(true);
 
     };
@@ -967,15 +1000,11 @@ const DNew_I = () => {
         try {
 
 
-            const response = await fetch(`${apiUrlinv}/NewNF?ps=${ps}&usr=${Cuser}`, {
-
-                //  const response = await fetch(`${apiUrl}/NewNF`, {
+            const { data, status } = await axios.get(`${apiUrlinv}/NewNF`, {
                 headers: { Authorization: `Bearer ${token}` },
+                params: { ps, usr: Cuser }
             });
-            if (!response.ok) throw new Error("Failed to fetch new invoice number");
-
-            const result = await response.json();
-            let newNumFact = result.new_num_fact;
+            if (status !== 200) throw new Error("Failed to fetch new invoice number");
 
             // Update num_fact for all items in datainv to newNumFact
             setDatainv(prev =>
@@ -1115,7 +1144,7 @@ const DNew_I = () => {
     const [editDialogItem, setEditDialogItem] = useState<Invoice | null>(null);
     const [editDialogRemise, setEditDialogRemise] = useState<number>(0);
 
-    const [editDialogIS_Gift, setEditDialogIS_Gift] = useState<boolean>(false);
+    // const [editDialogIS_Gift, setEditDialogIS_Gift] = useState<boolean>(false);
     // Handler for saving the edited remise
     const handleEditDialogSave = async () => {
         if (!editDialogItem) return;
@@ -1170,7 +1199,7 @@ const DNew_I = () => {
 
 
 
-    const [hiddenIds, setHiddenIds] = useState<number[]>([]); // Track hidden items
+    const [hiddenIds] = useState<number[]>([]); // Track hidden items
 
     // Calculate final total after discount for each currency type
     function getFinalTotal(items: any[], currencyType: string) {
@@ -1277,12 +1306,14 @@ const DNew_I = () => {
             {/* Cards Grid */}
 
             <Box sx={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
-                <Box sx={{ width: '15%', minWidth: 200, mr: 2 }}>
+                <Box sx={{ width: sidebarCollapsed ? '60px' : '13%', minWidth: sidebarCollapsed ? 60 : 160, mr: 2, transition: 'width 0.3s' }}>
                     {/* Left Sidebar Filter */}
-                    <Typography variant="h6" sx={{ mb: 2, fontWeight: 700 }}>Filter by Type</Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2 }}>
-                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, mb: 1 }}>
-
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 700 }}>Filter by Type</Typography>
+                        
+                    </Box>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2, mb: 1 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5, mb: 0.5 }}>
                             <Button
                                 variant={typeFilter === 'gold' ? 'contained' : 'outlined'}
                                 size="small"
@@ -1291,13 +1322,13 @@ const DNew_I = () => {
                                     setTypeFilter('gold');
                                     fetchData('gold');
                                 }}
-                                sx={{ textTransform: 'none', borderRadius: 2, display: 'flex', alignItems: 'center', flex: 1 }}
-                                startIcon={<span role="img" aria-label="Gold">🥇</span>}
+                                sx={{ textTransform: 'none', borderRadius: 1, display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, fontSize: 12, px: 1, py: 0.5 }}
+                                startIcon={<span role="img" aria-label="Gold" style={{ fontSize: 14 }}>🥇</span>}
                             >
                                 Gold
                             </Button>
                         </Box>
-                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, mb: 2 }}>
+                        <Box sx={{ display: 'flex', flexDirection: 'row', gap: 0.5, mb: 0.5 }}>
                             <Button
                                 variant={typeFilter === 'diamond' ? 'contained' : 'outlined'}
                                 color="inherit"
@@ -1306,8 +1337,8 @@ const DNew_I = () => {
                                     setTypeFilter('diamond');
                                     fetchData('diamond');
                                 }}
-                                sx={{ textTransform: 'none', borderRadius: 2, display: 'flex', alignItems: 'center', flex: 1 }}
-                                startIcon={<span role="img" aria-label="Diamond">💎</span>}
+                                sx={{ textTransform: 'none', borderRadius: 1, display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, fontSize: 12, px: 1, py: 0.5 }}
+                                startIcon={<span role="img" aria-label="Diamond" style={{ fontSize: 14 }}>💎</span>}
                             >
                                 Diamond
                             </Button>
@@ -1319,12 +1350,96 @@ const DNew_I = () => {
                                     setTypeFilter('watch');
                                     fetchData('watch');
                                 }}
-                                sx={{ textTransform: 'none', borderRadius: 2, display: 'flex', alignItems: 'center', flex: 1 }}
-                                startIcon={<span role="img" aria-label="Watch">⌚</span>}
+                                sx={{ textTransform: 'none', borderRadius: 1, display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, fontSize: 12, px: 1, py: 0.5 }}
+                                startIcon={<span role="img" aria-label="Watch" style={{ fontSize: 14 }}>⌚</span>}
                             >
                                 Watch
                             </Button>
                         </Box>
+                        {/* Cost Range Filter */}
+                        <Box sx={theme => ({
+                            display: 'flex', flexDirection: 'column', gap: 0.5, bgcolor: theme.palette.mode === 'dark' ? '#222' : '#f5f5f5', borderRadius: 1, p: 1, boxShadow: theme.palette.mode === 'dark' ? '0 1px 8px rgba(0,0,0,0.18)' : '0 1px 8px rgba(0,0,0,0.07)',
+                        })}>
+                            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, fontSize: 13 }}>Filter by Cost</Typography>
+                            <Box sx={{ display: 'flex', flexDirection: 'row', gap: 1, alignItems: 'center', width: '100%' }}>
+                                <input
+                                    type="number"
+                                    value={costMin}
+                                    onChange={e => setCostMin(e.target.value)}
+                                    placeholder="Min"
+                                    style={{
+                                        width: '45%',
+                                        minWidth: 60,
+                                        maxWidth: 120,
+                                        padding: '6px 10px',
+                                        borderRadius: 4,
+                                        border: '1px solid #ccc',
+                                        fontSize: 14,
+                                        background: 'inherit',
+                                        color: 'inherit',
+                                        boxSizing: 'border-box',
+                                        transition: 'width 0.3s',
+                                    }}
+                                />
+                                <Typography variant="body2" sx={{ fontSize: 13, minWidth: 18, textAlign: 'center' }}>to</Typography>
+                                <input
+                                    type="number"
+                                    value={costMax}
+                                    onChange={e => setCostMax(e.target.value)}
+                                    placeholder="Max"
+                                    style={{
+                                        width: '45%',
+                                        minWidth: 60,
+                                        maxWidth: 120,
+                                        padding: '6px 10px',
+                                        borderRadius: 4,
+                                        border: '1px solid #ccc',
+                                        fontSize: 14,
+                                        background: 'inherit',
+                                        color: 'inherit',
+                                        boxSizing: 'border-box',
+                                        transition: 'width 0.3s',
+                                    }}
+                                />
+                            </Box>
+                        </Box>
+                        {/* Brand Filter Dropdown */}
+                        <Box sx={theme => ({
+                            display: 'flex', flexDirection: 'column', gap: 0.5, bgcolor: theme.palette.mode === 'dark' ? '#222' : '#f5f5f5', borderRadius: 1, p: 1, boxShadow: theme.palette.mode === 'dark' ? '0 1px 8px rgba(0,0,0,0.18)' : '0 1px 8px rgba(0,0,0,0.07)',
+                        })}>
+                            <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5, fontSize: 13 }}>Filter by Brand</Typography>
+                            <TextField
+                                select
+                                value={brandFilter}
+                                onChange={e => setBrandFilter(e.target.value)}
+                                placeholder="Select Brand"
+                                size="small"
+                                variant="outlined"
+                                sx={{ width: '100%', bgcolor: 'inherit', borderRadius: 1, fontSize: 12 }}
+                                SelectProps={{ native: false }}
+                            >
+                                <MenuItem value="" sx={{ fontSize: 12 }}>All Brands</MenuItem>
+                                {distinctBrands.map(brand => (
+                                    <MenuItem key={brand} value={brand} sx={{ fontSize: 12 }}>{brand}</MenuItem>
+                                ))}
+                            </TextField>
+                        </Box>
+                        {/* Reset Filter Button */}
+                        <Button
+                            variant="contained"
+                            color="primary"
+                            size="small"
+                            sx={{ mt: 2, fontWeight: 700, borderRadius: 1, boxShadow: 1, fontSize: 12, py: 0.5, px: 1.5 }}
+                            onClick={() => {
+                                setTypeFilter('');
+                                setCostMin('');
+                                setCostMax('');
+                                setSearch('');
+                                setBrandFilter('');
+                            }}
+                        >
+                            Reset Filter
+                        </Button>
                     </Box>
                 </Box>
                 <Box sx={{ flex: 1, mr: 2 }}>
@@ -1337,7 +1452,7 @@ const DNew_I = () => {
                             value={search}
                             onChange={e => { setSearch(e.target.value); setPage(0); }}
                             InputProps={{
-                                startAdornment: <Search color="action" sx={{ mr: 1 }} />,
+                                startAdornment: <Search color="action" sx={{ mr: 1 }} />, 
                                 style: {
                                     background: 'transparent',
                                     fontSize: 16,
@@ -1349,7 +1464,8 @@ const DNew_I = () => {
                     </Box>
                     <Box sx={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr',   }}>
+                        gridTemplateColumns: '1fr',
+                    }}>
                         {loading ? (
                             <Box sx={{ gridColumn: '1/-1', textAlign: 'center', py: 6 }}>
                                 <Typography variant="h6" color="text.secondary" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
@@ -1358,21 +1474,23 @@ const DNew_I = () => {
                                 </Typography>
                             </Box>
                         ) : (
-                            paginatedData.filter(row => !hiddenIds.includes(row.id_fact)).map((row) => (
-                                <Box
-                                    key={row.id_fact}
-                                    sx={{
-                                        borderRadius: 2,
-                                        pr: 2,
-                                        display: 'flex',
-                                        flexDirection: 'row',
-                                        minHeight: 200,
-                                        border: '1px solid #e0e0e0',
-                                        alignItems: 'center',
-                                        justifyContent: 'flex-start',
-                                        gap: 1,
-                                    }}
-                                >
+                            <>
+                                {paginatedData.filter(row => !hiddenIds.includes(row.id_fact)).map((row) => (
+                                    <Box
+                                        key={row.id_fact}
+                                        sx={{
+                                            borderRadius: 2,
+                                            pr: 2,
+                                            display: 'flex',
+                                            flexDirection: 'row',
+                                            minHeight: 200,
+                                            border: '1px solid #e0e0e0',
+                                            alignItems: 'center',
+                                            justifyContent: 'flex-start',
+                                            gap: 1,
+                                            mb:1
+                                        }}
+                                    >
 
                                     <Box
                                         sx={{
@@ -1385,6 +1503,9 @@ const DNew_I = () => {
                                             overflow: 'hidden',
                                             position: 'relative',
                                             mr: 1,
+
+                                             
+                                            
                                         }}
                                     >
                                         {(() => {
@@ -1393,14 +1514,11 @@ const DNew_I = () => {
 
                                             // Robustly determine imageKey for this row
                                             let imageKey: string | number | undefined = undefined;
-                                            let watch: any = undefined;
-                                            let dp: any = row.DistributionPurchase;
+                                            let watch: any = undefined; let diamond: any = undefined; let dp: any = row.DistributionPurchase;
                                             if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === 'object') {
-                                                watch = dp[0]?.OriginalAchatWatch;
-                                                imageKey = watch?.id_achat;
+                                                diamond = dp[0]?.OriginalAchatDiamond; watch = dp[0]?.OriginalAchatWatch; imageKey = diamond?.id_achat || watch?.id_achat;
                                             } else if (dp && typeof dp === 'object') {
-                                                watch = dp?.OriginalAchatWatch;
-                                                imageKey = watch?.id_achat;
+                                                diamond = dp?.OriginalAchatDiamond; watch = dp?.OriginalAchatWatch; imageKey = diamond?.id_achat || watch?.id_achat;
                                             }
                                             // Fallback to row.id_fact if imageKey is falsy
                                             if (!imageKey) imageKey = row.id_fact;
@@ -1499,7 +1617,7 @@ const DNew_I = () => {
                                             {row.Fournisseur?.TYPE_SUPPLIER && !row.Fournisseur.TYPE_SUPPLIER.toLowerCase().includes('gold')}
                                         </Typography>
 
-                                        <Typography variant="body2" sx={{ whiteSpace: 'pre-line', fontSize: 13, color: 'inherit' }}>
+                                        <Typography variant="body2" sx={{ whiteSpace: 'pre-line', fontSize: 13, color: 'inherit', '& b': { color: 'text.secondary', fontWeight: 700 } }}>
 
 
                                             <b>ID:</b> {row.id_fact} |   {row.Design_art} | <b>Brand:</b> {row.Fournisseur?.client_name}
@@ -1559,20 +1677,27 @@ const DNew_I = () => {
                                                         {diamond.fluorescence && ` | `}<b>Fluorescence:</b> {diamond.fluorescence ?? '-'}
                                                         {diamond.certificate_number && ` | `}<b>Certificate Number:</b> {diamond.certificate_number ?? '-'}
                                                         {diamond.certificate_lab && ` | `}<b>Certificate Lab:</b> {diamond.certificate_lab ?? '-'}
-                                                        {diamond.certificate_url && ` | `}<b>Certificate URL:</b> <a href={diamond.certificate_url} target="_blank" rel="noopener noreferrer">Link</a>
+                                                        {diamond.certificate_url && ` | `}<b>Certificate URL:</b> <a href={diamond.certificate_url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>Link</a>
                                                         {diamond.laser_inscription && ` | `}<b>Laser Inscription:</b> {diamond.laser_inscription ?? '-'}
                                                         {diamond.origin_country && ` | `}<b>Origin Country:</b> {diamond.origin_country ?? '-'}
                                                         {diamond.DocumentNo && ` | `}<b>Document No:</b> {diamond.DocumentNo ?? '-'}
                                                         {diamond.CODE_EXTERNAL && ` | `}<b>External Code:</b> {diamond.CODE_EXTERNAL ?? '-'}
-                                                        {/* Always show sale_price if present, even if 0 */}
-                                                        {'sale_price' in diamond && (
-                                                            <div style={{ color: 'inherit', fontWeight: 900, marginTop: 2, fontSize: 18 }}>
-                                                                {diamond.sale_price !== undefined && diamond.sale_price !== null
-                                                                    ? diamond.sale_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                                                    : '-'}
-                                                                <sup style={{ fontSize: 12, marginLeft: 2 }}>USD</sup>
-                                                            </div>
-                                                        )}
+                                                        {/* Show diamond sale price: prefer sale_price, else SellingPrice (both may be 0) */}
+                                                        {(() => {
+                                                            let show = false;
+                                                            let val: any = null;
+                                                            if ('sale_price' in diamond) { show = true; val = diamond.sale_price; }
+                                                            else if ('SellingPrice' in diamond) { show = true; val = diamond.SellingPrice; }
+                                                            if (!show) return null;
+                                                            return (
+                                                                <div style={{ color: 'inherit', fontWeight: 900, marginTop: 2, fontSize: 18 }}>
+                                                                    {val !== undefined && val !== null
+                                                                        ? Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                                        : '-'}
+                                                                    <sup style={{ fontSize: 12, marginLeft: 2 }}>USD</sup>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </>
                                                 );
                                             })()}
@@ -1618,7 +1743,7 @@ const DNew_I = () => {
                                                                 { key: 'water_resistance', label: 'Water Resistance' },
                                                                 { key: 'functions', label: 'Functions' },
                                                                 { key: 'power_reserve', label: 'Power Reserve' },
-                                                                { key: 'common_local_brand', label: 'Local Brand' },
+                                                                { key: 'common_local_brand', label: 'Nickname' },
                                                             ];
                                                             return fields.map(f => {
                                                                 const val = watch[f.key];
@@ -1630,15 +1755,21 @@ const DNew_I = () => {
                                                         {typeof watch.box_papers !== 'undefined' && watch.box_papers !== null ? <> | <b>Box/Papers:</b> {watch.box_papers ? 'Yes' : 'No'}</> : null}
                                                         {/* Warranty */}
                                                         {watch.warranty ? <> | <b>Warranty:</b> {watch.warranty}</> : null}
-                                                        {/* Sale price */}
-                                                        {'sale_price' in watch ? (
-                                                            <div style={{ color: 'inherit', fontWeight: 900, marginTop: 2, fontSize: 18 }}>
-                                                                {watch.sale_price !== undefined && watch.sale_price !== null
-                                                                    ? watch.sale_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                                                                    : '-'}
-                                                                <sup style={{ fontSize: 12, marginLeft: 2 }}>USD</sup>
-                                                            </div>
-                                                        ) : null}
+                                                        {/* Watch sale price: prefer sale_price, else SellingPrice */}
+                                                        {(() => {
+                                                            let show = false; let val: any = null;
+                                                            if ('sale_price' in watch) { show = true; val = watch.sale_price; }
+                                                            else if ('SellingPrice' in watch) { show = true; val = watch.SellingPrice; }
+                                                            if (!show) return null;
+                                                            return (
+                                                                <div style={{ color: 'inherit', fontWeight: 900, marginTop: 2, fontSize: 18 }}>
+                                                                    {val !== undefined && val !== null
+                                                                        ? Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                                                        : '-'}
+                                                                    <sup style={{ fontSize: 12, marginLeft: 2 }}>USD</sup>
+                                                                </div>
+                                                            );
+                                                        })()}
                                                     </>
                                                 );
                                             })()}
@@ -1660,7 +1791,89 @@ const DNew_I = () => {
                                         </Button>
                                     </Box>
                                 </Box>
-                            ))
+                                ))}
+                                {/* Footer: Rows per page selector */}
+                                <Box
+                                    sx={theme => ({
+                                        display: 'flex',
+                                        flexDirection: { xs: 'column', sm: 'row' },
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        mt: 2,
+                                        mb: 1,
+                                        gap: 2,
+                                        flexWrap: 'wrap',
+                                        bgcolor: theme.palette.mode === 'dark' ? '#222' : '#fafafa',
+                                        borderRadius: 2,
+                                        boxShadow: theme.palette.mode === 'dark' ? '0 1px 8px rgba(0,0,0,0.25)' : '0 1px 8px rgba(0,0,0,0.07)',
+                                        p: { xs: 1, sm: 2 },
+                                    })}
+                                >
+                                    <Typography variant="body2" sx={theme => ({ fontWeight: 600, color: theme.palette.text.primary })}>
+                                        Total rows: {filteredData.length}
+                                    </Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                                        <Typography variant="body2" sx={theme => ({ mr: 1, fontWeight: 600, color: theme.palette.text.primary })}>Rows per page:</Typography>
+                                        <Box sx={{ minWidth: 100 }}>
+                                            <select
+                                                value={rowsPerPage}
+                                                onChange={e => { setRowsPerPage(Number(e.target.value)); setPage(0); }}
+                                                style={{
+                                                    padding: '8px 18px',
+                                                    borderRadius: 8,
+                                                    border: '1px solid #e0e0e0',
+                                                    fontSize: 15,
+                                                    background: 'inherit',
+                                                    fontWeight: 500,
+                                                    color: 'inherit',
+                                                    boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                                                    outline: 'none',
+                                                    transition: 'border 0.2s',
+                                                }}
+                                            >
+                                                <option value={6}>3</option>
+                                                <option value={10}>10</option>
+                                                <option value={20}>20</option>
+                                            </select>
+                                        </Box>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 2, flexWrap: 'wrap' }}>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => setPage(0)}
+                                                disabled={page === 0}
+                                                sx={theme => ({ borderRadius: 2, bgcolor: page === 0 ? (theme.palette.mode === 'dark' ? '#333' : '#eee') : 'inherit', border: '1px solid #e0e0e0', color: theme.palette.text.primary })}
+                                            >
+                                                <span style={{ fontSize: 18, fontWeight: 700 }}>&#8676;</span>
+                                            </IconButton>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => setPage(prev => Math.max(prev - 1, 0))}
+                                                disabled={page === 0}
+                                                sx={theme => ({ borderRadius: 2, bgcolor: page === 0 ? (theme.palette.mode === 'dark' ? '#333' : '#eee') : 'inherit', border: '1px solid #e0e0e0', color: theme.palette.text.primary })}
+                                            >
+                                                <span style={{ fontSize: 18, fontWeight: 700 }}>&larr;</span>
+                                            </IconButton>
+                                            <Typography variant="body2" sx={theme => ({ minWidth: 32, textAlign: 'center', fontWeight: 600, color: theme.palette.text.primary })}>{page + 1}</Typography>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => setPage(prev => (prev + 1 < Math.ceil(filteredData.length / rowsPerPage) ? prev + 1 : prev))}
+                                                disabled={page + 1 >= Math.ceil(filteredData.length / rowsPerPage)}
+                                                sx={theme => ({ borderRadius: 2, bgcolor: page + 1 >= Math.ceil(filteredData.length / rowsPerPage) ? (theme.palette.mode === 'dark' ? '#333' : '#eee') : 'inherit', border: '1px solid #e0e0e0', color: theme.palette.text.primary })}
+                                            >
+                                                <span style={{ fontSize: 18, fontWeight: 700 }}>&rarr;</span>
+                                            </IconButton>
+                                            <IconButton
+                                                size="small"
+                                                onClick={() => setPage(Math.max(Math.ceil(filteredData.length / rowsPerPage) - 1, 0))}
+                                                disabled={page + 1 >= Math.ceil(filteredData.length / rowsPerPage)}
+                                                sx={theme => ({ borderRadius: 2, bgcolor: page + 1 >= Math.ceil(filteredData.length / rowsPerPage) ? (theme.palette.mode === 'dark' ? '#333' : '#eee') : 'inherit', border: '1px solid #e0e0e0', color: theme.palette.text.primary })}
+                                            >
+                                                <span style={{ fontSize: 18, fontWeight: 700 }}>&#8677;</span>
+                                            </IconButton>
+                                        </Box>
+                                    </Box>
+                                </Box>
+                            </>
                         )}
                     </Box>
                 </Box>
@@ -1793,7 +2006,7 @@ const DNew_I = () => {
                                             </Box>
 
 
-                                            <Typography variant="body2" color="success.main" sx={{ fontWeight: 700 }}>
+                                            <Typography variant="body2" sx={{ fontWeight: 'bold', color: typeSupplier.toLowerCase().includes('gold') ? 'goldenrod' : 'deepskyblue', fontSize: 16, letterSpacing: 0.5 }}>
                                                 {item.total_remise ?
                                                     (typeSupplier.toLowerCase().includes('gold')
                                                         ? `${item.total_remise.toLocaleString('en-LY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} LYD`

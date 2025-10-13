@@ -1,6 +1,6 @@
 // GPurchase.tsx
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from "../../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -175,9 +175,8 @@ const GPurchase = (props: Props) => {
         Cuser = localStorage.getItem('Cuser');
     }
 
-    const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrl = `${apiIp}/purchases`;
-
+     
+    
     const showSnackbar = (message: string, severity: SnackbarState['severity']) => {
         setSnackbar({ open: true, message, severity });
     };
@@ -208,7 +207,7 @@ const GPurchase = (props: Props) => {
                 });
             }, 300);
 
-            const res = await axios.get<Purchase[]>(`${apiUrl}/all`, {
+            const res = await axios.get<Purchase[]>(`/purchases/all`, {
                 headers: { Authorization: `Bearer ${token}` },
                 params: {
                     ps,
@@ -231,7 +230,8 @@ const GPurchase = (props: Props) => {
             if (err.response?.status === 401) {
                 navigate("/");
             } else {
-                showSnackbar("Error loading data", 'error');
+                 showSnackbar(err, 'error');
+                showSnackbar("Error loading data...", 'error');
             }
         } finally {
             setLoading(false);
@@ -240,7 +240,7 @@ const GPurchase = (props: Props) => {
     }, [navigate, ps]);
 
     const fetchSuppliers = useCallback(async () => {
-        const apiUrlsuppliers = `${apiIp}/suppliers`;
+        const apiUrlsuppliers = `/suppliers`;
         const token = localStorage.getItem('token');
         try {
             setLoadingSuppliers(true);
@@ -249,7 +249,7 @@ const GPurchase = (props: Props) => {
             });
             setSuppliers(res.data);
         } catch (error) {
-            console.error("Error fetching suppliers:", error);
+         
             showSnackbar("Error fetching suppliers", 'error');
         } finally {
             setLoadingSuppliers(false);
@@ -270,7 +270,7 @@ const GPurchase = (props: Props) => {
             else if (Type === 'watches') type = 'Watche Purchase';
             else type = 'boxes Purchase';
             try {
-                const res = await axios.get(`${apiIp}/Dpurchases/not-received`, {
+                const res = await axios.get(`/Dpurchases/not-received`, {
                     headers: { Authorization: `Bearer ${token}` },
                     params: { type }
                 });
@@ -280,7 +280,7 @@ const GPurchase = (props: Props) => {
                 );
 
 
-               console.log("Not received distributions:",ps,  (res.data || []).filter((dist: any) => dist.ps === ps));
+ 
             } catch (err) {
                 setNotReceivedDistributions([]);
             }
@@ -334,7 +334,7 @@ const GPurchase = (props: Props) => {
     const handleAddNew = async () => {
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch(`${apiIp}/purchases/NewNF`, {
+            const response = await fetch(`/purchases/NewNF`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
              if (!response.ok) throw new Error("Failed to fetch new purchase number");
@@ -484,46 +484,90 @@ const GPurchase = (props: Props) => {
 
     const handleMarkReceived = async (distribution: any) => {
        
-            const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token');
+        try {
+            // Debug: log the distribution object
+           
+            // 1. Check if purchase with original_invoice exists
+            let res, purchases;
+
+
+        
             try {
-                // 1. Check if purchase with original_invoice exists
-                const res = await axios.get(`${apiIp}/purchases/findByOriginalInvoice`, {
+
+
+               
+                res = await axios.get(`/purchases/findByOriginalInvoice`, {
                     headers: { Authorization: `Bearer ${token}` },
                     params: { original_invoice: distribution.distributionID }
                 });
-                const purchases = res.data || [];
-                if (purchases.length > 0) {
-                    // 2. If exists, show the purchase (edit mode)
-                    const purchase = { ...purchases[0], Original_Invoice: distribution.distributionID };
-                    setEditPurchase(purchase);
-                    setIsEditMode(true);
-                    setShowPurchaseForm(true);
-                    setSelectedInvoiceNum(purchase.num_fact);
-                    setDistributionToReceive(distribution); // <-- Ensure this is set for referencePurchase
-                } else {
-                    // 3. Else, create new purchase as before
-                    const response = await fetch(`${apiIp}/purchases/NewNF`, {
-                        headers: { Authorization: `Bearer ${token}` },
-                    });
-                    if (!response.ok) throw new Error("Failed to fetch new purchase number");
-                    const result = await response.json();
-                    const newNumFact = result.new_num_fact;
-
-                    setEditPurchase({
-                        ...initialPurchaseState,
-                        num_fact: newNumFact,
-                        usr:Number( Cuser),
-                        ps: Number(ps),
-                        date_fact: new Date().toISOString().split('T')[0],
-                        Original_Invoice: distribution.distributionID
-                    });
-                    setDistributionToReceive(distribution);
-                    setShowPurchaseForm(true);
-                    setSelectedInvoiceNum(newNumFact);
+                // Debug: log the API response
+                
+                // If backend returns HTML, show error
+                if (typeof res.data === 'string' && res.data.trim().startsWith('<!DOCTYPE')) {
+                    showSnackbar('Server error: Received HTML instead of data. Please contact support.', 'error');
+                    return;
                 }
-            } catch (error) {
-                showSnackbar("Failed to process distribution", 'error');
+                purchases = res.data || [];
+
+
+               
+
+            } catch (err) {
+                console.error('Error fetching invoice data:', err);
+                showSnackbar('Failed to fetch invoice data. Please check your connection or contact support.', 'error');
+                return;
             }
+
+
+              
+            if (purchases.length > 0) {
+              
+                // 2. If exists, show the purchase (edit mode)
+                const purchase = { ...purchases[0], Original_Invoice: distribution.distributionID };
+                setEditPurchase(purchase);
+                setIsEditMode(true);
+                setShowPurchaseForm(true);
+                setSelectedInvoiceNum(purchase.num_fact);
+                setDistributionToReceive(distribution); // <-- Ensure this is set for referencePurchase
+            } else {
+                 
+                // 3. Else, create new purchase as before
+                const response = await axios.get(`/purchases/NewNF`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+
+                // Axios returns data directly, no need for .json()
+                const result = response.data;
+
+
+                const newNumFact = result.new_num_fact;
+
+
+
+              
+
+
+
+                setEditPurchase({
+                    ...initialPurchaseState,
+                    num_fact: newNumFact,
+                    usr: Number(Cuser),
+                    ps: Number(ps),
+                    date_fact: new Date().toISOString().split('T')[0],
+                    Original_Invoice: distribution.distributionID
+                });
+                setDistributionToReceive(distribution);
+                setShowPurchaseForm(true);
+                setSelectedInvoiceNum(newNumFact);
+            }
+
+
+
+        } catch (error) {
+            console.error("Error processing distribution:", error);
+            showSnackbar("Failed to process distribution", 'error');
+        }
         
        
 
@@ -537,7 +581,7 @@ const GPurchase = (props: Props) => {
             await Promise.all(
                 notReceivedDistributions.map(async (dist) => {
                     try {
-                        const res = await axios.get(`${apiIp}/purchases/findByOriginalInvoice`, {
+                        const res = await axios.get(`/purchases/findByOriginalInvoice`, {
                             headers: { Authorization: `Bearer ${token}` },
                             params: { original_invoice: dist.distributionID }
                         });

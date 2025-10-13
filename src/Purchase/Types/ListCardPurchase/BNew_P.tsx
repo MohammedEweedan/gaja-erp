@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -187,8 +187,8 @@ const BNew_p = (props: NewPProps) => {
         Cuser = localStorage.getItem('Cuser');
     }
     const apiIp = process.env.REACT_APP_API_IP;
-const apiUrl = `${apiIp}/purchases`;
-const apiUrlProducts = `${apiIp}/boxes`;
+const apiUrl = `http://${apiIp}/purchases`;
+const apiUrlProducts = `http://${apiIp}/boxes`;
 
     const isUsedSupplier = useMemo(() => {
         return editPurchase.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('used') ?? false;
@@ -306,7 +306,7 @@ const apiUrlProducts = `${apiIp}/boxes`;
     };
 
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = `${apiIp}/suppliers`;
+        const apiUrlsuppliers = `/suppliers`;
         const token = localStorage.getItem('token');
         try {
             setLoadingSuppliers(true);
@@ -350,7 +350,7 @@ const apiUrlProducts = `${apiIp}/boxes`;
     const handleAddNew = async () => {
         const token = localStorage.getItem('token');
         try {
-            const response = await fetch(`${apiIp}/purchases/NewNF`, {
+            const response = await fetch(`http://${apiIp}/purchases/NewNF`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) throw new Error("Failed to fetch new purchase number");

@@ -26,6 +26,7 @@ import Container from '@mui/material/Container';
 import Link from '@mui/material/Link';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import Header from '../components/Header/Header';
 
 function AuthLogin({ ...others }) {
   const { t } = useTranslation();
@@ -40,15 +41,12 @@ function AuthLogin({ ...others }) {
   async function SignIn(email, password) {
     try {
       const res = await axios.post(
-        
-        '/login',
+        '/api/login',
         { email, password },
         { headers: { 'Content-Type': 'application/json' } }
       );
 
       if (res.data.token) {
-
-      
         localStorage.setItem('token', res.data.token);
         localStorage.setItem(
           'user',
@@ -56,9 +54,8 @@ function AuthLogin({ ...others }) {
             id: email,
             ps: res.data.user.ps,
             Cuser: res.data.user.id_user,
-            roles:   res.data.user.Action_user,
+            roles: res.data.user.Action_user,
             name_user: res.data.user.name_user,
-            Prvilege: res.data.user.Roles,
           })
         );
         history('/home');
@@ -73,9 +70,12 @@ function AuthLogin({ ...others }) {
 
   return (
     <>
-      {/* Login Content (no header) */}
+      {/* Header Component */}
+      <Header />
+      
+      {/* Login Content */}
       <Box sx={{ 
-        minHeight: '100vh',
+        minHeight: 'calc(100vh - 80px)', // Adjust for header height
         display: 'flex', 
         alignItems: 'center', 
         bgcolor: (t) => t.palette.background.default,

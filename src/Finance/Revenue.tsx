@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from "../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -159,7 +159,7 @@ const Revenue = (props: Props) => {
 
 
 
-    const apiUrl = "http://localhost:9000/Revenue";
+    const apiUrl = "/Revenue";
     const apiUrlAccounts = `${apiIp}/Accounts`;
 
     const showSnackbar = (message: string, severity: SnackbarState['severity']) => {

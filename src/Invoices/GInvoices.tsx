@@ -1,6 +1,6 @@
 // GInvoices.tsx
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import axios from 'axios';
+import axios from "../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,

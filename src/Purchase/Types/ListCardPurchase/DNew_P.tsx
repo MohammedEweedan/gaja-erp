@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import axios from "../../../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -21,16 +21,16 @@ import {
     DialogActions,
     DialogContentText
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PrintIcon from '@mui/icons-material/PrintOutlined';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import { CancelOutlined, Warning } from '@mui/icons-material';
+import { CancelOutlined } from '@mui/icons-material';
 
 import React from 'react';
-import { Console } from 'console';
 type Purchase = {
     id_fact: number;
     date_fact: string;
@@ -150,8 +150,11 @@ interface NewPProps {
 }
 
 const DNew_p = (props: NewPProps) => {
+    const theme = useTheme();
+    const labelColor = theme.palette.text.secondary;
+    const valueColor = theme.palette.primary.main;
 
-    const { num_fact, distribution, onReceived, brand, referencePurchase } = props;
+    const { num_fact, distribution, onReceived, brand } = props;
 
     //const { num_fact, distribution, onReceived } = props;
     const [totalWeight, setTotalWeight] = useState(0);
@@ -161,13 +164,12 @@ const DNew_p = (props: NewPProps) => {
     const [Productsdata, setProductsdata] = useState<Product[]>([]);
     const [loading, setLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const [showPurchaseForm, setShowPurchaseForm] = useState(false);
+    // Removed unused showPurchaseForm
     const [editPurchase, setEditPurchase] = useState<Purchase>(initialPurchaseState);
     const [isEditMode, setIsEditMode] = useState(false);
     const [errors, setErrors] = useState<any>({});
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [loadingSuppliers, setLoadingSuppliers] = useState(false);
-    const [refreshFlag, setRefreshFlag] = useState(0);
+    // Removed unused loadingSuppliers and refreshFlag
     const [snackbar, setSnackbar] = useState({
         open: false,
         message: '',
@@ -179,13 +181,113 @@ const DNew_p = (props: NewPProps) => {
     });
     const [productDetails, setProductDetails] = useState<any>(null);
     const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
-    const [pendingSave, setPendingSave] = useState(false);
+    // Removed unused pendingSave
 
     const navigate = useNavigate();
-    const { ps, Cuser } = useLocation().state || {};
-    const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrl = `${apiIp}/purchases`;
-    const apiUrlProducts = `${apiIp}/products`;
+    const location = useLocation();
+    // Robust ps/Cuser derivation: prefer route state, fallback to localStorage(user JSON -> keys) -> localStorage keys -> 0
+    const statePs = (location.state as any)?.ps;
+    const stateCuser = (location.state as any)?.Cuser;
+    let psVal = 0;
+    let CuserVal = 0;
+    try {
+        const userStr = localStorage.getItem('user');
+        const userObj = userStr ? JSON.parse(userStr) : undefined;
+        const lsPs = userObj?.ps ?? localStorage.getItem('ps');
+        const lsCuser = userObj?.Cuser ?? localStorage.getItem('Cuser');
+        psVal = Number(statePs ?? lsPs) || 0;
+        CuserVal = Number(stateCuser ?? lsCuser) || 0;
+    } catch {
+        const lsPs = localStorage.getItem('ps');
+        const lsCuser = localStorage.getItem('Cuser');
+        psVal = Number(statePs ?? lsPs) || 0;
+        CuserVal = Number(stateCuser ?? lsCuser) || 0;
+    }
+ 
+    const apiUrl = `/purchases`;
+    const apiUrlProducts = `/products`;
+    // Image carousel (diamond images like DOPurchase)
+    const API_BASE = (process.env.REACT_APP_API_IP as string) || '';
+    const API_BASEImage = `${API_BASE}/images`;
+    // Secondary fallback for images host (matches WNew_P pattern)
+    const API_FALLBACK_IMAGE = '/images';
+    const [images, setImages] = useState<string[]>([]);
+    const [carouselIndex, setCarouselIndex] = useState(0);
+    // Removed blob-based fetch; we now use direct URLs like in DOPurchase
+    const fetchImages = useCallback(async (id_achat: number) => {
+        const token = localStorage.getItem('token');
+        if (!token || !id_achat) return false;
+        const endpoints = [
+            `${API_BASEImage}/list/diamond/${id_achat}`,
+            `${API_BASEImage}/list/${id_achat}`, // legacy/untyped (watch default)
+            `${API_FALLBACK_IMAGE}/list/diamond/${id_achat}`,
+            `${API_FALLBACK_IMAGE}/list/${id_achat}`,
+        ];
+        for (const url of endpoints) {
+            try {
+                const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+                const data = res.data;
+                if (Array.isArray(data) && data.length > 0) {
+                    let urls: string[] = [];
+                    if (typeof data[0] === 'string') {
+                        urls = data as string[];
+                    } else if (typeof data[0] === 'object' && data[0]) {
+                        urls = data.map((obj: Record<string, any>) => {
+                            const key = Object.keys(obj).find(k => ['url', 'path', 'filename', 'name'].includes(k));
+                            if (!key) return '';
+                            if (key === 'filename') {
+                                // Derive type from URL path; default to diamond
+                                const type = url.includes('/list/diamond/') ? 'diamond' : 'watch';
+                                return `${API_BASEImage}/${type}/${id_achat}/${obj[key]}`;
+                            }
+                            return String(obj[key]);
+                        });
+                    }
+                    const withToken = urls.filter(Boolean).map(u => u + (u.includes('?') ? '&' : '?') + `token=${token}`);
+                    if (withToken.length > 0) {
+                        setImages(withToken);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                // try next endpoint
+            }
+        }
+        setImages([]);
+        return false;
+    }, [API_BASEImage, API_FALLBACK_IMAGE]);
+
+    // Fetch images when diamond productDetails arrive; fallback to single image_url
+    useEffect(() => {
+        let id_achat: number | undefined;
+        // Try multiple possible locations for id_achat
+        id_achat =
+            productDetails?.[0]?.purchaseD?.id_achat ||
+            productDetails?.[0]?.id_achat ||
+            distribution?.purchaseD?.id_achat ||
+            distribution?.purchaseD?.purchase?.id_achat ||
+            distribution?.purchase?.id_achat ||
+            distribution?.id_achat;
+
+        (async () => {
+            if (id_achat) {
+                const ok = await fetchImages(id_achat);
+                if (!ok) {
+                    // Fallback to single URL if available
+                    const url = productDetails?.[0]?.purchaseD?.image_url;
+                    if (url) setImages([url]);
+                }
+            } else {
+                const url = productDetails?.[0]?.purchaseD?.image_url;
+                if (url) setImages([url]);
+            }
+        })();
+    }, [productDetails, distribution, fetchImages]);
+
+    // Reset carousel index when images change
+    useEffect(() => {
+        setCarouselIndex(0);
+    }, [images]);
 
     const isUsedSupplier = useMemo(() => {
         return editPurchase.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('used') ?? false;
@@ -273,15 +375,23 @@ const DNew_p = (props: NewPProps) => {
         });
     };
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         const token = localStorage.getItem('token');
         if (!token) return navigate("/");
         try {
             const res = await axios.get<Purchase[]>(`${apiUrl}/Getpurchase`, {
                 headers: { Authorization: `Bearer ${token}` },
-                params: { ps, num_fact: num_fact }
+                // Ensure ps is always present
+                params: { ps: psVal, num_fact: Number(num_fact) || 0 }
             });
             setData(res.data);
+
+
+
+            console.log("Fetched purchase data:", res.data);
+
+
+
 
             setEditPurchase(prevState => ({
                 ...prevState,
@@ -296,18 +406,19 @@ const DNew_p = (props: NewPProps) => {
             setItemCount(res.data.length);
         } catch (err: any) {
             if (err.response?.status === 401) navigate("/");
-            showNotification('Failed to fetch purchase data', 'error');
+            const msg = err.response?.data?.message || err.message || 'Failed to fetch purchase data';
+            console.error('Fetch purchases error:', err);
+            showNotification(`${msg}`, 'error');
         } finally {
             setLoading(false);
         }
-    };
+    }, [apiUrl, navigate, num_fact, psVal]);
 
-    const fetchSuppliers = async () => {
-        const apiUrlsuppliers = `${apiIp}/suppliers`;
+    const fetchSuppliers = useCallback(async () => {
+        
         const token = localStorage.getItem('token');
         try {
-            setLoadingSuppliers(true);
-            const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
+            const res = await axios.get<Supplier[]>(`/suppliers/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
 
@@ -318,12 +429,12 @@ const DNew_p = (props: NewPProps) => {
 
             setSuppliers(goldSuppliers);
         } catch (error) {
-            console.error("Error fetching suppliers:", error);
+          
             showNotification('Failed to fetch suppliers', 'error');
         } finally {
-            setLoadingSuppliers(false);
+            // no-op
         }
-    };
+    }, []);
 
     const fetchProductDetails = async (distributionID: number, type: string) => {
         const token = localStorage.getItem('token');
@@ -331,7 +442,7 @@ const DNew_p = (props: NewPProps) => {
 
         try {
             const response = await axios.get(
-                `${apiIp}/Dpurchases/ProductDetails`,
+                `/Dpurchases/ProductDetails`,
                 {
                     headers: { Authorization: `Bearer ${token}` },
                     params: { distributionID, type }
@@ -349,17 +460,25 @@ const DNew_p = (props: NewPProps) => {
         }
     };
 
+    /* eslint-disable react-hooks/exhaustive-deps */
     useEffect(() => {
         resetForm();
         fetchData();
         fetchSuppliers();
         fetchDataProducts();
     }, [num_fact]);
+    /* eslint-enable react-hooks/exhaustive-deps */
 
     // Prefill fields from distribution if present
     useEffect(() => {
+ 
+
+
         const fillFromDistribution = async () => {
+             
+
             if (distribution) {
+                
                 const type = distribution.PurchaseType?.toLowerCase();
                 const details = await fetchProductDetails(distribution.distributionID, type);
                 if (details && details[0]?.purchaseD) {
@@ -429,17 +548,17 @@ const DNew_p = (props: NewPProps) => {
         }
     }, [distribution, brand]);
 
-    const resetForm = () => {
+    const resetForm = useCallback(() => {
         setEditPurchase({
             ...initialPurchaseState,
             num_fact: num_fact || 0,
-            usr: Cuser,
-            ps: ps,
+            usr: CuserVal,
+            ps: psVal,
             date_fact: new Date().toISOString().split('T')[0]
         });
         setErrors({});
         setIsEditMode(false);
-    };
+    }, [num_fact, CuserVal, psVal]);
 
 
 
@@ -462,8 +581,7 @@ const DNew_p = (props: NewPProps) => {
             Fournisseur: row.Fournisseur || supplierData,
             client: row.Fournisseur?.id_client || row.client
         });
-        setIsEditMode(true);
-        setShowPurchaseForm(true);
+    setIsEditMode(true);
     };
 
     const validateForm = () => {
@@ -502,7 +620,6 @@ const DNew_p = (props: NewPProps) => {
     };
 
     const handleCancel = () => {
-        setShowPurchaseForm(false);
         setEditPurchase(initialPurchaseState);
         setErrors({});
     };
@@ -515,7 +632,10 @@ const DNew_p = (props: NewPProps) => {
             // If not used supplier, set default values for these fields
             const payloadData = {
                 ...editPurchase,
-                Selling_Price_Currency: isUsedSupplier ? editPurchase.Selling_Price_Currency : 0,
+                // For non-used suppliers, mirror WNew_P behavior by using product details price when available
+                Selling_Price_Currency: isUsedSupplier
+                    ? editPurchase.Selling_Price_Currency
+                    : (productDetails?.[0]?.purchaseD?.SellingPrice ?? editPurchase.Selling_Price_Currency ?? 0),
                 CURRENCY: isUsedSupplier ? editPurchase.CURRENCY : 'USD',
                 RATE: isUsedSupplier ? editPurchase.RATE : 1,
                 Cost_Lyd: isUsedSupplier ? editPurchase.Cost_Lyd : 0,
@@ -524,28 +644,22 @@ const DNew_p = (props: NewPProps) => {
             const payload = {
                 ...payloadData,
                 num_fact: num_fact,
-                usr: Cuser,
-                ps: ps,
+                usr: CuserVal,
+                ps: psVal,
                 client: editPurchase.Fournisseur?.id_client || editPurchase.client
             };
-            let responseData: Purchase;
-
             if (isEditMode) {
-                const response = await axios.put(`${apiUrl}/Update/${editPurchase.id_fact}`, payload, {
+                await axios.put(`${apiUrl}/Update/${editPurchase.id_fact}`, payload, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                responseData = response.data;
                 showNotification('Item updated successfully', 'success');
             } else {
-                const response = await axios.post(`${apiUrl}/Add`, payload, {
+                await axios.post(`${apiUrl}/Add`, payload, {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                responseData = response.data;
                 showNotification('Item added successfully', 'success');
             }
 
-            setRefreshFlag(prev => prev + 1);
-            setShowPurchaseForm(true);
             fetchData();
 
             setIsEditMode(false);
@@ -561,7 +675,7 @@ const DNew_p = (props: NewPProps) => {
 
 
                 await axios.put(
-                    `${apiIp}/Dpurchases/UpdateStatus/${distribution.distributionID}`,
+                    `/Dpurchases/UpdateStatus/${distribution.distributionID}`,
                     { DistributionISOK: true },
                     { headers: { Authorization: `Bearer ${token}` } }
                 ).catch((error) => {
@@ -606,10 +720,10 @@ const DNew_p = (props: NewPProps) => {
 
         const token = localStorage.getItem('token');
         try {
+            // Use the same base purchases API as elsewhere in this component
             await axios.delete(`${apiUrl}/Delete/${deleteDialog.purchaseId}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            setRefreshFlag(prev => prev + 1);
             fetchData();
             showNotification('Item deleted successfully', 'success');
         } catch (error) {
@@ -624,7 +738,7 @@ const DNew_p = (props: NewPProps) => {
         setDeleteDialog({ open: false, purchaseId: null, purchaseNum: null });
     };
 
-    const fetchDataProducts = async () => {
+    const fetchDataProducts = useCallback(async () => {
         const token = localStorage.getItem('token');
         if (!token) return navigate("/");
 
@@ -639,7 +753,7 @@ const DNew_p = (props: NewPProps) => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [apiUrlProducts, navigate]);
 
     const handleOpenStickerDialog = (stickerData: StickerData) => {
         // Find the current item index in the data array
@@ -682,6 +796,7 @@ const DNew_p = (props: NewPProps) => {
         });
     };
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     const columnsFiltredTable = useMemo<MRT_ColumnDef<Purchase>[]>(() => {
         const hasUsedSupplier = data.some(row => row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('used'));
         const baseColumns: MRT_ColumnDef<Purchase>[] = [
@@ -756,6 +871,7 @@ const DNew_p = (props: NewPProps) => {
             ),
         });
         return baseColumns;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [data]);
 
     const tableFiltered = useMaterialReactTable({
@@ -952,7 +1068,7 @@ const DNew_p = (props: NewPProps) => {
                     sx={{
                         mb: 2,
                         borderRadius: 2,
-                        borderColor: '#1b5e20',
+                        borderColor: 'success.main',
                         backgroundColor: 'inherit',
                         color: 'inherit',
                         borderWidth: 2,
@@ -961,110 +1077,141 @@ const DNew_p = (props: NewPProps) => {
                     }}
                 >
                     <strong>Diamond Details:</strong>
-                    <Box sx={{ mt: 1 }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <tbody>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500, width: 110 }}>Brand:</td>
-                                    <td style={{ color: '#0d47a1', width: 140 }}>{productDetails[0].purchaseD.supplier?.client_name || 'N/A'}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500, width: 110 }}>Ref Code:</td>
-                                    <td style={{ color: '#0d47a1', width: 140 }}>{productDetails[0].purchaseD.CODE_EXTERNAL}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500, width: 110 }}>Sales Code:</td>
-                                    <td style={{ color: '#0d47a1', width: 140 }}>
-                                        {productDetails[0].purchaseD.comment_edit
-                                            ? Number(productDetails[0].purchaseD.comment_edit).toLocaleString()
-                                            : productDetails[0].purchaseD.comment_edit}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Product Name:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.Design_art}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Sales Price:</td>
-                                    <td style={{ color: '#0d47a1' }}>
-                                        {Number(productDetails[0].purchaseD.SellingPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Carat:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.carat}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Cut:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.cut}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Color:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.color}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Clarity:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.clarity}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Shape:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.shape}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Measurements:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.measurements}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Depth %:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.depth_percent}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Table %:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.table_percent}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Girdle:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.girdle}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Culet:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.culet}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Polish:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.polish}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Symmetry:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.symmetry}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Fluorescence:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.fluorescence}</td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Cert No:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.certificate_number}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Lab:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.certificate_lab}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Certificate:</td>
-                                    <td style={{ color: '#0d47a1' }}>
-                                        <a href={productDetails[0].purchaseD.certificate_url} target="_blank" rel="noopener noreferrer">Link</a>
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Laser Inscription:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.laser_inscription}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Price/Carat:</td>
-                                    <td style={{ color: '#0d47a1' }}>
-                                        {Number(productDetails[0].purchaseD.price_per_carat).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Total Price:</td>
-                                    <td style={{ color: '#0d47a1' }}>
-                                        {Number(productDetails[0].purchaseD.total_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </td>
-                                </tr>
-                                <tr>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Origin:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.origin_country}</td>
-                                    <td style={{ color: '#1b5e20', fontWeight: 500 }}>Comment:</td>
-                                    <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseD.comment}</td>
-                                    <td colSpan={2}></td>
-                                </tr>
-                                {(productDetails[0].purchaseD.image_url || productDetails[0].purchaseD.video_url) && (
-                                    <tr>
-                                        <td style={{ color: '#1b5e20', fontWeight: 500 }}>Image:</td>
-                                        <td colSpan={2}>
-                                            {productDetails[0].purchaseD.image_url && (
-                                                <img src={productDetails[0].purchaseD.image_url} alt="Diamond" style={{ maxWidth: 100, marginTop: 8 }} />
-                                            )}
-                                        </td>
-                                        <td style={{ color: '#1b5e20', fontWeight: 500 }}>Video:</td>
-                                        <td colSpan={2}>
-                                            {productDetails[0].purchaseD.video_url && (
-                                                <a href={productDetails[0].purchaseD.video_url} target="_blank" rel="noopener noreferrer">Video</a>
-                                            )}
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
+
+                    <Box
+                        sx={{
+                            display: 'flex',
+                            flexDirection: 'row',
+                            gap: 4,
+                            padding: 1,
+                            justifyContent: 'center',
+                            margin: '0 auto',
+                            overflowX: 'auto',
+                            scrollBehavior: 'smooth',
+                            width: '100%',
+                            maxWidth: '100vw',
+                            '& > *:first-of-type': { marginRight: 4 },
+                            '&::-webkit-scrollbar': { display: 'none' },
+                            scrollbarWidth: 'none',
+                            alignItems: 'center',
+                        }}
+                    >
+                        <Box sx={{ mt: 1, display: 'flex', flexDirection: 'row', gap: 3, padding: 1 }}>
+                            {/* Details Table */}
+                            <Box sx={{ flex: 2 }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <tbody>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500, width: 110 }}>Brand:</td>
+                                            <td style={{ color: valueColor, width: 140 }}>{productDetails[0].purchaseD.supplier?.client_name || 'N/A'}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500, width: 110 }}>Ref Code:</td>
+                                            <td style={{ color: valueColor, width: 140 }}>{productDetails[0].purchaseD.CODE_EXTERNAL}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500, width: 110 }}>Sales Code:</td>
+                                            <td style={{ color: valueColor, width: 140 }}>
+                                                {productDetails[0].purchaseD.comment_edit
+                                                    ? Number(productDetails[0].purchaseD.comment_edit).toLocaleString()
+                                                    : productDetails[0].purchaseD.comment_edit}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Product Name:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.Design_art}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Sales Price:</td>
+                                            <td style={{ color: valueColor }}>
+                                                {Number(productDetails[0].purchaseD.SellingPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Carat:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.carat}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Cut:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.cut}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Color:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.color}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Clarity:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.clarity}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Shape:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.shape}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Measurements:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.measurements}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Depth %:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.depth_percent}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Table %:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.table_percent}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Girdle:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.girdle}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Culet:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.culet}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Polish:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.polish}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Symmetry:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.symmetry}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Fluorescence:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.fluorescence}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Cert No:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.certificate_number}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Lab:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.certificate_lab}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Certificate:</td>
+                                            <td style={{ color: valueColor }}>
+                                                <a href={productDetails[0].purchaseD.certificate_url} target="_blank" rel="noopener noreferrer">Link</a>
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Laser Inscription:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.laser_inscription}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Total Price:</td>
+                                            <td style={{ color: valueColor }}>
+                                                {Number(productDetails[0].purchaseD.total_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Origin:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.origin_country}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Comment:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseD.comment}</td>
+                                            <td colSpan={2}></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </Box>
+                        </Box>
+
+                        {/* Carousel for images - same behavior as WNew_P */}
+                        <Box sx={{
+                            display: 'flex', flexDirection: 'row', 
+                            justifyItems: 'stretch', gap: 2, alignItems: 'center',
+                            padding: 1,
+                            border: '1px solid #ccc' 
+                        }}>
+                            {images.length > 0 ? (
+                                <Box sx={{ flex: 1,    display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                    <Typography variant="subtitle1" sx={{ mb: 1 }}>Images</Typography>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                        <IconButton onClick={() => setCarouselIndex(i => (i - 1 + images.length) % images.length)}>
+                                            {'<'}
+                                        </IconButton>
+                                        <img
+                                            src={images[carouselIndex]}
+                                            alt={`Diamond ${carouselIndex + 1}`}
+                                            style={{ maxHeight: 240, height: 240, maxWidth: 410, borderRadius: 8, border: '1px solid #ccc', objectFit: 'contain' }}
+                                        />
+                                        <IconButton onClick={() => setCarouselIndex(i => (i + 1) % images.length)}>
+                                            {'>'}
+                                        </IconButton>
+                                    </Box>
+                                    <Typography variant="caption" sx={{ mt: 1 }}>{carouselIndex + 1} / {images.length}</Typography>
+                                </Box>
+                            ) : null}
+                        </Box>
                     </Box>
                 </Alert>
             )}
@@ -1150,171 +1297,7 @@ const DNew_p = (props: NewPProps) => {
                     </Box>
                 )}
 
-                <Divider sx={{ mb: 0, borderColor: '#616161', borderBottomWidth: 1 }} />
-
-                <Box display={'inline-flex'} gap={2} justifyContent={'space-between'}>
-                    {/* Only show these fields if there is NO distribution */}
-                    {!distribution && (
-                        <>
-                            <TextField
-                                label="Full Weight"
-                                type="number"
-                                fullWidth
-                                value={editPurchase?.Full_qty || 1}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, Full_qty: 1 }))
-                                }
-                                error={!!errors.Full_qty}
-                                helperText={errors.Full_qty}
-                            />
-
-                            <TextField
-                                label="Weight"
-                                type="number"
-                                fullWidth
-                                value={editPurchase?.qty || 1}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, qty: 1 }))
-                                }
-                                error={!!errors.qty}
-                                helperText={errors.qty}
-                            />
-
-
-                            <TextField
-                                label="Product Refrence"
-                                type="text"
-                                fullWidth
-                                value={editPurchase?.CODE_EXTERNAL || ''}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, CODE_EXTERNAL: e.target.value }))
-                                }
-                                error={!!errors.CODE_EXTERNAL}
-                                helperText={errors.CODE_EXTERNAL}
-                            />
-
-
-                            <TextField
-                                label="Sales Code"
-                                type="text"
-                                fullWidth
-                                value={editPurchase?.comment_edit || ''}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, comment_edit: e.target.value }))
-                                }
-                                error={!!errors.comment_edit}
-                                helperText={errors.comment_edit}
-                            />
-
-
-                            <Autocomplete
-                                options={Productsdata}
-                                fullWidth
-                                getOptionLabel={(option) => typeof option === 'string' ? option : option.desig_famille}
-                                value={Productsdata.find((p) => p.desig_famille === editPurchase.Design_art) || null}
-                                onChange={(event, newValue) => {
-                                    setEditPurchase(prev => ({
-                                        ...prev,
-                                        Design_art: newValue?.desig_famille || ''
-                                    }));
-                                }}
-                                renderInput={(params) => (
-                                    <TextField
-                                        {...params}
-                                        label="Product Name"
-                                        error={!!errors.Design_art}
-                                        helperText={errors.Design_art}
-                                        required
-                                    />
-                                )}
-                            />
-
-                            <TextField
-                                label="Stone Color"
-                                fullWidth
-                                value={editPurchase?.Color_Rush || ''}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, Color_Rush: e.target.value }))
-                                }
-                                error={!!errors.Color_Rush}
-                                helperText={errors.Color_Rush}
-                            />
-
-                            <TextField
-                                label="Gold Color"
-                                fullWidth
-                                value={editPurchase?.Color_Gold || ''}
-                                onChange={(e) =>
-                                    setEditPurchase(prev => ({ ...prev, Color_Gold: e.target.value }))
-                                }
-                                error={!!errors.Color_Gold}
-                                helperText={errors.Color_Gold}
-                            />
-                        </>
-                    )}
-
-                    {/* In the form section (add/edit), show Selling Price, Currency, Exchange Rate, and Cost fields if isUsedSupplier is true */}
-                    {isUsedSupplier && (
-                        <>
-                            <TextField
-                                label="Selling Price"
-                                type="number"
-                                fullWidth
-                                value={editPurchase?.Selling_Price_Currency || 0}
-                                onChange={(e) => setEditPurchase(prev => ({ ...prev, Selling_Price_Currency: parseFloat(e.target.value) }))}
-                                error={!!errors.Selling_Price_Currency}
-                                helperText={errors.Selling_Price_Currency}
-                                required
-                            />
-                            <FormControl fullWidth>
-                                <InputLabel>Currency *</InputLabel>
-                                <Select
-                                    value={editPurchase?.CURRENCY || ''}
-                                    onChange={(e) => setEditPurchase(prev => ({ ...prev, CURRENCY: e.target.value }))}
-                                    label="Currency *"
-                                    error={!!errors.CURRENCY}
-                                >
-                                    <MenuItem value="USD">USD</MenuItem>
-                                    <MenuItem value="Euro">Euro</MenuItem>
-                                    <MenuItem value="LYD">LYD</MenuItem>
-                                    <MenuItem value="GBP">GBP</MenuItem>
-                                </Select>
-                                {errors.CURRENCY && (
-                                    <Typography variant="caption" color="error">
-                                        {errors.CURRENCY}
-                                    </Typography>
-                                )}
-                            </FormControl>
-                            <TextField
-                                label="Exchange Rate"
-                                type="number"
-                                fullWidth
-                                value={editPurchase?.RATE || 1}
-                                onChange={(e) => setEditPurchase(prev => ({ ...prev, RATE: parseFloat(e.target.value) }))}
-                                error={!!errors.RATE}
-                                helperText={errors.RATE}
-                                required
-                                inputProps={{ min: 0.01, step: 0.01 }}
-                            />
-                            <TextField
-                                label="Cost (LYD)"
-                                type="number"
-                                fullWidth
-                                value={editPurchase?.Cost_Lyd || 0}
-                                onChange={(e) => setEditPurchase(prev => ({ ...prev, Cost_Lyd: parseFloat(e.target.value) }))}
-                                error={!!errors.Cost_Lyd}
-                                helperText={errors.Cost_Lyd}
-                                required
-                                inputProps={{ min: 0.01, step: 0.01 }}
-                            />
-                        </>
-                    )}
-                </Box>
-
-                <Divider sx={{ mb: 0, borderColor: 'grey.300', borderBottomWidth: 1 }} />
-
-                {/* Hide table if distribution exists */}
-                {!distribution && <MaterialReactTable table={tableFiltered} />}
+                
             </Box>
 
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>

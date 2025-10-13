@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useNavigate } from 'react-router-dom';
 import {
   MaterialReactTable,
@@ -37,32 +37,30 @@ const initialCustomerState: Customer = {
 const darkTheme = createTheme({
   palette: {
     mode: 'dark',
-    background: {
-      default: '#121212',
-      paper: '#1E1E1E',
-    },
-    primary: {
-      main: '#90caf9',
-    },
-    secondary: {
-      main: '#f48fb1',
-    },
+    background: { default: '#121212', paper: '#1E1E1E' },
+    primary: { main: '#90caf9' },
+    secondary: { main: '#f48fb1' },
+    text: { primary: '#9e9e9e', secondary: '#9e9e9e' },
+  },
+  components: {
+    MuiFormLabel: { styleOverrides: { root: { color: '#9e9e9e' } } },
+    MuiInputLabel: { styleOverrides: { root: { color: '#9e9e9e' } } },
+    MuiFormControlLabel: { styleOverrides: { label: { color: '#9e9e9e' } } },
   },
 });
 
 const lightTheme = createTheme({
   palette: {
     mode: 'light',
-    background: {
-      default: '#fafafa',
-      paper: '#ffffff',
-    },
-    primary: {
-      main: '#3f51b5',
-    },
-    secondary: {
-      main: '#f50057',
-    },
+    background: { default: '#fafafa', paper: '#ffffff' },
+    primary: { main: '#3f51b5' },
+    secondary: { main: '#f50057' },
+    text: { primary: '#374151', secondary: '#374151' },
+  },
+  components: {
+    MuiFormLabel: { styleOverrides: { root: { color: '#374151' } } },
+    MuiInputLabel: { styleOverrides: { root: { color: '#374151' } } },
+    MuiFormControlLabel: { styleOverrides: { label: { color: '#374151' } } },
   },
 });
 

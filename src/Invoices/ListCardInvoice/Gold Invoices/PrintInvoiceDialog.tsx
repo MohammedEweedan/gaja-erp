@@ -2,9 +2,9 @@ import React, { RefObject } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Checkbox, FormControlLabel } from '@mui/material';
 import { Box } from '@mui/system';
 import { Dialog as MuiDialog, DialogTitle as MuiDialogTitle, DialogContent as MuiDialogContent, DialogActions as MuiDialogActions } from '@mui/material';
+import axios from "../../../api";
 
 import WatchStandardInvoiceContent from './WatchStandardInvoiceContent';
-import { n } from 'framer-motion/dist/types.d-B50aGbjN';
 
 // Define minimal local types for Invoice and Client
 export type Client = {
@@ -169,7 +169,8 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
   const [invoiceNumFact, setInvoiceNumFact] = React.useState<number | null>(null);
   const [makeTransactionToCashier, setMakeTransactionToCashier] = React.useState(false);
   const [closeWarningOpen, setCloseWarningOpen] = React.useState(false);
-  const [showImage, setShowImage] = React.useState(true);
+  const [showImage] = React.useState(true);
+
 
   // Initialize invoice number from the provided invoice when available
   React.useEffect(() => {
@@ -217,11 +218,42 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
             /* Ensure tables and layout look good */
             table { width: 100%; border-collapse: collapse; }
             th, td { border: 1px solid #ccc; padding: 4px 8px; }
+            /* Hide empty/filler cells (e.g., extra trailing column) */
+            table td:empty, table th:empty { display: none !important; border: none !important; padding: 0 !important; }
+            table tr > td:last-child:empty, table thead tr > th:last-child:empty { display: none !important; }
+            .MuiTableCell-root:empty, .MuiTableCell-root[aria-hidden="true"] { display: none !important; border: none !important; padding: 0 !important; }
+            /* Avoid page margins creating phantom columns */
+            .invoice-content { overflow: hidden !important; }
             /* Add more print-specific styles as needed */
           </style>
         </head>
         <body>
           <div class="MuiDialogContent-root">${printContents}</div>
+          <script>
+            (function() {
+              try {
+                var root = document;
+                var tables = root.querySelectorAll('table');
+                tables.forEach(function(table) {
+                  // Remove empty last TH in header if present
+                  var theadTr = table.querySelector('thead tr');
+                  if (theadTr) {
+                    var lastTh = theadTr.querySelector('th:last-child');
+                    if (lastTh && lastTh.children.length === 0 && lastTh.textContent.trim() === '') {
+                      lastTh.remove();
+                    }
+                  }
+                  // Remove empty last TD in each row
+                  table.querySelectorAll('tr').forEach(function(tr) {
+                    var lastTd = tr.querySelector('td:last-child');
+                    if (lastTd && lastTd.children.length === 0 && lastTd.textContent.trim() === '') {
+                      lastTd.remove();
+                    }
+                  });
+                });
+              } catch (e) { /* ignore */ }
+            })();
+          </script>
         </body>
       </html>
     `);
@@ -287,16 +319,12 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
         num_fact: String(num_fact),
         MakeCashVoucher: String(!!makeTransactionToCashier),
       });
-      const response = await fetch(`${apiUrlinv}/CloseNF?${qs.toString()}`,
-        { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to close invoice');
-      }
+      const response = await axios.get(`${apiUrlinv}/CloseNF`, {
+        params: qs,
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-
-      const result = await response.json();
+      const result = response.data;
 
       // Optionally update state/UI here
       if (result?.new_num_fact) setInvoiceNumFact(Number(result.new_num_fact));
@@ -339,11 +367,15 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     const psParam = invoice?.ps != null ? String(invoice.ps) : String(ps ?? '');
     const usrParam = invoice?.usr != null ? String(invoice.usr) : String(Cuser ?? '');
     try {
-      const response = await fetch(`${apiUrlinv}/SetNF?ps=${encodeURIComponent(psParam)}&usr=${encodeURIComponent(usrParam)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error("Failed to fetch new invoice number");
-      const result = await response.json();
+      
+      const response = await axios.get(
+        `${apiUrlinv}/SetNF`,
+        {
+          params: { ps: psParam, usr: usrParam },
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const result = response.data;
       setInvoiceNumFact(result.new_num_fact); // Set the new invoice number in state
       return Number(result.new_num_fact) || null;
     } catch (error) {
@@ -461,7 +493,7 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
       <DialogContent sx={{ p: 3, background: '#fff', color: '#000' }}>
 
         <WatchStandardInvoiceContent
-          ref={printRef}
+          ref={printRef as unknown as React.Ref<HTMLDivElement>}
           data={dataWithTotalAmountFinal}
           num_fact={invoiceNumFact ?? invoice?.num_fact}
           key={invoiceNumFact ?? invoice?.num_fact ?? 'default'}
@@ -469,16 +501,25 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
         />
       </DialogContent>
       <DialogActions sx={{ background: 'info', color: '#000' }}>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handlePrint}
-          sx={{ ml: 2 }}
-        >
-          Print
-        </Button>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handlePrint}
+            sx={{ ml: 2 }}
+          >
+            Print
+          </Button>
+
+
+
+
+
       </DialogActions>
+
+
+
+      
 
       {/* Confirmation Dialog for Generate New Invoice Number */}
       <MuiDialog open={confirmOpen} onClose={handleConfirmClose}>

@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios from "../api";
 import { getAuthHeader } from '../utils/auth';
 
 const API_URL = process.env.REACT_APP_API_IP;

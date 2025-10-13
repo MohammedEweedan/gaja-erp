@@ -1,4 +1,4 @@
-import React, { createContext, useMemo, useState, useContext, ReactNode } from 'react';
+import React, { createContext, useMemo, useState, useContext, ReactNode, useEffect } from 'react';
 import { ThemeProvider as MuiThemeProvider, createTheme, ThemeOptions } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { getDesignTokens } from './theme';
@@ -23,7 +23,17 @@ interface CustomThemeProviderProps {
 }
 
 export const CustomThemeProvider: React.FC<CustomThemeProviderProps> = ({ children }) => {
-  const [mode, setMode] = useState<'light' | 'dark'>('light');
+  // Force light as the default mode (ignore system and any previously saved value)
+  const [mode, setMode] = useState<'light' | 'dark'>(() => 'light');
+
+  // Persist mode on change
+  useEffect(() => {
+    try {
+      // Persist the current mode and reflect on html attribute
+      localStorage.setItem('color-mode', mode);
+      document.documentElement.setAttribute('data-color-mode', mode);
+    } catch {}
+  }, [mode]);
 
   const colorMode = useMemo(
     () => ({
@@ -35,14 +45,25 @@ export const CustomThemeProvider: React.FC<CustomThemeProviderProps> = ({ childr
     [mode]
   );
 
+  // Listen to LanguageContext custom event to adopt direction changes
+  const [direction, setDirection] = useState<'ltr' | 'rtl'>(() => (document?.documentElement?.dir as 'ltr' | 'rtl') || 'ltr');
+  useEffect(() => {
+    const handler = (e: any) => {
+      const dir = e?.detail?.direction as 'ltr' | 'rtl' | undefined;
+      if (dir === 'ltr' || dir === 'rtl') setDirection(dir);
+    };
+    window.addEventListener('languageChange', handler as EventListener);
+    return () => window.removeEventListener('languageChange', handler as EventListener);
+  }, []);
+
   const theme = useMemo(() => {
-    const tokens = getDesignTokens(mode);
+    const tokens = getDesignTokens(mode, direction);
     const baseTheme = createTheme(tokens as ThemeOptions);
     // Re-attach custom palette keys that MUI may strip during palette creation
     (baseTheme as any).palette.gaja = (tokens as any).palette.gaja;
 
     return baseTheme;
-  }, [mode]);
+  }, [mode, direction]);
 
   return (
     <ThemeContext.Provider value={colorMode}>

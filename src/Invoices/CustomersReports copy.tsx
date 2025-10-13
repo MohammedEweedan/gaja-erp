@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Autocomplete, Box, TextField, Typography, CircularProgress } from '@mui/material';
-import axios from 'axios';
+import axios from "../api";
 import { MaterialReactTable, type MRT_ColumnDef } from 'material-react-table';
 
 interface Client {
@@ -45,7 +45,7 @@ const CustomersReports = () => {
         const token = localStorage.getItem('token');
         const ps = localStorage.getItem('ps');
         try {
-            const res = await axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
+            const res = await axios.get(`/invoices/allDetailsPC`, {
                 headers: { Authorization: `Bearer ${token}` },
                 params: {
                     ps: ps,

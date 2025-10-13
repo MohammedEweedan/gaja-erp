@@ -1,11 +1,105 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, CircularProgress, FormControl, InputLabel, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, Button } from '@mui/material';
-import axios from 'axios';
+import axios from "../api";
 import { MaterialReactTable, type MRT_ColumnDef } from 'material-react-table';
 import LockIcon from '@mui/icons-material/Lock';
 
 import PrintInvoiceDialog from '../Invoices/ListCardInvoice/Gold Invoices/PrintInvoiceDialog';
 import ChiraReturnPage from './ChiraReturnPage';
+
+// Standard thumbnail size in on-screen table is 80px. For export we use smaller + caps to keep file size manageable.
+const EXPORT_IMG_SIZE = 55; // px size for exported thumbnails (HTML + Excel)
+const EXPORT_IMG_QUALITY = 0.7; // base JPEG quality for export
+const EXPORT_MAX_IMAGES = 800; // global cap of embedded images across entire export
+const EXPORT_FALLBACK_COLOR = '#f0f0f0';
+
+// Utility: fetch image URL (already tokenized) and downscale to fixed size JPEG base64 to reduce XLS size
+async function fetchAndDownscaleToBase64(rawUrl: string, size: number): Promise<string | null> {
+    try {
+        const resp = await fetch(rawUrl, { method: 'GET' });
+        if (!resp.ok) return null;
+        const blob = await resp.blob();
+        // If already tiny just convert to base64 directly
+        if (blob.size < 3500) {
+            return await new Promise<string>((resolve, reject) => {
+                const r = new FileReader();
+                r.onloadend = () => resolve(r.result as string);
+                r.onerror = reject;
+                r.readAsDataURL(blob);
+            });
+        }
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const i = new Image();
+            i.onload = () => resolve(i);
+            i.onerror = reject;
+            i.src = URL.createObjectURL(blob);
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return null;
+        // object-fit: cover logic
+        const ratio = Math.max(size / img.width, size / img.height);
+        const nw = img.width * ratio; const nh = img.height * ratio;
+        const dx = (size - nw) / 2; const dy = (size - nh) / 2;
+        ctx.fillStyle = EXPORT_FALLBACK_COLOR; // background to avoid black bars
+        ctx.fillRect(0,0,size,size);
+        ctx.drawImage(img, dx, dy, nw, nh);
+        let dataUrl = canvas.toDataURL('image/jpeg', EXPORT_IMG_QUALITY);
+        URL.revokeObjectURL(img.src);
+        // If still large, lower quality further
+        if (dataUrl.length > 25000) dataUrl = canvas.toDataURL('image/jpeg', 0.55);
+        if (dataUrl.length > 40000) dataUrl = canvas.toDataURL('image/jpeg', 0.4);
+        return dataUrl;
+    } catch {
+        // fallback raw base64
+        try {
+            const r2 = await fetch(rawUrl);
+            if (!r2.ok) return null;
+            const b2 = await r2.blob();
+            return await new Promise<string>((resolve, reject) => {
+                const fr = new FileReader();
+                fr.onloadend = () => resolve(fr.result as string);
+                fr.onerror = reject;
+                fr.readAsDataURL(b2);
+            });
+        } catch { return null; }
+    }
+}
+
+// Direct fetch of image list for export (avoids relying solely on cached state when many rows)
+async function fetchImageListForExport(id: number, supplierType?: string): Promise<string[]> {
+    const token = localStorage.getItem('token');
+    const API_BASEImage = '/images';
+    const t = supplierType?.toLowerCase() || '';
+    let typed: 'watch' | 'diamond' | undefined;
+    if (t.includes('watch')) typed = 'watch'; else if (t.includes('diamond')) typed = 'diamond';
+    const endpoints = typed ? [`${API_BASEImage}/list/${typed}/${id}`, `${API_BASEImage}/list/${id}`] : [`${API_BASEImage}/list/${id}`];
+    for (const url of endpoints) {
+        try {
+            const res = await axios.get(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+            if (Array.isArray(res.data)) {
+                return res.data.map((u: string) => {
+                    if (typeof u !== 'string') return '';
+                    if (u.startsWith('http://system.gaja.ly')) {
+                        u = 'https://system.gaja.ly' + u.substring('http://system.gaja.ly'.length);
+                    }
+                    if (window?.location?.protocol === 'https:' && u.startsWith('http://')) {
+                        try { const after = u.substring('http://'.length); u = 'https://' + after; } catch { /* ignore */ }
+                    }
+                    if (token) {
+                        const urlObj = new URL(u, window.location.origin);
+                        urlObj.searchParams.delete('token');
+                        urlObj.searchParams.append('token', token);
+                        u = urlObj.toString();
+                    }
+                    return u;
+                }).filter(Boolean);
+            }
+        } catch { /* try next */ }
+    }
+    return [];
+}
 
 
 const MODEL_LABELS = {
@@ -61,7 +155,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
 
 
 
-    const apiUrlusers = `http://localhost:9000/users`;
+    const apiUrlusers = `/users`;
     const [users, setUsers] = useState<Users[]>([]);
     const fetchUsers = async () => {
         const token = localStorage.getItem('token');
@@ -86,8 +180,10 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
     }, []);
 
 
-    const API_BASEImage = 'http://localhost:9000/images';
+    const API_BASEImage = '/images';
+    // Raw URL lists per picint/id_achat
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
+    // Blob/object URLs per picint/id_achat (used for display/export)
     const [imageBlobUrls, setImageBlobUrls] = useState<Record<string, string[]>>({});
     let ps: string | null = null;
     const userStr = localStorage.getItem('user');
@@ -102,37 +198,60 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
         ps = localStorage.getItem('ps');
     }
 
-    // Fetch all images for a given picint (or id_achat)
-    const fetchImages = async (picint: number) => {
+    // Fetch all images for a given picint (or id_achat) with optional supplier type to select correct folder
+    // Typed fetch similar to WatchStandardInvoiceContent: only attempt the explicit folder based on supplier type, with a legacy fallback if none
+    const fetchImages = async (id: number, supplierType?: string) => {
+        if (!id) return;
+        if (imageUrls[id] !== undefined) return; // already fetched
         const token = localStorage.getItem('token');
-        try {
-            const res = await axios.get(`${API_BASEImage}/list/${picint}`, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (Array.isArray(res.data)) {
-                setImageUrls(prev => ({ ...prev, [picint]: res.data }));
-            } else {
-                setImageUrls(prev => ({ ...prev, [picint]: [] }));
-            }
-        } catch {
-            setImageUrls(prev => ({ ...prev, [picint]: [] }));
+        const t = supplierType?.toLowerCase() || '';
+        let typed: 'watch' | 'diamond' | undefined;
+        if (t.includes('watch')) typed = 'watch'; else if (t.includes('diamond')) typed = 'diamond';
+        const endpoints = typed
+            ? [ `${API_BASEImage}/list/${typed}/${id}` , `${API_BASEImage}/list/${id}` ]
+            : [ `${API_BASEImage}/list/${id}` ];
+        for (const url of endpoints) {
+            try {
+                const res = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } });
+                if (Array.isArray(res.data)) {
+                    const list = res.data.map((u: string) => {
+                        if (typeof u !== 'string') return '';
+                        // Always force https for system.gaja.ly to avoid redirect on preflight
+                        if (u.startsWith('http://system.gaja.ly')) {
+                            u = 'https://system.gaja.ly' + u.substring('http://system.gaja.ly'.length);
+                        }
+                        // If page is https and URL is plain http (any host), upgrade
+                        if (window?.location?.protocol === 'https:' && u.startsWith('http://')) {
+                            try { const after = u.substring('http://'.length); u = 'https://' + after; } catch { /* ignore */ }
+                        }
+                        // Append token as query param to avoid Authorization header (which triggers preflight + redirect)
+                        if (token) {
+                            const urlObj = new URL(u, window.location.origin);
+                            // Remove existing token param to prevent duplication
+                            urlObj.searchParams.delete('token');
+                            urlObj.searchParams.append('token', token);
+                            u = urlObj.toString();
+                        }
+                        return u;
+                    }).filter(Boolean);
+                    setImageUrls(prev => ({ ...prev, [id]: list }));
+                    return;
+                }
+            } catch { /* try fallback */ }
         }
-
-
+        setImageUrls(prev => ({ ...prev, [id]: [] }));
     };
 
     // Helper to fetch image as blob and store object URL
     const fetchImageBlobs = async (picint: number, urls: string[]) => {
-        const token = localStorage.getItem('token');
         const blobUrls: string[] = [];
         for (const url of urls) {
             try {
-                const imgUrl = url.startsWith('http') ? url : `${API_BASEImage}/${url}`;
-                const res = await axios.get(imgUrl, {
-                    headers: { Authorization: `Bearer ${token}` },
-                    responseType: 'blob',
-                });
-                const blobUrl = URL.createObjectURL(res.data);
+                const imgUrl = url.startsWith('http') ? url : `${API_BASEImage}/${url}`; // url already has ?token
+                const resp = await fetch(imgUrl, { method: 'GET' });
+                if (!resp.ok) continue;
+                const blob = await resp.blob();
+                const blobUrl = URL.createObjectURL(blob);
                 blobUrls.push(blobUrl);
             } catch {
                 // fallback: skip or push empty
@@ -163,7 +282,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
     useEffect(() => {
         setLoading(true);
         const token = localStorage.getItem('token');
-        axios.get(`http://localhost:9000/invoices/allDetailsP`, {
+        axios.get(`/invoices/allDetailsP`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,
@@ -180,6 +299,13 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
             .catch(() => setData([]))
             .finally(() => setLoading(false));
     }, [type, periodFrom, periodTo, ps, isChira, isWholeSale, chiraRefreshFlag, invoiceRefreshFlag]);
+
+    // When filter criteria change (not internal refresh flags), clear cached images so they reload for the new dataset
+    useEffect(() => {
+        // Reset only on primary filter changes
+        setImageUrls({});
+        setImageBlobUrls({});
+    }, [type, periodFrom, periodTo, isChira, isWholeSale]);
 
     // Calculate total weight in gram (sum of qty for all rows)
     const totalWeight = data.reduce((sum, row) => {
@@ -266,7 +392,8 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                 if (typeSupplier.toLowerCase().includes('gold')) {
                     weight = achat.qty?.toString() || '';
                 }
-                const picint = row.picint || '';
+                // Prefer achat.picint, then achat.id_achat, then invoice.picint
+                const picint = achat.picint || achat.id_achat || row.picint || '';
 
                 const IS_GIFT = row.IS_GIFT || '';
 
@@ -295,34 +422,35 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
 
     // Fetch images for all invoices in sortedData when data changes
     useEffect(() => {
-        const picints: Set<number> = new Set();
+        const queued: { id: number, type?: string }[] = [];
         data.forEach((row: any) => {
-            if (row.picint && !imageUrls[row.picint]) {
-                picints.add(row.picint);
-            }
+            const supplierType = row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER;
+            if (row.picint) queued.push({ id: row.picint, type: supplierType });
+            (row.ACHATs || []).forEach((a: any) => {
+                const prodId = a.picint || a.id_achat;
+                if (prodId) queued.push({ id: prodId, type: a?.Fournisseur?.TYPE_SUPPLIER || supplierType });
+            });
         });
-        Array.from(picints).forEach(picint => fetchImages(picint));
+        // Fetch distinct
+        const seen = new Set<number>();
+        queued.forEach(q => { if (!seen.has(q.id)) { seen.add(q.id); fetchImages(q.id, q.type); } });
         // eslint-disable-next-line
     }, [sortedData]);
 
     // Fetch images for all product-level picints in sortedData when data changes
     useEffect(() => {
-        const allPicints: Set<number> = new Set();
+        // (Keeping this effect for safety but main fetching now handled by previous effect)
+        const pending: { id: number, type?: string }[] = [];
         sortedData.forEach((row: any) => {
-            // Collect invoice-level picint
-            if (row.picint && !imageUrls[row.picint]) {
-                allPicints.add(row.picint);
-            }
-            // Collect all product-level picints from ACHATs
-            if (Array.isArray(row.ACHATs)) {
-                row.ACHATs.forEach((achat: any) => {
-                    if (achat.picint && !imageUrls[achat.picint]) {
-                        allPicints.add(achat.picint);
-                    }
-                });
-            }
+            const supplierType = row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER;
+            if (row.picint && imageUrls[row.picint] === undefined) pending.push({ id: row.picint, type: supplierType });
+            (row.ACHATs || []).forEach((a: any) => {
+                const prodId = a.picint || a.id_achat;
+                if (prodId && imageUrls[prodId] === undefined) pending.push({ id: prodId, type: a?.Fournisseur?.TYPE_SUPPLIER || supplierType });
+            });
         });
-        Array.from(allPicints).forEach(picint => fetchImages(picint));
+        const unique = new Set<number>();
+        pending.forEach(p => { if (!unique.has(p.id)) { unique.add(p.id); fetchImages(p.id, p.type); } });
         // eslint-disable-next-line
     }, [sortedData]);
 
@@ -462,17 +590,8 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                     <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                         <tbody>
                             {details.map((d: any, idx: number) => {
-                                // Find the matching row in the original data by id_fact
-                                const matchingRow = data.find((row: any) => {
-                                    if (Array.isArray(row.ACHATs)) {
-                                        return row.ACHATs.some((achat: any) => achat.id_fact === d.code);
-                                    }
-                                    return false;
-                                });
-
-                                // Get the picint for this product row
-                                let productPicint = matchingRow.picint;
-
+                                // Use the product-level picint captured in mergeRowsByInvoice
+                                const productPicint = d.picint;
 
 
                                 const getProductImages = (achatPicint: number | undefined) => {
@@ -496,19 +615,26 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                                         </td>
                                         <td style={{ padding: '2px 6px', verticalAlign: 'middle', minWidth: 52, maxWidth: 220 }}>
                                             {productBlobUrls.length > 0 ? (
-                                                <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 4, overflowX: 'auto', whiteSpace: 'nowrap' }}>
-                                                    {productBlobUrls.map((url: string, i: number) => (
-                                                        <img
-                                                            key={i}
-                                                            src={url}
-                                                            alt={`Product Img ${i + 1}`}
-                                                            style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 4, border: '1px solid #eee', flex: '0 0 auto', cursor: 'pointer' }}
-                                                            onClick={() => {
-                                                                setImageDialogUrl(url);
-                                                                setImageDialogOpen(true);
-                                                            }}
-                                                        />
+                                                <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', gap: 4, overflow: 'hidden', whiteSpace: 'nowrap', position: 'relative' }}>
+                                                    {productBlobUrls.slice(0, 2).map((url: string, i: number) => (
+                                                        <div key={i} style={{ position: 'relative' }}>
+                                                            <img
+                                                                src={url}
+                                                                alt={`Product Img ${i + 1}`}
+                                                                style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 4, border: '1px solid #eee', flex: '0 0 auto', cursor: 'pointer' }}
+                                                                onClick={() => {
+                                                                    setImageDialogUrl(url);
+                                                                    setImageDialogOpen(true);
+                                                                }}
+                                                            />
+                                                        </div>
                                                     ))}
+                                                    {productBlobUrls.length > 2 && (
+                                                        <div style={{ width: 80, height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f5', border: '1px solid #eee', borderRadius: 4, fontSize: 12, fontWeight: 600, color: '#555' }}
+                                                             title={`+${productBlobUrls.length - 2} more images`}>
+                                                            +{productBlobUrls.length - 2}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ) : (
                                                 <span style={{ color: '#aaa' }}>No Image</span>
@@ -739,31 +865,31 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
 
     // Build styled HTML with embedded images for export (used by HTML and Excel exports)
     async function generateExportHtml(): Promise<string> {
-        // Convert all product images to base64 for export
-        async function blobUrlToBase64(blobUrl: string): Promise<string> {
-            return new Promise((resolve, reject) => {
-                fetch(blobUrl)
-                    .then(res => res.blob())
-                    .then(blob => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result as string);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    })
-                    .catch(reject);
-            });
-        }
-        // Build a map of picint to base64 image data URLs
+        // On-demand image conversion with global cap.
         const picintToBase64: Record<string, string[]> = {};
-        for (const [picint, urls] of Object.entries(imageBlobUrls)) {
-            picintToBase64[picint] = [];
-            for (const url of urls) {
-                try {
-                    const base64 = await blobUrlToBase64(url);
-                    picintToBase64[picint].push(base64);
-                } catch {
-                    // skip if error
+        const processed = new Set<string>();
+        let globalImageCount = 0;
+        let truncated = false;
+        for (const row of sortedData) {
+            if (truncated) break;
+            if (!row?._productDetails) continue;
+            for (const d of row._productDetails) {
+                if (truncated) break;
+                const picint = d.picint;
+                if (!picint || processed.has(String(picint))) continue;
+                processed.add(String(picint));
+                if (globalImageCount >= EXPORT_MAX_IMAGES) { truncated = true; break; }
+                const blobUrls = imageBlobUrls[picint] || [];
+                let candidateUrls: string[] = [];
+                if (blobUrls.length > 0) candidateUrls = blobUrls; else candidateUrls = imageUrls[picint] || await fetchImageListForExport(picint, d.typeSupplier);
+                const limited = candidateUrls.slice(0, 2);
+                const base64List: string[] = [];
+                for (const u of limited) {
+                    if (globalImageCount >= EXPORT_MAX_IMAGES) { truncated = true; break; }
+                    const b64 = await fetchAndDownscaleToBase64(u, EXPORT_IMG_SIZE);
+                    if (b64) { base64List.push(b64); globalImageCount++; }
                 }
+                picintToBase64[picint] = base64List;
             }
         }
         const logoUrl = '/logo.png';
@@ -783,7 +909,8 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                 .export-table tr:nth-child(even) { background: #fafafa; }
                 .export-footer { margin: 16px auto 0 auto; text-align: center; color: #757575; font-size: 0.9rem; }
                 .export-img-row { display: flex; flex-direction: row; gap: 6px; flex-wrap: wrap; }
-                .export-img-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid #e0e0e0; }
+                /* Use smaller fixed size for export images */
+                .export-img-row img { width: ${EXPORT_IMG_SIZE}px; height: ${EXPORT_IMG_SIZE}px; object-fit: cover; border-radius: 4px; border: 1px solid #e0e0e0; }
                 .export-product-table { width: 100%; border-collapse: collapse; margin: 0; }
                 .export-product-table th, .export-product-table td { border: 1px solid #eeeeee; padding: 4px 6px; font-size: 0.9rem; }
                 .export-product-table th { background: #f0f7ff; color: #1976d2; font-weight: 600; }
@@ -854,9 +981,18 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                     const picint = d.picint;
                     const urls = picint && picintToBase64[picint] ? picintToBase64[picint] : [];
                     const gift = d.IS_GIFT === true ? ' <span title="Gift">🎁</span>' : '';
-                    const imagesRow = urls.length > 0
-                        ? `<div class='export-img-row'>${urls.map((u: string) => `<img src='${u}' alt='Product' />`).join('')}</div>`
-                        : `<span style='color:#9e9e9e'>No Image</span>`;
+                    // Limit to first two images to mirror on-screen table; show +N if more
+                    let imagesRow = '';
+                    if (urls.length > 0) {
+                        const visible = urls.slice(0, 2);
+                        const extra = urls.length - visible.length;
+                        imagesRow = `<div class='export-img-row'>` +
+                            visible.map((u: string) => `<img src='${u}' alt='Product' width='${EXPORT_IMG_SIZE}' height='${EXPORT_IMG_SIZE}' style='width:${EXPORT_IMG_SIZE}px;height:${EXPORT_IMG_SIZE}px;object-fit:cover;border-radius:4px;border:1px solid #e0e0e0;mso-width-source:userset;mso-height-source:userset;' />`).join('') +
+                            (extra > 0 ? `<div style='width:${EXPORT_IMG_SIZE}px;height:${EXPORT_IMG_SIZE}px;display:flex;align-items:center;justify-content:center;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;font-size:12px;font-weight:600;color:#555;'>+${extra}</div>` : '') +
+                            `</div>`;
+                    } else {
+                        imagesRow = `<span style='color:#9e9e9e'>No Image</span>`;
+                    }
                     detailsHtml += `<tr><td>${lineText}${gift}<div style='margin-top:4px'>${imagesRow}</div></td></tr>`;
                 });
                 detailsHtml += `</tbody></table>`;
@@ -910,6 +1046,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                         <td colspan="5" style="text-align:right;">Total Watch:</td>
                         <td colspan="3" style="text-align:left; color:#1976d2;">${formatNumber(totalWatch)} USD</td>
                     </tr>
+                    ${truncated ? `<tr><td colspan='8' style='text-align:center;font-size:12px;color:#d32f2f;'>Image export truncated after ${globalImageCount} images (max ${EXPORT_MAX_IMAGES}).</td></tr>` : ''}
                 </tfoot>
             </table>
             <div class="export-footer">Generated on ${new Date().toLocaleString()}</div>
@@ -948,19 +1085,6 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
     // Generate an MHTML document with embedded images (cid) for Excel
     async function generateExportMhtml(): Promise<string> {
         // 1) Collect images as base64
-        async function blobUrlToBase64(blobUrl: string): Promise<string> {
-            return new Promise((resolve, reject) => {
-                fetch(blobUrl)
-                    .then(res => res.blob())
-                    .then(blob => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result as string);
-                        reader.onerror = reject;
-                        reader.readAsDataURL(blob);
-                    })
-                    .catch(reject);
-            });
-        }
         const parseDataUrl = (dataUrl: string): { mime: string; base64: string } | null => {
             const match = dataUrl.match(/^data:(.*?);base64,(.*)$/);
             if (!match) return null;
@@ -971,21 +1095,32 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
         const picintToCidImages: Record<string, { cid: string; mime: string; base64: string }[]> = {};
         const allImages: { cid: string; mime: string; base64: string }[] = [];
         let idx = 1;
-        for (const [picint, urls] of Object.entries(imageBlobUrls)) {
-            picintToCidImages[picint] = [];
-            for (const url of urls) {
+        let globalImageCount = 0;
+        let truncated = false;
+        const needed: { picint: number, supplierType?: string }[] = [];
+        sortedData.forEach((row: any) => (row._productDetails || []).forEach((d: any) => { if (d.picint) needed.push({ picint: d.picint, supplierType: d.typeSupplier }); }));
+        const uniquePicints = Array.from(new Set(needed.map(n => n.picint)));
+        for (const picint of uniquePicints) {
+            if (truncated) break;
+            const pd = needed.find(n => n.picint === picint);
+            const blobUrls = imageBlobUrls[picint] || [];
+            let candidateUrls: string[] = [];
+            if (blobUrls.length > 0) candidateUrls = blobUrls; else candidateUrls = imageUrls[picint] || await fetchImageListForExport(picint, pd?.supplierType);
+            const limited = candidateUrls.slice(0, 2);
+            const parts: { cid: string; mime: string; base64: string }[] = [];
+            for (const raw of limited) {
+                if (globalImageCount >= EXPORT_MAX_IMAGES) { truncated = true; break; }
                 try {
-                    const b64url = await blobUrlToBase64(url);
-                    const parsed = parseDataUrl(b64url);
+                    const down = await fetchAndDownscaleToBase64(raw, EXPORT_IMG_SIZE);
+                    if (!down) continue;
+                    const parsed = parseDataUrl(down);
                     if (!parsed) continue;
                     const cid = `image${String(idx++).padStart(4, '0')}`;
                     const part = { cid, mime: parsed.mime, base64: parsed.base64 };
-                    picintToCidImages[picint].push(part);
-                    allImages.push(part);
-                } catch {
-                    // skip
-                }
+                    parts.push(part); allImages.push(part); globalImageCount++;
+                } catch { /* skip */ }
             }
+            picintToCidImages[String(picint)] = parts;
         }
 
         // 2) Build HTML body that references images by cid
@@ -1011,7 +1146,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                 .export-table tr:nth-child(even) { background: #fafafa; }
                 .export-footer { margin: 16px auto 0 auto; text-align: center; color: #757575; font-size: 0.9rem; }
                 .export-img-row { display: flex; flex-direction: row; gap: 6px; flex-wrap: wrap; }
-                .export-img-row img { width: 64px; height: 64px; object-fit: cover; border-radius: 4px; border: 1px solid #e0e0e0; }
+                .export-img-row img { width: ${EXPORT_IMG_SIZE}px; height: ${EXPORT_IMG_SIZE}px; object-fit: cover; border-radius: 4px; border: 1px solid #e0e0e0; }
                 .export-product-table { width: 100%; border-collapse: collapse; margin: 0; }
                 .export-product-table th, .export-product-table td { border: 1px solid #eeeeee; padding: 4px 6px; font-size: 0.9rem; }
                 .export-product-table th { background: #f0f7ff; color: #1976d2; font-weight: 600; }
@@ -1076,9 +1211,18 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                     const picint = d.picint;
                     const imgs = picint && picintToCidImages[String(picint)] ? picintToCidImages[String(picint)] : [];
                     const gift = d.IS_GIFT === true ? ' <span title="Gift">🎁</span>' : '';
-                    const imagesRow = imgs.length > 0
-                        ? `<div class='export-img-row'>${imgs.map((p) => `<img src='cid:${p.cid}' alt='Product' />`).join('')}</div>`
-                        : `<span style='color:#9e9e9e'>No Image</span>`;
+                    // Limit to first two images for Excel export as well, with +N indicator
+                    let imagesRow = '';
+                    if (imgs.length > 0) {
+                        const visible = imgs.slice(0, 2);
+                        const extra = imgs.length - visible.length;
+                        imagesRow = `<div class='export-img-row'>` +
+                            visible.map((p) => `<img src='cid:${p.cid}' alt='Product' width='${EXPORT_IMG_SIZE}' height='${EXPORT_IMG_SIZE}' style='width:${EXPORT_IMG_SIZE}px;height:${EXPORT_IMG_SIZE}px;object-fit:cover;border-radius:4px;border:1px solid #e0e0e0;mso-width-source:userset;mso-height-source:userset;' />`).join('') +
+                            (extra > 0 ? `<div style='width:${EXPORT_IMG_SIZE}px;height:${EXPORT_IMG_SIZE}px;display:flex;align-items:center;justify-content:center;background:#f5f5f5;border:1px solid #e0e0e0;border-radius:4px;font-size:12px;font-weight:600;color:#555;'>+${extra}</div>` : '') +
+                            `</div>`;
+                    } else {
+                        imagesRow = `<span style='color:#9e9e9e'>No Image</span>`;
+                    }
                     detailsHtml += `<tr><td>${lineText}${gift}<div style='margin-top:4px'>${imagesRow}</div></td></tr>`;
                 });
                 detailsHtml += `</tbody></table>`;
@@ -1131,6 +1275,7 @@ const SalesReportsTable = ({ type: initialType }: { type?: 'gold' | 'diamond' | 
                         <td colspan="4" style="text-align:right;">Total Watch:</td>
                         <td colspan="2" style="text-align:left; color:#1976d2;">${formatNumber(totalWatch)} USD</td>
                     </tr>
+                    ${truncated ? `<tr><td colspan='6' style='text-align:center;font-size:12px;color:#d32f2f;'>Image export truncated after ${globalImageCount} images (max ${EXPORT_MAX_IMAGES}).</td></tr>` : ''}
                 </tfoot>
             </table>
             <div class="export-footer">Generated on ${new Date().toLocaleString()}</div>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import {
   Box, IconButton, Tooltip, Button, Dialog,
   DialogActions, DialogContent, DialogTitle, TextField,
@@ -46,7 +46,13 @@ const ItemsTypes = () => {
         default: themeMode === localStorage.getItem('themeMode') ? '#121212' : '#fafafa',
         paper: themeMode === localStorage.getItem('themeMode')? '#1E1E1E' : '#fff',
       },
+      text: { primary: themeMode === 'dark' ? '#9e9e9e' : '#374151', secondary: themeMode === 'dark' ? '#9e9e9e' : '#374151' },
     },
+    components: {
+      MuiFormLabel: { styleOverrides: { root: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
+      MuiInputLabel: { styleOverrides: { root: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
+      MuiFormControlLabel: { styleOverrides: { label: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
+    }
   });
 
   const fetchData = async () => {

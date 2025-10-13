@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, TextField, Button } from '@mui/material';
 import { MaterialReactTable, MRT_ColumnDef } from 'material-react-table';
-import axios from 'axios';
+import axios from "../api";
 import Autocomplete from '@mui/material/Autocomplete';
 type Client = {
     id_client: number;

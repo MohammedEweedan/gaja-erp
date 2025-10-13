@@ -23,7 +23,7 @@ import {
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
-import axios from 'axios';
+import axios from "../../api";
 
 // Icons
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';

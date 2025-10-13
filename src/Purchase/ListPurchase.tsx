@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../api";
 import { useNavigate } from 'react-router-dom';
 import {
   MaterialReactTable,
@@ -75,7 +75,7 @@ const ListPurchase = () => {
   const [errors, setErrors] = useState<any>({});
   const navigate = useNavigate();
   const apiIp = process.env.REACT_APP_API_IP;
-  const apiUrl = `${apiIp}/customers`;
+  const apiUrl = `http://${apiIp}/customers`;
 
   // Get theme mode from localStorage or default to 'dark'
   const savedThemeMode = localStorage.getItem('themeMode') as 'light' | 'dark' || 'dark';
@@ -236,7 +236,7 @@ const ListPurchase = () => {
     <ThemeProvider theme={themeMode === localStorage.getItem('themeMode') ? darkTheme : lightTheme}>
       <Box p={0.5} >
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+          <Typography  color="text.primary" variant="h5" sx={{ fontWeight: 'bold' }}>
             Customers List
           </Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>

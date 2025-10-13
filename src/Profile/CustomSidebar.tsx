@@ -34,11 +34,9 @@ function CustomSidebar({ navigation, routeMap, mode, onToggleTheme, onLogout }: 
     const theme = useTheme();
     const { t } = useTranslation();
 
-    // Accent color from theme: gold in dark mode, navy in light mode
+    // Accent color from theme: use unified gaja[100] for both modes
     const gaja = (theme.palette as any)?.gaja as Record<string, string> | undefined;
-    const accent = theme.palette.mode === 'dark'
-        ? (gaja?.[100] ?? '#b7a27d')
-        : (gaja?.[50] ?? '#334d68');
+    const accent = (gaja?.[100]) ?? theme.palette.text.primary;
 
     // Helper to get the full path for a segment
     const getPath = (segment: string | undefined, parent?: string) => {

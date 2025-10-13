@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, CircularProgress, FormControl, InputLabel, Select, MenuItem, TextField, Dialog, DialogTitle, DialogContent, IconButton, Button, Autocomplete } from '@mui/material';
-import axios from 'axios';
+import axios from "../api";
 import { MaterialReactTable, type MRT_ColumnDef } from 'material-react-table';
 
 
@@ -53,7 +53,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
     const [selectedCustomer, setSelectedCustomer] = useState<Client | null>(null);
 
     const apiIp = process.env.REACT_APP_API_IP;
-    const API_BASEImage = 'http://localhost:9000/images';
+    const API_BASEImage = '/images';
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
     const [imageBlobUrls, setImageBlobUrls] = useState<Record<string, string[]>>({});
     let ps: string | null = null;
@@ -71,7 +71,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
 
 
     const apiUrlcustomers = `${apiIp}/customers`;
-    const apiUrlRevenue = "http://localhost:9000/Revenue";
+    const apiUrlRevenue = "/Revenue";
 
 
     // Fetch customers
@@ -205,7 +205,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
         const token = localStorage.getItem('token');
         if (!token) return;
         // Only fetch invoices for selected customer
-        axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
+        axios.get(`/invoices/allDetailsPC`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,
@@ -252,7 +252,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
             return;
         }
         const token = localStorage.getItem('token');
-        axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
+        axios.get(`/invoices/allDetailsPC`, {
             headers: { Authorization: `Bearer ${token}` },
             params: {
                 ps: ps,
@@ -1354,7 +1354,7 @@ const CustomersReports = ({ type: initialType }: { type?: 'gold' | 'diamond' | '
                             }
                             const token = localStorage.getItem('token');
                             if (!token) return;
-                            axios.get(`http://localhost:9000/invoices/allDetailsPC`, {
+                            axios.get(`/invoices/allDetailsPC`, {
                                 headers: { Authorization: `Bearer ${token}` },
                                 params: {
                                     ps: ps,

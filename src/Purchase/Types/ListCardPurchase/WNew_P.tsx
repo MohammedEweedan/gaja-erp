@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -21,6 +21,7 @@ import {
     DialogActions,
     DialogContentText
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -150,6 +151,9 @@ interface NewPProps {
 }
 
 const WNew_p = (props: NewPProps) => {
+    const theme = useTheme();
+    const labelColor = theme.palette.text.secondary;
+    const valueColor = theme.palette.primary.main;
 
     const { num_fact, distribution, onReceived, brand, referencePurchase } = props;
 
@@ -182,60 +186,56 @@ const WNew_p = (props: NewPProps) => {
     const [pendingSave, setPendingSave] = useState(false);
 
     const navigate = useNavigate();
-    let ps: string | null = null;
-    let Cuser: string | null = null;
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-        try {
-            const userObj = JSON.parse(userStr);
-            ps = userObj.ps ?? localStorage.getItem('ps');
-            Cuser = userObj.Cuser ?? localStorage.getItem('Cuser');
-        } catch {
-            ps = localStorage.getItem('ps');
-            Cuser = localStorage.getItem('Cuser');
-        }
-    } else {
-        ps = localStorage.getItem('ps');
-        Cuser = localStorage.getItem('Cuser');
+    const location = useLocation();
+    // Robust ps/Cuser derivation: prefer route state, fallback to localStorage(user JSON -> keys) -> localStorage keys -> 0
+    const statePs = (location.state as any)?.ps;
+    const stateCuser = (location.state as any)?.Cuser;
+    let psVal = 0;
+    let CuserVal = 0;
+    try {
+        const userStr = localStorage.getItem('user');
+        const userObj = userStr ? JSON.parse(userStr) : undefined;
+        const lsPs = userObj?.ps ?? localStorage.getItem('ps');
+        const lsCuser = userObj?.Cuser ?? localStorage.getItem('Cuser');
+        psVal = Number(statePs ?? lsPs) || 0;
+        CuserVal = Number(stateCuser ?? lsCuser) || 0;
+    } catch {
+        const lsPs = localStorage.getItem('ps');
+        const lsCuser = localStorage.getItem('Cuser');
+        psVal = Number(statePs ?? lsPs) || 0;
+        CuserVal = Number(stateCuser ?? lsCuser) || 0;
     }
-    const apiUrl = "http://localhost:9000/purchases";
+    const apiUrl = "/purchases";
 
 
-    const API_BASEImage = 'http://localhost:9000/images'; // Adjust if needed
+    const API_BASEImage = '/images'; // Adjust if needed
     const [images, setImages] = useState<string[]>([]);
     const [carouselIndex, setCarouselIndex] = useState(0); // Add carousel index state
 
     // Helper to fetch image as blob with auth and return object URL
-    const fetchImageWithAuth = async (url: string, token: string) => {
-        try {
-            const res = await axios.get(url, {
-                headers: { Authorization: `Bearer ${token}` },
-                responseType: 'blob',
-            });
-            return URL.createObjectURL(res.data);
-        } catch (err) {
-            return '';
-        }
-    };
+    // REMOVED: fetchImageWithAuth. We now use direct URLs for images (no blob fetch, no auth header needed)
 
     // Update fetchImages to fetch blobs with auth
     const fetchImages = async (id_achat: number) => {
-        const token = localStorage.getItem('token');
-        if (!token || !id_achat) return;
+        if (!id_achat) return;
         try {
+            const token = localStorage.getItem('token');
             const res = await axios.get(`${API_BASEImage}/list/${id_achat}`, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
             });
+            console.log('[WNew_P] /images/list response:', res.data);
             let urls: string[] = [];
             if (Array.isArray(res.data) && res.data.length > 0 && typeof res.data[0] === 'object') {
                 urls = res.data.map((img: any) => img.url || img);
             } else {
                 urls = res.data;
             }
-            // Fetch all images as blobs with auth
-            const blobUrls = await Promise.all(urls.map(url => fetchImageWithAuth(url, token)));
-            setImages(blobUrls.filter(Boolean));
+            // Force https for all image URLs
+            urls = urls.map(u => typeof u === 'string' && u.startsWith('http://') ? u.replace('http://', 'https://') : u);
+            console.log('[WNew_P] Image URLs (https):', urls);
+            setImages(urls.filter(Boolean));
         } catch (err) {
+            console.error('[WNew_P] Error fetching images:', err);
             setImages([]);
         }
     };
@@ -349,7 +349,8 @@ const WNew_p = (props: NewPProps) => {
         try {
             const res = await axios.get<Purchase[]>(`${apiUrl}/Getpurchase`, {
                 headers: { Authorization: `Bearer ${token}` },
-                params: { ps, num_fact: num_fact }
+                // Ensure ps is always present and num_fact numeric
+                params: { ps: psVal, num_fact: Number(num_fact) || 0 }
             });
             setData(res.data);
 
@@ -366,17 +367,18 @@ const WNew_p = (props: NewPProps) => {
             setItemCount(res.data.length);
         } catch (err: any) {
             if (err.response?.status === 401) navigate("/");
-            showNotification('Failed to fetch purchase data', 'error');
+            const msg = err.response?.data?.message || err.message || 'Failed to fetch purchase data';
+            console.error('Fetch purchases error:', err);
+            showNotification(`${msg}`, 'error');
         } finally {
             setLoading(false);
         }
     };
 
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = "http://localhost:9000/suppliers";
+        const apiUrlsuppliers = "/suppliers";
         const token = localStorage.getItem('token');
         try {
-            setLoadingSuppliers(true);
             const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -391,7 +393,7 @@ const WNew_p = (props: NewPProps) => {
             console.error("Error fetching suppliers:", error);
             showNotification('Failed to fetch suppliers', 'error');
         } finally {
-            setLoadingSuppliers(false);
+            // no-op
         }
     };
 
@@ -401,7 +403,7 @@ const WNew_p = (props: NewPProps) => {
 
         try {
             const response = await axios.get(
-                `http://localhost:9000/Dpurchases/ProductDetails`,
+                `/Dpurchases/ProductDetails`,
                 {
                     headers: { Authorization: `Bearer ${token}` },
                     params: { distributionID, type }
@@ -410,6 +412,9 @@ const WNew_p = (props: NewPProps) => {
 
 
             setProductDetails(response.data); // Store product details in state
+
+
+          
             return response.data;
 
 
@@ -428,6 +433,8 @@ const WNew_p = (props: NewPProps) => {
 
     // Prefill fields from distribution if present
     useEffect(() => {
+
+        
         const fillFromDistribution = async () => {
             if (distribution) {
                 const type = distribution.PurchaseType?.toLowerCase();
@@ -547,8 +554,8 @@ const WNew_p = (props: NewPProps) => {
         setEditPurchase({
             ...initialPurchaseState,
             num_fact: num_fact || 0,
-            usr: Number(Cuser),
-            ps: Number(ps),
+            usr: CuserVal,
+            ps: psVal,
             date_fact: new Date().toISOString().split('T')[0]
         });
         setErrors({});
@@ -616,9 +623,7 @@ const WNew_p = (props: NewPProps) => {
     };
 
     const handleCancel = () => {
-        setShowPurchaseForm(false);
-        setEditPurchase(initialPurchaseState);
-        setErrors({});
+        resetForm();
     };
 
     const handleSave = async () => {
@@ -629,7 +634,9 @@ const WNew_p = (props: NewPProps) => {
             // If not used supplier, set default values for these fields
             const payloadData = {
                 ...editPurchase,
-                Selling_Price_Currency: productDetails[0].purchaseW.sale_price,
+                Selling_Price_Currency: isUsedSupplier
+                    ? editPurchase.Selling_Price_Currency
+                    : (productDetails?.[0]?.purchaseW?.sale_price ?? editPurchase.Selling_Price_Currency ?? 0),
                 CURRENCY: isUsedSupplier ? editPurchase.CURRENCY : 'USD',
                 RATE: isUsedSupplier ? editPurchase.RATE : 1,
                 Cost_Lyd: isUsedSupplier ? editPurchase.Cost_Lyd : 0,
@@ -638,8 +645,8 @@ const WNew_p = (props: NewPProps) => {
             const payload = {
                 ...payloadData,
                 num_fact: num_fact,
-                usr: Cuser,
-                ps: ps,
+                usr: CuserVal,
+                ps: psVal,
                 client: editPurchase.Fournisseur?.id_client || editPurchase.client
             };
             let responseData: Purchase;
@@ -675,7 +682,7 @@ const WNew_p = (props: NewPProps) => {
 
 
                 await axios.put(
-                    `http://localhost:9000/Dpurchases/UpdateStatus/${distribution.distributionID}`,
+                    `/Dpurchases/UpdateStatus/${distribution.distributionID}`,
                     { DistributionISOK: true },
                     { headers: { Authorization: `Bearer ${token}` } }
                 ).catch((error) => {
@@ -738,20 +745,20 @@ const WNew_p = (props: NewPProps) => {
         setDeleteDialog({ open: false, purchaseId: null, purchaseNum: null });
     };
 
-    const apiUrlProducts = "http://localhost:9000/products";
+    const apiUrlProducts = "/products";
 
     const fetchDataProducts = async () => {
         const token = localStorage.getItem('token');
         if (!token) return navigate("/");
 
         try {
-            const response = await axios.get<Product[]>(`${apiUrlProducts}/all`, {
+            const response = await axios.get<Product[]>(`/products/all`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             setProductsdata(response.data);
         } catch (error: any) {
             if (error.response?.status === 401) navigate("/");
-            else alert("Error loading data");
+            else alert("Error loading data...");
         } finally {
             setLoading(false);
         }
@@ -1068,7 +1075,7 @@ const WNew_p = (props: NewPProps) => {
                     sx={{
                         mb: 2,
                         borderRadius: 2,
-                        borderColor: '#1b5e20',
+                        borderColor: 'success.main',
                         backgroundColor: 'inherit',
                         color: 'inherit',
                         borderWidth: 2,
@@ -1087,7 +1094,7 @@ const WNew_p = (props: NewPProps) => {
                             gap: 4,
                             padding: 1,
                             justifyContent: 'center',
-                            borderColor: '#1b5e20',
+                            borderColor: 'success.main',
                           
                             margin: '0 auto',
                             overflowX: 'auto',
@@ -1106,76 +1113,76 @@ const WNew_p = (props: NewPProps) => {
                                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                     <tbody>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Brand:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.supplier?.client_name || productDetails[0].purchaseW.Brand || 'N/A'}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Model:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.model}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Reference Number:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.reference_number}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Brand:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.supplier?.client_name || productDetails[0].purchaseW.Brand || 'N/A'}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Model:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.model}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Reference Number:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.reference_number}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Serial Number:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.serial_number}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Movement:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.movement}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Caliber:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.caliber}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Serial Number:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.serial_number}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Movement:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.movement}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Caliber:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.caliber}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Gender:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.gender}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Condition:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.condition}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Diamond Total Carat:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.diamond_total_carat}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Gender:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.gender}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Condition:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.condition}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Diamond Total Carat:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.diamond_total_carat}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Diamond Quality:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.diamond_quality}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Diamond Setting:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.diamond_setting}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Number of Diamonds:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.number_of_diamonds}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Diamond Quality:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.diamond_quality}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Diamond Setting:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.diamond_setting}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Number of Diamonds:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.number_of_diamonds}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Custom/Factory:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.custom_or_factory}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Case Material:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.case_material}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Case Size:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.case_size}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Custom/Factory:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.custom_or_factory}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Case Material:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.case_material}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Case Size:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.case_size}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Bezel:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.bezel}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Bracelet Type:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.bracelet_type}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Bracelet Material:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.bracelet_material}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Bezel:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.bezel}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Bracelet Type:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.bracelet_type}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Bracelet Material:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.bracelet_material}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Dial Color:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.dial_color}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Dial Style:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.dial_style}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Crystal:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.crystal}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Dial Color:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.dial_color}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Dial Style:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.dial_style}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Crystal:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.crystal}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Water Resistance:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.water_resistance}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Functions:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.functions}</td>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Power Reserve:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.power_reserve}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Water Resistance:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.water_resistance}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Functions:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.functions}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Power Reserve:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.power_reserve}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Box & Papers:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.box_papers ? 'Yes' : 'No'}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Box & Papers:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.box_papers ? 'Yes' : 'No'}</td>
                                         </tr>
                                         <tr>
-                                            <td style={{ color: '#1b5e20', fontWeight: 500 }}>Sale Price:</td>
-                                            <td style={{ color: '#0d47a1' }}>{productDetails[0].purchaseW.sale_price}</td>
+                                            <td style={{ color: labelColor, fontWeight: 500 }}>Sale Price:</td>
+                                            <td style={{ color: valueColor }}>{productDetails[0].purchaseW.sale_price}</td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -1186,11 +1193,12 @@ const WNew_p = (props: NewPProps) => {
 
                         <Box sx={{
                             display: 'flex', flexDirection: 'row', justifyItems: 'stretch', gap: 2, alignItems: 'center',
-                            padding: 1,
+                            padding: 1,borderColor: 'success.main',borderRadius: 2, borderWidth: 1, borderStyle: 'solid'
+                     
                         }}>
                             {/* Carousel for images */}
                             {images.length > 0 ? (
-                                <Box sx={{ flex: 1, height:300,minWidth: 320, maxWidth: 520, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <Box sx={{ flex: 1,   display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                     <Typography variant="subtitle1" sx={{ mb: 1 }}>Images</Typography>
                                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                         <IconButton onClick={() => setCarouselIndex(i => (i - 1 + images.length) % images.length)}>
@@ -1199,7 +1207,11 @@ const WNew_p = (props: NewPProps) => {
                                         <img
                                             src={images[carouselIndex]}
                                             alt={`Watch ${carouselIndex + 1}`}
-                                            style={{ maxHeight: 500,height:250, maxWidth: 480, borderRadius: 8, border: '1px solid #ccc' }}
+                                            style={{ maxHeight: 500, height:250, maxWidth: 480, borderRadius: 8, border: '1px solid #ccc' }}
+                                            onError={e => {
+                                                console.error('[WNew_P] Image failed to load:', images[carouselIndex]);
+                                                (e.target as HTMLImageElement).style.opacity = '0.3';
+                                            }}
                                         />
                                         <IconButton onClick={() => setCarouselIndex(i => (i + 1) % images.length)}>
                                             {'>'}

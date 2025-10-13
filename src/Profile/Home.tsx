@@ -1,6 +1,6 @@
 // src/pages/Home.tsx
 import * as React from 'react';
-import { createTheme, ThemeProvider, StyledEngineProvider, alpha } from '@mui/material/styles';
+import { createTheme, ThemeProvider, StyledEngineProvider } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 import {
   AppProvider,
@@ -16,6 +16,7 @@ import {
   Alert,
   Tooltip,
   CssBaseline,
+  Chip,
 } from '@mui/material';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -61,7 +62,7 @@ import FinanceSettings from '../Setup/Finance/FinanceSettings';
 import SCSSettings from '../Setup/SCS/SCSSettings';
 import GPurchase from '../Purchase/Types/GPurchase';
 import OPurchase from '../Purchase/OriginalAchat/OPurchase';
-import DOPurchase from '../Purchase/OriginalAchat/DOPurchase';
+import Dpage from '../Purchase/OriginalAchat/DOPurchase/Dpage';
 import Wpage from '../Purchase/OriginalAchat/WOPurchase/Wpage';
 import GInventory from '../Inventory/GInventory';
 import DInventory from '../Inventory/DInventory';
@@ -81,15 +82,7 @@ import createCache from '@emotion/cache';
 import { CacheProvider } from '@emotion/react';
 
 // ---------- Roles ----------
-const showGeneralSettings = hasRole('User');
-const showOpurchasde = hasRole('Purchase');
-const showReceiveProducts = hasRole('Receive Products');
-const showInvoices = hasRole('General Invoices');
-const showInventory = hasRole('inventory');
-const showcashbook = hasRole('Cash Book');
-const showHR = hasRole('User');
-const showFin = hasRole('Finance');
-const showSales = hasRole('Sales Settings');
+// Moved role checks into component scope to evaluate after login
 
 // ---------- Theme tokens with gaja palette (must exist globally) ----------
 declare module '@mui/material/styles' {
@@ -115,18 +108,24 @@ declare module '@mui/material/styles' {
 const getDesignTokens = (mode: 'light' | 'dark') => ({
   palette: {
     mode,
-    gaja: {
-      50: '#334d68',
-      100: '#b7a27d', // ← gold accent
-      200: '#334d68',
-      300: '#b7a27d',
-      400: '#b7a27d',
-      500: '#b7a27d',
-      600: '#334d68',
-      700: '#b7a27d',
-      800: '#334d68',
-      900: '#b7a27d',
-    },
+    // GAJA accent unified baseline; slightly darker in light mode
+    gaja: (() => {
+  // Darker neutral in light mode, baseline neutral in dark mode
+  const accent = mode === 'light' ? '#4b5563' : '#9e9e9e';
+      // Keep structure, use accent for all slots that previously used gold
+      return {
+        50: '#334d68',
+        100: accent,
+        200: '#334d68',
+        300: accent,
+        400: accent,
+        500: accent,
+        600: '#334d68',
+        700: accent,
+        800: '#334d68',
+        900: accent,
+      } as any;
+    })(),
     ...(mode === 'light'
       ? {
           primary: { main: '#1976d2' },
@@ -283,7 +282,7 @@ function getPageComponent(pathname: string) {
     case '/inventory/watchesinventory': return <WInventoryWrapper type="watches" />;
     case '/inventory/boxesinventory': return <BInventoryWrapper type="boxes" />;
     case '/purchaseProducts/OPurchase': return <OPurchase />;
-    case '/purchaseProducts/DOPurchase': return <DOPurchase />;
+    case '/purchaseProducts/DOPurchase': return <Dpage />;
     case '/purchaseProducts/WOPurchase': return <Wpage />;
     case '/cashBook/cashdeposit': return <Revenue />;
     case '/cashBook/cashexpenses': return <Expenses />;
@@ -294,11 +293,25 @@ function getPageComponent(pathname: string) {
 }
 
 // ---------- Navigation using i18n & gaja.100 on icons ----------
-function buildNavigation(t: (k: string) => string): Navigation {
+function buildNavigation(
+  t: (k: string) => string,
+  accent: string,
+  visibility: {
+    showGeneralSettings: boolean;
+    showOpurchasde: boolean;
+    showReceiveProducts: boolean;
+    showInvoices: boolean;
+    showInventory: boolean;
+    showcashbook: boolean;
+    showHR: boolean;
+    showFin: boolean;
+    showSales: boolean;
+  }
+): Navigation {
   const iconSx = {
-    sx: (th: Theme) => ({
-      color: ((th.palette as any)?.gaja?.[100]) ?? '#b7a27d',
-    }),
+    sx: {
+      color: accent,
+    },
   } as const;
 
   return [
@@ -311,13 +324,13 @@ function buildNavigation(t: (k: string) => string): Navigation {
       title: t('nav.setting.root'),
       icon: <TuneIcon {...iconSx} />,
       children: [
-        showGeneralSettings && { segment: 'generals', title: t('nav.setting.general'), icon: <SettingsIcon {...iconSx} /> },
-        showHR && { segment: 'hrSetting', title: t('nav.setting.hr'), icon: <PeopleAltIcon {...iconSx} /> },
-        showFin && { segment: 'finSetting', title: t('nav.setting.finance'), icon: <MonetizationOnIcon {...iconSx} /> },
-        showSales && { segment: 'spySetting', title: t('nav.setting.sales'), icon: <WarehouseIcon {...iconSx} /> },
+        visibility.showGeneralSettings && { segment: 'generals', title: t('nav.setting.general'), icon: <SettingsIcon {...iconSx} /> },
+        visibility.showHR && { segment: 'hrSetting', title: t('nav.setting.hr'), icon: <PeopleAltIcon {...iconSx} /> },
+        visibility.showFin && { segment: 'finSetting', title: t('nav.setting.finance'), icon: <MonetizationOnIcon {...iconSx} /> },
+        visibility.showSales && { segment: 'spySetting', title: t('nav.setting.sales'), icon: <WarehouseIcon {...iconSx} /> },
       ].filter(Boolean) as any[],
     },
-    ...(showOpurchasde
+    ...(visibility.showOpurchasde
       ? [{
           segment: 'purchaseProducts',
           title: t('nav.purchase.root'),
@@ -329,7 +342,7 @@ function buildNavigation(t: (k: string) => string): Navigation {
           ],
         }]
       : []),
-    ...(showReceiveProducts
+    ...(visibility.showReceiveProducts
       ? [{
           segment: 'receiveProducts',
           title: t('nav.receive.root'),
@@ -342,7 +355,7 @@ function buildNavigation(t: (k: string) => string): Navigation {
           ],
         }]
       : []),
-    ...(showInvoices
+    ...(visibility.showInvoices
       ? [{
           segment: 'invoice',
           title: t('nav.invoice.root'),
@@ -355,7 +368,7 @@ function buildNavigation(t: (k: string) => string): Navigation {
           ],
         }]
       : []),
-    ...(showInventory
+    ...(visibility.showInventory
       ? [{
           segment: 'inventory',
           title: t('nav.inventory.root'),
@@ -368,7 +381,7 @@ function buildNavigation(t: (k: string) => string): Navigation {
           ],
         }]
       : []),
-    ...(showcashbook
+    ...(visibility.showcashbook
       ? [{
           segment: 'cashBook',
           title: t('nav.cashbook.root'),
@@ -382,7 +395,7 @@ function buildNavigation(t: (k: string) => string): Navigation {
           ],
         }]
       : []),
-    ...(showHR
+    ...(visibility.showHR
       ? [{
           segment: 'humanRessources',
           title: t('nav.hr.root'),
@@ -423,7 +436,13 @@ function createEmotionCache(direction: 'ltr' | 'rtl') {
 // ---------- Component ----------
 export default function Home(props: any) {
   const { t, i18n } = useTranslation();
-  const [mode, setMode] = React.useState<'light' | 'dark'>(() => 'dark');
+  const [mode, setMode] = React.useState<'light' | 'dark'>(() => {
+    try {
+      const saved = typeof window !== 'undefined' ? (localStorage.getItem('themeMode') as 'light' | 'dark' | null) : null;
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {}
+    return 'light';
+  });
   const dir = i18n.dir() as 'ltr' | 'rtl';
 
 
@@ -479,110 +498,83 @@ export default function Home(props: any) {
     if (reason === 'clickaway') return;
     setSnackbarOpen(false);
   };
+  // Current real path (decrypt if needed)
+  // Accent: darker in light mode (#374151), baseline in dark mode
+  const accent = (mode === 'light' ? '#374151' : '#9e9e9e');
 
-  const NAV = React.useMemo<Navigation>(() => buildNavigation(t), [t]);
+  // Compute visibility flags from roles (reads localStorage via hasRole)
+  const visibility = React.useMemo(() => ({
+    showGeneralSettings: hasRole('User'),
+    showOpurchasde: hasRole('Purchase'),
+    showReceiveProducts: hasRole('Receive Products'),
+    showInvoices: hasRole('General Invoices'),
+    showInventory: hasRole('inventory'),
+    showcashbook: hasRole('Cash Book'),
+    showHR: hasRole('User'),
+    showFin: hasRole('Finance'),
+    showSales: hasRole('Sales Settings'),
+  }), []);
 
-  const DesktopDynamicIsland: React.FC<{
-    dir: 'ltr' | 'rtl';
-    accent: string;
-    mode: 'light' | 'dark';
-    t: (k: string) => string;
-    onToggleTheme: () => void;
-    onLogout: () => void;
-  }> = ({ dir, accent, mode, t, onToggleTheme, onLogout }) => {
-    const isRTL = dir === 'rtl';
-    const [hovered, setHovered] = React.useState(false);
+  const NAV = React.useMemo<Navigation>(() => buildNavigation(t, accent, visibility), [t, accent, visibility]);
 
-    return (
-      <Box
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        sx={(theme) => ({
-          position: 'fixed',
-          top: '50%',
-          left: isRTL ? 20 : 'auto',
-          right: isRTL ? 'auto' : 20,
-          transform: 'translateY(-50%)',
-          zIndex: theme.zIndex.drawer + 2,
-          display: { xs: 'none', md: 'flex' }, // desktop only
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 0,                     // no gaps for perfect alignment
-          width: 56,                  // fixed width for pill shape
-          height: 'auto',
-          minHeight: 160,             // bigger overall size
-          padding: '12px 0',          // vertical padding only
-          borderRadius: 28,           // perfect pill shape
-          border: '3px solid',
-          borderColor: accent,        // gold border
-          backgroundColor: mode === 'light' 
-            ? alpha('#000000', hovered ? 0.95 : 0.85)  // dark background in light mode
-            : alpha('#ffffff', hovered ? 0.95 : 0.7), // lighter in dark mode
-          backdropFilter: 'blur(16px)',
-          boxShadow: hovered
-            ? `0 20px 60px ${alpha(accent, 0.5)}`      // gold shadow on hover
-            : `0 12px 40px ${alpha(accent, 0.3)}`,      // subtle gold shadow
-          transition: 'all 250ms cubic-bezier(0.4, 0, 0.2, 1)',
-          opacity: hovered ? 1 : 0.85,
-          '&:focus-within': {
-            opacity: 1,
-            backgroundColor: mode === 'light' 
-              ? alpha('#1a1a1a', 0.98) 
-              : alpha(theme.palette.background.paper, 0.98),
-            boxShadow: `0 24px 72px ${alpha(accent, 0.6)}`,
-            transform: 'translateY(-50%) scale(1.02)',
-          },
-        })}
-      >
-        <Tooltip title={mode === 'dark' ? t('tooltip.lightMode') : t('tooltip.darkMode')}>
-          <IconButton
-            onClick={onToggleTheme}
-            aria-label={t('aria.toggleTheme')}
-            size="medium"
-            sx={{
-              color: accent, // gold color always
-              '&:hover': { 
-                backgroundColor: alpha(accent, 0.1),
-                transform: 'scale(1.1)',
-              },
-              width: 40,
-              height: 40,
-              margin: '4px 0',
-              transition: 'all 200ms ease',
-            }}
-          >
-            {mode === 'dark' ? <Brightness7Icon fontSize="medium" /> : <Brightness4Icon fontSize="medium" />}
-          </IconButton>
-        </Tooltip>
+  // Role label mapping (Admin > Accounting > User) derived from localStorage.user.Prvilege
+  const roleLabel = React.useMemo(() => {
+    const normalizeRoles = (input: any): string[] => {
+      if (!input) return [];
+      if (Array.isArray(input)) {
+        return input
+          .map((r) => (typeof r === 'string' ? r : String((r as any)?.name || (r as any)?.role || (r as any)?.value || r)))
+          .flatMap((s) => String(s).split(/[\s,;]+/))
+          .filter(Boolean)
+          .map((s) => s.toUpperCase());
+      }
+      if (typeof input === 'string') {
+        return input
+          .split(/[\s,;]+/)
+          .filter(Boolean)
+          .map((s) => s.toUpperCase());
+      }
+      if (typeof input === 'object') {
+        const s = String((input as any).name || (input as any).role || (input as any).value || '');
+        return s
+          ? s
+              .split(/[\s,;]+/)
+              .filter(Boolean)
+              .map((x) => x.toUpperCase())
+          : [];
+      }
+      return [];
+    };
 
-        <Box sx={{ margin: '4px 0' }}>
-          <LanguageSwitcher />
-        </Box>
+    try {
+      let roles: string[] = [];
+      const u = localStorage.getItem('user');
+      if (u) {
+        const obj = JSON.parse(u);
+        roles = roles.concat(normalizeRoles(obj?.Prvilege));
+      }
+      if (roles.length === 0) {
+        const standalone = localStorage.getItem('Prvilege');
+        if (standalone) {
+          try {
+            roles = roles.concat(normalizeRoles(JSON.parse(standalone)));
+          } catch {
+            roles = roles.concat(normalizeRoles(standalone));
+          }
+        }
+      }
 
-        <Tooltip title={t('tooltip.logout')}>
-          <IconButton
-            onClick={onLogout}
-            aria-label={t('aria.logout')}
-            size="medium"
-            sx={{
-              color: '#ff4757', // red color
-              '&:hover': { 
-                backgroundColor: alpha('#ff4757', 0.1),
-                transform: 'scale(1.1)',
-              },
-              width: 40,
-              height: 40,
-              margin: '4px 0',
-              transition: 'all 200ms ease',
-            }}
-          >
-            <Logout fontSize="medium" />
-          </IconButton>
-        </Tooltip>
-      </Box>
-    );
-  };
+      const has = (needle: string) => roles.some((r) => r === needle || r.includes(needle));
+      if (has('ROLE_ADMIN') || has('ADMIN')) return 'Admin';
+      if (has('ROLE_ACCOUNT') || has('ACCOUNT')) return 'Accounting';
+      if (has('ROLE_USER') || has('USER')) return 'User';
+      return '';
+    } catch {
+      return '';
+    }
+  }, []);
+
+  // Removed DesktopDynamicIsland floating widget
 
   // Tab title from NAV (i18n-aware)
   React.useEffect(() => {
@@ -596,16 +588,15 @@ export default function Home(props: any) {
       }
       return null;
     }
-    const realPath = encryptedToRoute[router.pathname] || router.pathname;
-    const title = findTitle(NAV, realPath) || t('app.title');
+    const real = encryptedToRoute[router.pathname] || router.pathname;
+    const title = findTitle(NAV, real) || t('app.title');
     document.title = title;
   }, [router.pathname, NAV, t]);
 
   // Emotion cache per direction to avoid layout shifts
   const cache = React.useMemo(() => createEmotionCache(dir), [dir]);
 
-  // Force gold everywhere as requested
-  const accent = '#b7a27d';
+  // Removed privilege alert on navigating to '/home'
 
   return (
     <CacheProvider value={cache}>
@@ -624,7 +615,7 @@ export default function Home(props: any) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    width: '100%',
+                    width: '95%',
                     color: accent, // all children (incl. Logo SVG) inherit
                   }}
                 >
@@ -634,41 +625,36 @@ export default function Home(props: any) {
               title: ''
             }}
           >
-             <DesktopDynamicIsland
-                dir={dir}
-                accent={accent}
-                mode={mode}
-                t={t}
-                onToggleTheme={colorMode.toggleColorMode}
-                onLogout={handleLogout}
-              />
             <DashboardLayout
               sx={{
                 bgcolor: 'background.default',
+                // Full-width layout tweaks
+                m: 0,
+                p: 0,
                 '& .MuiDrawer-root': { position: 'relative', height: '100vh' },
                 '& .MuiDrawer-paper': {
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  borderInlineEnd: `1px solid #b7a27d`,
+                  borderInlineEnd: `1px solid ${accent}`,
                 },
-                // keep your gold-for-everything overrides...
+                // dynamic accent for navigation items
                 '& .MuiDrawer-paper .MuiListItemIcon-root, & .MuiDrawer-paper .MuiListItemIcon-root svg': {
-                  color: `#b7a27d !important`,
+                  color: `${accent} !important`,
                   fontWeight: 800,
                   letterSpacing: '0.2px',
                 },
                 '& .MuiDrawer-paper .MuiListItemText-root .MuiTypography-root': {
-                  color: `#b7a27d !important`,
+                  color: `${accent} !important`,
                   fontWeight: 800,
                   fontSize: '1rem',
                   letterSpacing: '0.3px',
                 },
                 '& .MuiDrawer-paper .Mui-selected .MuiListItemIcon-root svg': {
-                  color: `#b7a27d !important`,
+                  color: `${accent} !important`,
                 },
                 '& .MuiDrawer-paper .MuiListItemButton-root:hover .MuiListItemIcon-root svg': {
-                  color: `#b7a27d !important`,
+                  color: `${accent} !important`,
                 },
               }}
               navigation={NAV}
@@ -676,7 +662,7 @@ export default function Home(props: any) {
                 toolbarActions: () => (
                   <Box
                     sx={{
-                      display: { xs: 'flex', md: 'none' },  // ← mobile only
+                      display: 'flex', // show on all sizes
                       alignItems: 'center',
                       gap: 1,
                       flexDirection: dir === 'rtl' ? 'row-reverse' : 'row',
@@ -684,6 +670,15 @@ export default function Home(props: any) {
                       width: '100%',
                     }}
                   >
+                    {/* User Role at right in header (Home toolbar) */}
+                    {roleLabel && (
+                      <Chip
+                        label={roleLabel}
+                        color={roleLabel === 'Admin' ? 'warning' : 'default'}
+                        size="small"
+                        sx={{ fontWeight: 800, letterSpacing: 0.3 }}
+                      />
+                    )}
                     <Tooltip
                       title={mode === 'dark' ? t('tooltip.lightMode') : t('tooltip.darkMode')}
                       placement={dir === 'rtl' ? 'bottom-start' : 'bottom-end'}
@@ -712,7 +707,23 @@ export default function Home(props: any) {
                 ),
               }}
             >
-              <PageContainer title="">
+              <PageContainer
+                title=""
+                sx={{
+                  // Force full-bleed content (remove Container maxWidth and gutters)
+                  maxWidth: '100% !important',
+                  p: 0,
+                  // Consistent 2% horizontal spacing on Home page
+                  pl: '2%',
+                  pr: '2%',
+                  m: 0,
+                  '&.MuiContainer-root': {
+                    maxWidth: '100% !important',
+                    paddingLeft: '2% !important',
+                    paddingRight: '2% !important',
+                  },
+                }}
+              >
                 {getPageComponent(router.pathname)}
               </PageContainer>
             </DashboardLayout>

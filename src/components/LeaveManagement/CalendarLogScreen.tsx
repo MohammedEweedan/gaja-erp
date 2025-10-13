@@ -71,7 +71,7 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
   const isDark = theme.palette.mode === "dark";
 
   // Brand color (gaja.100) with safe fallback
-  const brand: string = (theme.palette as any)?.gaja?.[100] || "#b7a27d";
+  const brand: string = (theme.palette as any)?.gaja?.[100] || theme.palette.text.primary;
   const brandHover = isDark ? lighten(brand, 0.08) : darken(brand, 0.12);
   const brandSoft = alpha(brand, isDark ? 0.18 : 0.1);
   const gridBorder = alpha(isDark ? "#ffffff" : "#000000", 0.1);

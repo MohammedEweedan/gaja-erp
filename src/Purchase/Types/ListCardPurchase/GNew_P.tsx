@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     MaterialReactTable,
@@ -208,9 +208,9 @@ const GNew_p = (props: NewPProps) => {
         Cuser = localStorage.getItem('Cuser');
     }
 
-    const apiIp = process.env.REACT_APP_API_IP;
-    const apiUrl = `${apiIp}/purchases`;
-    const apiUrlProducts = `${apiIp}/products`;
+     
+    const apiUrl = `/purchases`;
+    const apiUrlProducts = `/products`;
 
     const isUsedSupplier = useMemo(() => {
         return editPurchase.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('used') ?? false;
@@ -328,7 +328,7 @@ const GNew_p = (props: NewPProps) => {
     };
 
     const fetchSuppliers = async () => {
-        const apiUrlsuppliers = `${apiIp}/suppliers`;
+        const apiUrlsuppliers = `/suppliers`;
         const token = localStorage.getItem('token');
         try {
             const res = await axios.get<Supplier[]>(`${apiUrlsuppliers}/all`, {
@@ -472,7 +472,7 @@ const GNew_p = (props: NewPProps) => {
             // If this was a distribution receive, mark as received
             if (distribution && distribution.distributionID) {
                 await axios.put(
-                    `${apiIp}/Dpurchases/UpdateStatus/${distribution.distributionID}`,
+                    `/Dpurchases/UpdateStatus/${distribution.distributionID}`,
                     { DistributionISOK: true },
                     { headers: { Authorization: `Bearer ${token}` } }
                 ).catch((error) => {

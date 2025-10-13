@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import axios from 'axios';
+import axios from "../../../api";
 import { useNavigate } from 'react-router-dom';
 import {
   MaterialReactTable,

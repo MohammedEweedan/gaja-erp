@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Typography, TextField, Button } from '@mui/material';
-import axios from 'axios';
+import axios from "../api";
 
 const apiIp = process.env.REACT_APP_API_IP;
 

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Box, Typography, Card, CardContent } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
-import axios from 'axios';
+import axios from "../../api";
 import WatchLaterIcon from '@mui/icons-material/WatchLater';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import EuroIcon from '@mui/icons-material/Euro';

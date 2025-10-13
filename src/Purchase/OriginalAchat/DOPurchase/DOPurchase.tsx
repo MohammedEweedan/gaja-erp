@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo, forwardRef } from 'react';
-import axios from 'axios';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useState, useMemo, forwardRef, useCallback } from 'react';
+import axios from "../../../api";
+import { useNavigate } from 'react-router-dom';
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -11,6 +11,7 @@ import {
   DialogActions, DialogContent, DialogTitle, TextField,
   Divider, Typography, Autocomplete, Link
 } from '@mui/material';
+import { currencyList } from '../../../constants/currencies';
 
 import Snackbar from '@mui/material/Snackbar';
 import MuiAlert, { AlertProps } from '@mui/material/Alert';
@@ -19,21 +20,111 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
 import ImportExportIcon from '@mui/icons-material/ImportExport';
+// Removed ImageIcon: no longer used after removing action button
+import ImgDialog from '../WOPurchase/ImgDialog';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SharePointIcon from '@mui/icons-material/Share';
+import PhotoCamera from '@mui/icons-material/PhotoCamera';
 
 import EmailIcon from '@mui/icons-material/Email';
 import * as XLSX from 'xlsx';
 import Backdrop from '@mui/material/Backdrop';
 
 import LinearProgress from '@mui/material/LinearProgress';
-import Logo from '../../ui-component/Logo';
+import Logo from '../../../ui-component/Logo';
+import AttchDiamondFiles from './AttchDiamondFiles';
+
+// Simple in-memory cache to avoid refetching thumbnails repeatedly
+const thumbCache = new Map<number, string>();
+//const API_BASE = (process.env.REACT_APP_API_IP as string) || '';
+const API_BASEI = (process.env.REACT_APP_API_IP as string) || '';
+const Thumb: React.FC<{ idAchat: number; onClick?: () => void }> = ({ idAchat, onClick }) => {
+  const [src, setSrc] = useState<string | null>(thumbCache.get(idAchat) || null);
+  const [loading, setLoading] = useState(!src);
+
+  useEffect(() => {
+    let cancelled = false;
+    const token = localStorage.getItem('token') || '';
+    const load = async () => {
+      if (thumbCache.has(idAchat)) {
+        setSrc(thumbCache.get(idAchat)!);
+        setLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${API_BASEI}/images/list/diamond/${idAchat}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        if (!res.ok) {
+          setLoading(false);
+          return;
+        }
+        const data = await res.json();
+        let firstUrl: string | undefined;
+        if (Array.isArray(data) && data.length > 0) {
+          if (typeof data[0] === 'string') {
+            firstUrl = data[0];
+          } else if (typeof data[0] === 'object' && data[0]) {
+            const obj = data[0] as Record<string, any>;
+            const key = Object.keys(obj).find(k => ['url', 'path', 'filename', 'name'].includes(k));
+            if (key) {
+              if (key === 'filename') {
+                firstUrl = `${API_BASEI}/images/diamond/${idAchat}/${obj[key]}`;
+              } else {
+                firstUrl = String(obj[key]);
+              }
+            }
+          }
+        }
+        if (!cancelled && firstUrl) {
+          const withToken = firstUrl + (firstUrl.includes('?') ? '&' : '?') + `token=${token}`;
+          thumbCache.set(idAchat, withToken);
+          setSrc(withToken);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    if (!src) load();
+    return () => {
+      cancelled = true;
+    };
+  }, [idAchat, src]);
+
+  if (loading || !src) return null;
+  return (
+    <Box
+      onClick={onClick}
+      sx={{
+        width: 48,
+        height: 48,
+        borderRadius: 1,
+        overflow: 'hidden',
+        border: '1px solid #e0e0e0',
+        background: '#fafafa',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: onClick ? 'pointer' : 'default',
+      }}
+      title={'Click to view images'}
+    >
+      <Box component="img" src={src} alt="thumb" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+    </Box>
+  );
+};
 
 type Supplier = {
   id_client: number;
   client_name: string;
   TYPE_SUPPLIER?: string;
+};
+
+type Vendor = {
+  ExtraClient_ID: number;
+  Client_Name: string;
 };
 
 type User = {
@@ -46,6 +137,7 @@ type User = {
 
 type DOPuchase = {
   id_achat: number;
+  vendorsID?: number | null;
   carat?: number;
   cut?: string;
   color?: string;
@@ -79,6 +171,7 @@ type DOPuchase = {
   Date_Achat?: string;
   Brand?: number;
   supplier?: Supplier | null;
+  vendor?: Vendor | null;
   user?: User;
   CODE_EXTERNAL?: string;
   comment_edit?: string;
@@ -90,11 +183,12 @@ type DOPuchase = {
   Total_Price_LYD?: number;
   SellingPrice?: number;
   Design_art?: string;
+  currencyRetail?: string;
 };
 
 type Product = {
-    id_famille: number;
-    desig_famille: string;
+  id_famille: number;
+  desig_famille: string;
 };
 
 
@@ -115,6 +209,7 @@ type Ps = {
 
 const initialBoxeState: DOPuchase = {
   id_achat: 0,
+  vendorsID: null,
   carat: undefined,
   cut: '',
   color: '',
@@ -148,6 +243,7 @@ const initialBoxeState: DOPuchase = {
   Date_Achat: new Date().toISOString().slice(0, 10),
   Brand: undefined,
   supplier: null,
+  vendor: null,
   CODE_EXTERNAL: '',
   comment_edit: '',
   sharepoint_url: '',
@@ -158,6 +254,7 @@ const initialBoxeState: DOPuchase = {
   Total_Price_LYD: undefined,
   SellingPrice: undefined,
   Design_art: '',
+  currencyRetail: '',
 };
 
 const Alert = forwardRef<HTMLDivElement, AlertProps>(
@@ -165,27 +262,40 @@ const Alert = forwardRef<HTMLDivElement, AlertProps>(
 );
 
 const DOPurchase = () => {
-  let ps: string | null = null;
-    let Cuser: string | null = null;
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-        try {
-            const userObj = JSON.parse(userStr);
-            ps = userObj.ps ?? localStorage.getItem('ps');
-            Cuser = userObj.Cuser ?? localStorage.getItem('Cuser');
-        } catch {
-            ps = localStorage.getItem('ps');
-            Cuser = localStorage.getItem('Cuser');
-        }
-    } else {
-        ps = localStorage.getItem('ps');
-        Cuser = localStorage.getItem('Cuser');
+  let Cuser: string | null = null;
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      const userObj = JSON.parse(userStr);
+      Cuser = userObj.Cuser ?? localStorage.getItem('Cuser');
+    } catch {
+      Cuser = localStorage.getItem('Cuser');
     }
+  } else {
+    Cuser = localStorage.getItem('Cuser');
+  }
 
   const [data, setData] = useState<DOPuchase[]>([]);
   const [loading, setLoading] = useState(true);
   const [openDialog, setOpenDialog] = useState(false);
   const [editOPurchase, setEditOPurchase] = useState<DOPuchase | null>(null);
+
+  // Keep total_price automatically in sync with carat and price_per_carat
+  // so that Total Price defaults to carat * price_per_carat even on initial load
+  useEffect(() => {
+    setEditOPurchase(prev => {
+      if (!prev) return prev;
+      const carat = Number(prev.carat) || 0;
+      const ppc = Number(prev.price_per_carat) || 0;
+      const computed = carat * ppc;
+      const current = Number(prev.total_price) || 0;
+      if ((carat !== 0 || ppc !== 0) && computed !== current) {
+        return { ...prev, total_price: computed };
+      }
+      return prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editOPurchase?.carat, editOPurchase?.price_per_carat]);
   const [isEditMode, setIsEditMode] = useState(false);
   const [errors, setErrors] = useState<any>({});
   const [snackbar, setSnackbar] = useState<{
@@ -195,19 +305,19 @@ const DOPurchase = () => {
     actionType?: string
   }>({ open: false, message: '', severity: 'success' });
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [Productsdata, setProductsdata] = useState<Product[]>([]);
-  const [loadingSuppliers, setLoadingSuppliers] = useState(false);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [Productsdata, setProductsdata] = useState<Product[]>([]);
+  const [_loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [attachmentDialog, setAttachmentDialog] = useState<{ open: boolean, row: DOPuchase | null }>({ open: false, row: null });
-  const [attachment, setAttachment] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  // Multi-file dialog handles its own state
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailProgress, setEmailProgress] = useState(0);
   const [distributionDialog, setDistributionDialog] = useState<{ open: boolean, purchase: DOPuchase | null }>({ open: false, purchase: null });
   const [distributions, setDistributions] = useState<DistributionPurchase[]>([]);
   const [newDistribution, setNewDistribution] = useState<{ ps: number; distributionDate: string }>({ ps: 0, distributionDate: new Date().toISOString().slice(0, 10) });
-  const [loadingDistributions, setLoadingDistributions] = useState(false);
+  const [_loadingDistributions, setLoadingDistributions] = useState(false);
   const [psList, setPsList] = useState<Ps[]>([]);
-  const [pendingDeleteDist, setPendingDeleteDist] = useState<DistributionPurchase | null>(null);
+  // removed unused pendingDeleteDist state
   const [distributionReady, setDistributionReady] = useState(false);
   const [distributionErrors, setDistributionErrors] = useState<{ ps?: string }>({});
   const [pendingDistribution, setPendingDistribution] = useState(false);
@@ -219,30 +329,32 @@ const DOPurchase = () => {
   });
   const [costDialog, setCostDialog] = useState<{ open: boolean, row: DOPuchase | null }>({ open: false, row: null });
   const [costFields, setCostFields] = useState<{ MakingCharge?: number; ShippingCharge?: number; TravelExpesenes?: number; Rate?: number; Total_Price_LYD?: number }>({});
+  const [imgDialogOpen, setImgDialogOpen] = useState(false);
+  const [imgDialogIdAchat, setImgDialogIdAchat] = useState<number | null>(null);
 
   const navigate = useNavigate();
-  const apiIp = process.env.REACT_APP_API_IP;
-  const apiUrl = `${apiIp}/DOpurchases`;
 
-  const fetchData = async () => {
+  const apiUrl = `/DOpurchases`;
+
+  const fetchData = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) return navigate("/");
 
     try {
-      const response = await axios.get<DOPuchase[]>(`${apiUrl}/all`, {
+      const response = await axios.get<DOPuchase[]>(`/DOpurchases/all`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setData(response.data);
     } catch (error: any) {
       if (error.response?.status === 401) navigate("/");
-      else setSnackbar({ open: true, message: "Error loading data", severity: 'error' });
+      else setSnackbar({ open: true, message: "Error loading data1", severity: 'error' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
 
   const fetchSuppliers = async () => {
-    const apiUrlsuppliers = `${apiIp}/suppliers`;
+    const apiUrlsuppliers = `/suppliers`;
     const token = localStorage.getItem('token');
     try {
       setLoadingSuppliers(true);
@@ -260,10 +372,24 @@ const DOPurchase = () => {
     }
   };
 
+  // Fetch Vendors (for diamond purchases)
+  const fetchVendors = async () => {
+    const apiUrlVendors = `/vendors`;
+    const token = localStorage.getItem('token');
+    try {
+      const res = await axios.get<Vendor[]>(`${apiUrlVendors}/all`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setVendors(res.data);
+    } catch (error) {
+      // optional: notify
+    }
+  };
+
   const fetchAllDistributions = async () => {
     const token = localStorage.getItem('token');
     try {
-      const res = await axios.get('http://localhost:9000/Dpurchases/all', {
+      const res = await axios.get('/Dpurchases/all', {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDistributions(res.data.filter((d: any) => d.PurchaseType === 'Diamond Purchase'));
@@ -273,37 +399,39 @@ const DOPurchase = () => {
   };
 
 
-  const apiUrlProducts = `${apiIp}/products`;
-  
-      const fetchDataProducts = async () => {
-          const token = localStorage.getItem('token');
-          if (!token) return navigate("/");
-  
-          try {
-              const response = await axios.get<Product[]>(`${apiUrlProducts}/all`, {
-                  headers: { Authorization: `Bearer ${token}` }
-              });
-              setProductsdata(response.data);
-          } catch (error: any) {
-              if (error.response?.status === 401) navigate("/");
-             
-          } finally {
-              setLoading(false);
-          }
-      };
+  const apiUrlProducts = `/products`;
+
+  const fetchDataProducts = useCallback(async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return navigate("/");
+
+    try {
+      const response = await axios.get<Product[]>(`${apiUrlProducts}/all`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setProductsdata(response.data);
+    } catch (error: any) {
+      if (error.response?.status === 401) navigate("/");
+
+    } finally {
+      setLoading(false);
+    }
+  }, [apiUrlProducts, navigate]);
 
 
   useEffect(() => {
     fetchData();
     fetchSuppliers();
+    fetchVendors();
     fetchDataProducts(); // <-- Add this
-  }, [navigate]);
+  }, [fetchData, fetchDataProducts, navigate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const fetchPsList = async () => {
       const token = localStorage.getItem('token');
       try {
-        const res = await axios.get('http://localhost:9000/ps/all', {
+        const res = await axios.get('/ps/all', {
           headers: { Authorization: `Bearer ${token}` }
         });
         setPsList(res.data);
@@ -318,14 +446,15 @@ const DOPurchase = () => {
     fetchAllDistributions();
   }, []);
 
-  const handleEdit = (row: DOPuchase) => {
+  const handleEdit = useCallback((row: DOPuchase) => {
     setEditOPurchase({
       ...row,
-      supplier: suppliers.find(s => s.id_client === row.Brand) || null
+      supplier: suppliers.find(s => s.id_client === row.Brand) || null,
+      vendor: vendors.find(v => v.ExtraClient_ID === (row.vendorsID ?? undefined)) || null
     });
     setIsEditMode(true);
     setOpenDialog(true);
-  };
+  }, [suppliers, vendors]);
 
   const handleAddNew = () => {
     setEditOPurchase(initialBoxeState);
@@ -342,29 +471,33 @@ const DOPurchase = () => {
   const validateForm = () => {
     const newErrors: any = {};
     if (!editOPurchase?.Design_art) newErrors.Design_art = 'Required';
-    if (!editOPurchase?.carat && editOPurchase?.carat !== 0) newErrors.carat = 'Required';
-    if (!editOPurchase?.cut) newErrors.cut = 'Required';
-    if (!editOPurchase?.color) newErrors.color = 'Required';
-    if (!editOPurchase?.clarity) newErrors.clarity = 'Required';
-    if (!editOPurchase?.shape) newErrors.shape = 'Required';
-    if (!editOPurchase?.measurements) newErrors.measurements = 'Required';
-    if (!editOPurchase?.depth_percent && editOPurchase?.depth_percent !== 0) newErrors.depth_percent = 'Required';
-    if (!editOPurchase?.table_percent && editOPurchase?.table_percent !== 0) newErrors.table_percent = 'Required';
-    if (!editOPurchase?.girdle) newErrors.girdle = 'Required';
-    if (!editOPurchase?.culet) newErrors.culet = 'Required';
-    if (!editOPurchase?.polish) newErrors.polish = 'Required';
-    if (!editOPurchase?.symmetry) newErrors.symmetry = 'Required';
-    if (!editOPurchase?.fluorescence) newErrors.fluorescence = 'Required';
-    if (!editOPurchase?.certificate_number) newErrors.certificate_number = 'Required';
-    if (!editOPurchase?.certificate_lab) newErrors.certificate_lab = 'Required';
-    if (!editOPurchase?.certificate_url) newErrors.certificate_url = 'Required';
-    if (!editOPurchase?.laser_inscription) newErrors.laser_inscription = 'Required';
+    if (!editOPurchase?.vendor) newErrors.vendor = 'Required';
+    // carat is not required, default is 1
+    //if (!editOPurchase?.cut) newErrors.cut = 'Required';
+    //if (!editOPurchase?.color) newErrors.color = 'Required';
+    if (!editOPurchase?.CODE_EXTERNAL) newErrors.CODE_EXTERNAL = 'Required';
+     if (!editOPurchase?.SellingPrice && editOPurchase?.SellingPrice !== 0) newErrors.SellingPrice = 'Required';
+     if (!editOPurchase?.comment_edit) newErrors.comment_edit = 'Required';
+    //if (!editOPurchase?.clarity) newErrors.clarity = 'Required';
+    //if (!editOPurchase?.shape) newErrors.shape = 'Required';
+    //if (!editOPurchase?.measurements) newErrors.measurements = 'Required';
+    //if (!editOPurchase?.depth_percent && editOPurchase?.depth_percent !== 0) newErrors.depth_percent = 'Required';
+    //if (!editOPurchase?.table_percent && editOPurchase?.table_percent !== 0) newErrors.table_percent = 'Required';
+    //if (!editOPurchase?.girdle) newErrors.girdle = 'Required';
+   // if (!editOPurchase?.culet) newErrors.culet = 'Required';
+   // if (!editOPurchase?.polish) newErrors.polish = 'Required';
+    //if (!editOPurchase?.symmetry) newErrors.symmetry = 'Required';
+   // if (!editOPurchase?.fluorescence) newErrors.fluorescence = 'Required';
+    //if (!editOPurchase?.certificate_number) newErrors.certificate_number = 'Required';
+    //if (!editOPurchase?.certificate_lab) newErrors.certificate_lab = 'Required';
+    //if (!editOPurchase?.certificate_url) newErrors.certificate_url = 'Required';
+    //if (!editOPurchase?.laser_inscription) newErrors.laser_inscription = 'Required';
     if (!editOPurchase?.price_per_carat && editOPurchase?.price_per_carat !== 0) newErrors.price_per_carat = 'Required';
     if (!editOPurchase?.total_price && editOPurchase?.total_price !== 0) newErrors.total_price = 'Required';
-    if (!editOPurchase?.origin_country) newErrors.origin_country = 'Required';
+    //if (!editOPurchase?.origin_country) newErrors.origin_country = 'Required';
     if (!editOPurchase?.Date_Achat) newErrors.Date_Achat = 'Required';
     if (!editOPurchase?.supplier) newErrors.supplier = 'Required';
-    if (!editOPurchase?.SellingPrice && editOPurchase?.SellingPrice !== 0) newErrors.SellingPrice = 'Required';
+   
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -387,6 +520,7 @@ const DOPurchase = () => {
     const payload = {
       ...editOPurchase,
       Brand: editOPurchase.supplier?.id_client,
+      vendorsID: editOPurchase.vendor?.ExtraClient_ID ?? null,
       Usr: Cuser,
       Date_Achat: formatDate(editOPurchase.Date_Achat),
       Approval_Date: formatDateTime(editOPurchase.Approval_Date),
@@ -394,7 +528,7 @@ const DOPurchase = () => {
 
     try {
       if (isEditMode) {
-        await axios.put(`${apiUrl}/Update/${editOPurchase.id_achat}`, payload, {
+        await axios.put(`/DOpurchases/Update/${editOPurchase.id_achat}`, payload, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setSnackbar({ open: true, message: 'Purchase updated successfully', severity: 'success' });
@@ -417,7 +551,7 @@ const DOPurchase = () => {
     setConfirmDelete({ open: true, row });
   };
 
-  const handleRequestApproval = async (row: DOPuchase) => {
+  const handleRequestApproval = useCallback(async (row: DOPuchase) => {
     const email = 'hasni.zied@gmail.com';
     if (!email) return;
     setSendingEmail(true);
@@ -446,7 +580,7 @@ const DOPurchase = () => {
       setEmailProgress(40);
       const token = localStorage.getItem('token');
       setEmailProgress(60);
-      await axios.post(`${apiIp}/DOpurchases/send-approval`, payload, {
+      await axios.post(`/DOpurchases/send-approval`, payload, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmailProgress(90);
@@ -459,7 +593,7 @@ const DOPurchase = () => {
       setEmailProgress(0);
       setSendingEmail(false);
     }
-  };
+  }, [suppliers]);
 
 
 
@@ -478,7 +612,7 @@ const DOPurchase = () => {
 
   const handleExportExcel = () => {
     const headers = [
-      "ID Achat", "Carat", "Cut", "Color", "Clarity", "Shape", "Measurements", "Depth %", "Table %", "Girdle", "Culet", "Polish", "Symmetry", "Fluorescence", "Certificate #", "Certificate Lab", "Certificate URL", "Laser Inscription", "Price/Carat", "Total Price", "Origin Country", "Comment", "Image URL", "Video URL", "Comment Achat", "Document No", "Is Approved", "Approval Date", "Approved By", "Attachment", "Date Achat", "Supplier"
+      "ID Achat", "Carat", "Cut", "Color", "Clarity", "Shape", "Measurements", "Depth %", "Table %", "Girdle", "Culet", "Polish", "Symmetry", "Fluorescence", "Certificate #", "Certificate Lab", "Certificate URL", "Laser Inscription", "Item Cost", "Total Price", "Origin Country", "Comment", "Image URL", "Video URL", "Comment Achat", "Document No", "Is Approved", "Approval Date", "Approved By", "Attachment", "Date Achat", "Supplier"
     ];
     const rows = data.map(boxe => [
       boxe.id_achat,
@@ -524,52 +658,15 @@ const DOPurchase = () => {
   // --- Attachment logic ---
   const handleOpenAttachmentDialog = (row: DOPuchase) => {
     setAttachmentDialog({ open: true, row });
-    setAttachment(null);
+    // no-op: multi-file dialog handles file selection
   };
 
   const handleCloseAttachmentDialog = () => {
     setAttachmentDialog({ open: false, row: null });
-    setAttachment(null);
+    // no-op: multi-file dialog handles file selection
   };
 
-  const handleAttachmentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setAttachment(e.target.files[0]);
-    }
-  };
-
-  const handleUploadAttachment = async () => {
-    if (!attachment || !attachmentDialog.row) {
-      setSnackbar({ open: true, message: 'No file or purchase selected', severity: 'warning' });
-      return;
-    }
-    setUploading(true);
-    const token = localStorage.getItem('token');
-    const formData = new FormData();
-    formData.append('file', attachment);
-    formData.append('id_achat', String(attachmentDialog.row.id_achat));
-
-    try {
-      await axios.post(
-        `${apiUrl}/upload-attachment`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      );
-      setSnackbar({ open: true, message: 'Attachment uploaded successfully', severity: 'success' });
-      setAttachment(null);
-      setAttachmentDialog({ open: false, row: null });
-      await fetchData();
-    } catch (error: any) {
-      setSnackbar({ open: true, message: error.response?.data?.message || 'Upload failed', severity: 'error' });
-    } finally {
-      setUploading(false);
-    }
-  };
+  // Removed obsolete single-file upload handlers
 
   const handleConfirmDistribution = async () => {
     try {
@@ -581,7 +678,7 @@ const DOPurchase = () => {
 
       if (existingDist) {
         // Update the existing distribution
-        await axios.put(`${apiIp}/Dpurchases/Update/${existingDist.distributionID}`, {
+        await axios.put(`/Dpurchases/Update/${existingDist.distributionID}`, {
           PurchaseID: distributionDialog.purchase?.id_achat,
           ps: newDistribution.ps,
           distributionDate: newDistribution.distributionDate,
@@ -595,7 +692,7 @@ const DOPurchase = () => {
         setSnackbar({ open: true, message: 'Distribution updated successfully', severity: 'success' });
       } else {
         // Add a new distribution
-        await axios.post('http://localhost:9000/Dpurchases/Add', {
+        await axios.post('/Dpurchases/Add', {
           PurchaseID: distributionDialog.purchase?.id_achat,
           ps: newDistribution.ps,
           distributionDate: newDistribution.distributionDate,
@@ -634,7 +731,7 @@ const DOPurchase = () => {
     setLoadingDistributions(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${apiIp}/Dpurchases/all`, {
+      const res = await axios.get(`/Dpurchases/all`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const filtered = res.data.filter(
@@ -654,7 +751,128 @@ const DOPurchase = () => {
   // --- Update columns definition for price group ---
   const columns = useMemo<MRT_ColumnDef<DOPuchase>[]>(() => [
 
+
+    {
+      header: 'Add Image',
+      id: 'photo',
+      size: 40,
+      Cell: ({ row }) => (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+
+          <Tooltip title="Add/Take photo">
+            <IconButton
+              size="small"
+              color="primary"
+              onClick={() => {
+                setImgDialogIdAchat(row.original.id_achat);
+                setImgDialogOpen(true);
+              }}
+            >
+              <PhotoCamera fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      ),
+      enableColumnFilter: false,
+      enableSorting: false,
+    },
+    // Show first image for each item, matching WOPurchase logic
+    {
+      header: 'Image',
+      id: 'image-action',
+      size: 60,
+      Cell: ({ row }) => {
+        const [thumb, setThumb] = useState<string | null>(null);
+        const [loading, setLoading] = useState(false);
+        const [open, setOpen] = useState(false);
+        const id_achat = row.original.id_achat;
+        useEffect(() => {
+          let mounted = true;
+          const fetchThumb = async () => {
+            setLoading(true);
+            const token = localStorage.getItem('token');
+            try {
+              const res = await axios.get(`/images/list/diamond/${id_achat}`, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              let images = res.data;
+              if (Array.isArray(images) && images.length > 0 && typeof images[0] === 'object') {
+                const key = Object.keys(images[0]).find(k => ['url', 'path', 'filename', 'name'].includes(k));
+                if (key) images = images.map((img) => img[key]);
+              }
+              let imgUrl = images[0] ? images[0] : null;
+              if (imgUrl) {
+                // If not absolute, prepend API base
+                if (!/^https?:\/\//i.test(imgUrl)) {
+                  imgUrl = `/images/${imgUrl}`;
+                }
+                // Always append token as query param
+                if (token) {
+                  imgUrl += (imgUrl.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+                }
+              }
+              if (mounted) setThumb(imgUrl);
+            } catch {
+              if (mounted) setThumb(null);
+            } finally {
+              if (mounted) setLoading(false);
+            }
+          };
+          fetchThumb();
+          return () => { mounted = false; };
+        }, [id_achat]);
+        if (thumb) {
+          console.log('DOPurchase image thumb URL:', thumb);
+        }
+        return (
+          <>
+            <Box sx={{ width: 50, height: 50, bgcolor: '#eee', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: thumb ? 'pointer' : 'default' }}
+              onClick={() => { if (thumb) setOpen(true); }}>
+              {loading ? null : thumb ? (
+                <Box
+                  component="img"
+                  src={thumb}
+                  alt="img"
+                  onError={e => {
+                    console.error('[DOPurchase] Image failed to load:', thumb, e);
+                  }}
+                  onLoad={() => {
+                    console.log('[DOPurchase] Image loaded successfully:', thumb);
+                  }}
+                  sx={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 1 }}
+                />
+              ) : null}
+            </Box>
+            <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md">
+              <Box sx={{ p: 2, display: 'flex', justifyContent: 'center', alignItems: 'center', bgcolor: '#222' }}>
+                {thumb && (
+                  <Box
+                    component="img"
+                    src={thumb}
+                    alt="zoomed-img"
+                    sx={{ maxWidth: '80vw', maxHeight: '80vh', borderRadius: 2, boxShadow: 3 }}
+                  />
+                )}
+              </Box>
+            </Dialog>
+          </>
+        );
+      },
+      enableSorting: false,
+      enableColumnFilter: false,
+    },
+
     { accessorKey: 'Date_Achat', header: 'Date Achat', size: 100, Cell: ({ cell }) => formatDate(cell.getValue<string>()) },
+    {
+      header: 'Vendor',
+      id: 'vendorsID',
+      size: 110,
+      Cell: ({ row }) => (
+        <Box sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          {vendors.find(v => v.ExtraClient_ID === (row.original as any).vendorsID)?.Client_Name || ''}
+        </Box>
+      ),
+    },
     {
       accessorKey: 'Brand',
       header: 'Brand',
@@ -667,7 +885,7 @@ const DOPurchase = () => {
     },
 
 
-     {
+    {
       accessorKey: 'Design_art',
       header: 'Product Design',
       size: 120,
@@ -711,42 +929,19 @@ const DOPurchase = () => {
     { accessorKey: 'id_achat', header: 'ID Achat', size: 60 },
 
     {
-      header: 'Price',
-      id: 'price_group',
+      header: 'Item Cost',
+      id: 'item_cost_group',
       size: 160,
       Cell: ({ row }) => {
         const carat = Number(row.original.carat) || 0;
-        const pricePerCarat = Number(row.original.price_per_carat) || 0;
-        const total = carat * pricePerCarat;
+        const itemCost = Number(row.original.price_per_carat) || 0;
         return (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
             <span>
               <span>Carat:</span> {carat ? carat.toLocaleString() : ''}
             </span>
             <span>
-              <span>Carat Price:</span> {pricePerCarat ? pricePerCarat.toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : ''}
-            </span>
-            <span>
-              <span>Total:</span>{' '}
-              <Box
-                component="span"
-                sx={{
-                  bgcolor: 'rgba(255, 152, 0, 0.08)',
-                  border: '1px solid rgba(255, 152, 0, 0.2)',
-                  color: 'rgb(255, 152, 0)',
-                  borderRadius: '12px',
-                  px: 1.2,
-                  py: 0.2,
-                  fontWeight: 600,
-                  fontSize: '0.98em',
-                  ml: 0.5,
-                  display: 'inline-block',
-                  minWidth: 90,
-                  textAlign: 'right',
-                }}
-              >
-                {(carat * pricePerCarat).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
-              </Box>
+              <span>Item Cost:</span> {itemCost ? itemCost.toLocaleString(undefined, { style: 'currency', currency: 'USD' }) : ''}
             </span>
           </Box>
         );
@@ -801,14 +996,7 @@ const DOPurchase = () => {
       enableSorting: false,
     },
     { accessorKey: 'laser_inscription', header: 'Laser Inscription', size: 120 },
-    {
-      accessorKey: 'image_url',
-      header: 'Image',
-      size: 80,
-      Cell: ({ cell }) => cell.getValue<string>() ? (
-        <Link href={cell.getValue<string>()} target="_blank" rel="noopener noreferrer">Image</Link>
-      ) : ''
-    },
+    // (removed old image_url column, now handled by image-action column)
     {
       accessorKey: 'video_url',
       header: 'Video',
@@ -830,33 +1018,15 @@ const DOPurchase = () => {
       size: 80,
       Cell: ({ row }) => (
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          {row.original.attachmentUrl ? (
-            <Tooltip title="Download Attachment">
-              <IconButton
-                component="a"
-                href={row.original.attachmentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                color="success"
-                size="small"
-              >
-                <AttachFileIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          ) : (
-            // Only show upload if not approved
-            row.original.IsApprouved !== 'Accepted' && (
-              <Tooltip title="Attach File">
-                <IconButton
-                  color="primary"
-                  onClick={() => handleOpenAttachmentDialog(row.original)}
-                  size="small"
-                >
-                  <CloudUploadIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )
-          )}
+          <Tooltip title="Attachments">
+            <IconButton
+              color="primary"
+              onClick={() => handleOpenAttachmentDialog(row.original)}
+              size="small"
+            >
+              <AttachFileIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
       ),
     },
@@ -1037,6 +1207,7 @@ const DOPurchase = () => {
               textAlign: 'center',
               minWidth: 120,
             }}
+
           >
             Not Distributed Yet
           </Box>
@@ -1055,8 +1226,11 @@ const DOPurchase = () => {
       enableColumnFilter: false,
       enableSorting: false,
     },
-   
-  ], [suppliers, distributions, psList]);
+
+
+
+
+  ], [suppliers, vendors, distributions, psList, handleEdit, handleRequestApproval]);
 
   // Filtered data for table
   const filteredData = useMemo(
@@ -1070,7 +1244,7 @@ const DOPurchase = () => {
   const table = useMaterialReactTable({
     columns,
     data: filteredData,
-    state: { isLoading: loading, density: 'compact' },
+    state: { isLoading: loading || _loadingSuppliers, density: 'compact' },
     enableDensityToggle: true,
     muiTableBodyCellProps: {
       sx: {
@@ -1090,6 +1264,8 @@ const DOPurchase = () => {
         pageIndex: 0
       },
       columnVisibility: {
+        thumb: true,
+        photo: true,
         id_achat: false,
         carat: true,
         cut: false,
@@ -1264,11 +1440,40 @@ const DOPurchase = () => {
               renderInput={(params) => (
                 <TextField
                   {...params}
-                  label="Supplier (Vendor)"
+                  label="Brand (Supplier)"
                   required
                   error={!!errors.supplier}
-                  helperText={
-                    errors.supplier}
+                  helperText={errors.supplier}
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+
+            <Autocomplete
+              id="vendors-select"
+              options={vendors}
+              autoHighlight
+              getOptionLabel={(option) => option.Client_Name}
+              value={editOPurchase?.vendor || null}
+              onChange={(_event, newValue) => {
+                setEditOPurchase(prev => ({
+                  ...prev!,
+                  vendor: newValue
+                    ? {
+                      ExtraClient_ID: newValue.ExtraClient_ID,
+                      Client_Name: newValue.Client_Name,
+                    }
+                    : null,
+                  vendorsID: newValue ? newValue.ExtraClient_ID : null,
+                }));
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Vendor"
+                  required
+                  error={!!errors.vendor}
+                  helperText={errors.vendor}
                   FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
                 />
               )}
@@ -1278,7 +1483,6 @@ const DOPurchase = () => {
               label="Date Achat"
               type="date"
               fullWidth
-              required
               value={editOPurchase?.Date_Achat || ''}
               onChange={e => setEditOPurchase({ ...editOPurchase!, Date_Achat: e.target.value })}
               error={!!errors.Date_Achat}
@@ -1288,53 +1492,81 @@ const DOPurchase = () => {
               FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
             />
 
+
+            <Autocomplete
+              options={Productsdata}
+              getOptionLabel={option => option.desig_famille}
+              value={
+                Productsdata.find(p => p.desig_famille === editOPurchase?.Design_art) || null
+              }
+              onChange={(_event, newValue) => {
+                setEditOPurchase(prev => ({
+                  ...prev!,
+                  Design_art: newValue ? newValue.desig_famille : ''
+                }));
+              }}
+              renderInput={params => (
+                <TextField
+                  {...params}
+                  label="Product Name"
+                  required
+                  error={!!errors.Design_art}
+                  helperText={errors.Design_art || "Select the product design"}
+                  FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                />
+              )}
+            />
+            {/* Move External Code & Edit Comment directly after Product Name */}
             <TextField
-              label="Origin Country"
+              label="Ref Code"
               fullWidth
               required
-              value={editOPurchase?.origin_country || ''}
-              onChange={e => setEditOPurchase({ ...editOPurchase!, origin_country: e.target.value })}
-              error={!!errors.origin_country}
-              helperText={
-                errors.origin_country ||
-                ""
-              }
+              value={editOPurchase?.CODE_EXTERNAL || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, CODE_EXTERNAL: e.target.value })}
+             
+
+
+                error={!!errors.CODE_EXTERNAL}
+                helperText={
+                  errors.CODE_EXTERNAL ||
+                  (editOPurchase?.CODE_EXTERNAL
+                    ? `Sales Code: ${Number(editOPurchase.CODE_EXTERNAL).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                    : "")
+                }
+
+
+
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+            <TextField
+              label="Sales Code"
+              fullWidth
+              required
+              minRows={2}
+              value={editOPurchase?.comment_edit || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, comment_edit: e.target.value })}
+         
+
+
+
+                 error={!!errors.comment_edit}
+                helperText={
+                  errors.comment_edit ||
+                  (editOPurchase?.comment_edit
+                    ? `Sales Code: ${Number(editOPurchase.comment_edit).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                    : "")
+                }
+
+
               FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
             />
 
-<Autocomplete
-  options={Productsdata}
-  getOptionLabel={option => option.desig_famille}
-  value={
-    Productsdata.find(p => p.desig_famille === editOPurchase?.Design_art) || null
-  }
-  onChange={(_event, newValue) => {
-    setEditOPurchase(prev => ({
-      ...prev!,
-      Design_art: newValue ? newValue.desig_famille : ''
-    }));
-  }}
-  renderInput={params => (
-    <TextField
-      {...params}
-      label="Design Art"
-      required
-      error={!!errors.Design_art}
-      helperText={errors.Design_art || "Select the product design"}
-      FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
-    />
-  )}
-/>
-            <Typography variant="body2" sx={{ mb: 0, color: 'text.info' }}>
-              Carat is the standard unit of weight for diamonds and gemstones. 1 carat equals 0.2 grams.
-            </Typography>
 
             <Box sx={{ display: 'flex', gap: 2 }}>
               <TextField
                 label="Carat"
                 type="number"
                 fullWidth
-                required
                 value={editOPurchase?.carat ?? ''}
                 onChange={e => {
                   const carat = Number(e.target.value);
@@ -1344,6 +1576,7 @@ const DOPurchase = () => {
                     total_price: carat * (prev?.price_per_carat || 0)
                   }));
                 }}
+
                 error={!!errors.carat}
                 helperText={
                   errors.carat ||
@@ -1355,7 +1588,7 @@ const DOPurchase = () => {
                 sx={{ flex: 1 }}
               />
               <TextField
-                label="Price/Carat"
+                label="Item Cost"
                 type="number"
                 fullWidth
                 required
@@ -1372,35 +1605,52 @@ const DOPurchase = () => {
                 helperText={
                   errors.price_per_carat ||
                   (editOPurchase?.price_per_carat
-                    ? `Price/Carat: ${Number(editOPurchase.price_per_carat).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
+                    ? `Item Cost: ${Number(editOPurchase.price_per_carat).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
                     : "")
                 }
                 FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
                 sx={{ flex: 1 }}
               />
 
-              <TextField
-                label="Total Price"
-                type="number"
-                fullWidth
-                required
-                value={editOPurchase?.total_price === 0 ? '' : editOPurchase?.total_price ?? ''}
-                InputProps={{ readOnly: true }}
-                error={!!errors.total_price}
-                helperText={
-                  errors.total_price ||
-                  (editOPurchase?.total_price
-                    ? `Total: ${Number(editOPurchase.total_price).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}`
-                    : "")
-                }
-                FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            </Box>
+
+            {/* Currency Retail for Diamond Purchase */}
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Autocomplete
+                options={currencyList}
+                getOptionLabel={(option) => `${option.flag} ${option.code} - ${option.name}`}
+                value={currencyList.find(c => c.code === (editOPurchase?.currencyRetail || '')) || null}
+                onChange={(_e, v) => setEditOPurchase(prev => prev ? { ...prev, currencyRetail: v ? v.code : '' } : prev)}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Currency"
+                    placeholder="Select currency"
+                    required
+                    error={!!errors.currencyRetail}
+                    helperText={errors.currencyRetail}
+                    FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+                  />
+
+
+
+
+                 
+                )}
+
+
+
+                  
+
+
+                isOptionEqualToValue={(option, value) => option.code === value.code}
                 sx={{ flex: 1 }}
               />
             </Box>
 
 
             <TextField
-              label="Selling Price"
+              label="Selling Price $"
               type="number"
               fullWidth
               sx={{ flex: 1 }}
@@ -1700,25 +1950,6 @@ const DOPurchase = () => {
 
 
             {/* New fields: External Code and Edit Comment */}
-            <TextField
-              label="External Code"
-              fullWidth
-              value={editOPurchase?.CODE_EXTERNAL || ''}
-              onChange={e => setEditOPurchase({ ...editOPurchase!, CODE_EXTERNAL: e.target.value })}
-              helperText="External reference code for this diamond (if any)."
-              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
-            />
-
-            <TextField
-              label="Edit Comment"
-              fullWidth
-              multiline
-              minRows={2}
-              value={editOPurchase?.comment_edit || ''}
-              onChange={e => setEditOPurchase({ ...editOPurchase!, comment_edit: e.target.value })}
-              helperText="Internal comment or edit note for this record."
-              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
-            />
 
             <TextField
               label="SharePoint URL"
@@ -1727,6 +1958,17 @@ const DOPurchase = () => {
               onChange={e => setEditOPurchase({ ...editOPurchase!, sharepoint_url: e.target.value })}
               helperText="Optional: Link to the related SharePoint document or item."
               FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+            />
+
+            {/* Move Origin Country to the very bottom */}
+            <TextField
+              label="Origin Country"
+              fullWidth
+              value={editOPurchase?.origin_country || ''}
+              onChange={e => setEditOPurchase({ ...editOPurchase!, origin_country: e.target.value })}
+              helperText="Country of origin for this diamond."
+              FormHelperTextProps={{ sx: { whiteSpace: 'pre-line' } }}
+              sx={{ mt: 2 }}
             />
           </Box>
         </DialogContent>
@@ -1740,47 +1982,18 @@ const DOPurchase = () => {
         </DialogActions>
       </Dialog>
 
-      {/* --- Attachment Dialog --- */}
-      <Dialog open={attachmentDialog.open} onClose={handleCloseAttachmentDialog}>
-        <DialogTitle>
-          Upload Attachment
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-            <Button
-              variant="outlined"
-              component="label"
-              startIcon={<CloudUploadIcon />}
-              color="primary"
-              sx={{ textTransform: 'none', fontWeight: 'bold' }}
-              disabled={uploading}
-            >
-              {attachment ? attachment.name : 'Choose File'}
-              <input
-                type="file"
-                hidden
-                onChange={handleAttachmentChange}
-              />
-            </Button>
-            {attachment && (
-              <Button
-                variant="contained"
-                color="success"
-                onClick={handleUploadAttachment}
-                disabled={uploading}
-                sx={{ textTransform: 'none', fontWeight: 'bold' }}
-              >
-                {uploading ? 'Uploading...' : 'Send'}
-              </Button>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseAttachmentDialog} color="secondary" disabled={uploading}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* --- Image Dialog (reuse watches) --- */}
+      <ImgDialog open={imgDialogOpen} onClose={() => setImgDialogOpen(false)} id_achat={imgDialogIdAchat} type="diamond" />
+
+      {/* --- Attachment Dialog (Multi-file) --- */}
+      <AttchDiamondFiles
+        open={attachmentDialog.open}
+        onClose={handleCloseAttachmentDialog}
+        row={attachmentDialog.row}
+        id_achat={attachmentDialog.row?.id_achat}
+        onUploadSuccess={fetchData}
+        token={localStorage.getItem('token') || ''}
+      />
 
       {/* --- Distribution Dialog --- */}
       <Dialog open={distributionDialog.open} onClose={() => setDistributionDialog({ open: false, purchase: null })}>
@@ -1840,7 +2053,7 @@ const DOPurchase = () => {
             }}
             color="primary"
             variant="contained"
-            disabled={distributionReady}
+            disabled={distributionReady || _loadingDistributions}
           >
             Distribute
           </Button>
@@ -1871,7 +2084,6 @@ const DOPurchase = () => {
                 <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
               </Typography>
 
-
               <TextField
                 label="Making Charge"
                 type="number"
@@ -1901,6 +2113,17 @@ const DOPurchase = () => {
                 fullWidth
               />
 
+              {/* Move Origin Country to bottom */}
+              <TextField
+                label="Origin Country"
+                value={costDialog.row?.origin_country ?? ''}
+                onChange={e => {
+                  if (costDialog.row) setCostDialog(d => ({ ...d, row: { ...d.row!, origin_country: e.target.value } }));
+                }}
+                fullWidth
+                sx={{ mt: 2 }}
+              />
+
             </Box>
             {/* Totals Box on the right */}
             <Box
@@ -1923,15 +2146,7 @@ const DOPurchase = () => {
                 Carat: <b>{costDialog.row?.carat ?? 0} ct</b>
               </Typography>
               <Divider sx={{ my: 1, borderBottomWidth: 2 }} />
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                <b>Total Price (USD):</b>{' '}
-                {((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0)).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
-              </Typography>
-              <Typography variant="body2">
-                <b>Total Price (LYD):</b>{' '}
-                {((costDialog.row?.carat ?? 0) * (costDialog.row?.price_per_carat ?? 0) * (costFields.Rate ?? 0)).toLocaleString(undefined, { style: 'currency', currency: 'LYD' })}
-              </Typography>
-              <Divider sx={{ my: 1 }} />
+              {/* Removed total price display */}
               <Typography variant="body2" sx={{ fontWeight: 'bold', mb: 1 }}>
                 Add Charges:
               </Typography>
@@ -1983,7 +2198,7 @@ const DOPurchase = () => {
             onClick={async () => {
 
               if (!costDialog.row) return;
-             
+
               const token = localStorage.getItem('token');
               try {
                 await axios.put(`${apiUrl}/Update/${costDialog.row.id_achat}`, {

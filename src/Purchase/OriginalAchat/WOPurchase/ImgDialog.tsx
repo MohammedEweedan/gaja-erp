@@ -1,38 +1,24 @@
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { Dialog, DialogTitle, DialogContent, Typography, Button, Box } from '@mui/material';
 import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import { AttachFile } from '@mui/icons-material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import Webcam from 'react-webcam';
-import axios from 'axios';
+import { Camera as CameraComponent } from 'react-camera-pro';
+import axios from "../../../api";
 import Snackbar from '@mui/material/Snackbar';
 import MuiAlert from '@mui/material/Alert';
-
-// Convert base64/URLEncoded data to a File object
-const dataURLtoFile = (dataurl: string, filename: string): File => {
-    const arr = dataurl.split(',');
-    const mime = arr[0].match(/:(.*?);/)?.[1];
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    
-    while (n--) {
-        u8arr[n] = bstr.charCodeAt(n);
-    }
-    
-    return new File([u8arr], filename, { type: mime });
-};
-
 
 interface ImgDialogProps {
     open: boolean;
     onClose: () => void;
     id_achat: number | null;
+    type?: 'watch' | 'diamond'; // default 'watch'
 }
 
-const API_BASE = 'http://localhost:9000/images'; // Adjust if needed
+const API_HOST = (process.env.REACT_APP_API_IP as string) || '';
+const API_BASE = `${API_HOST}/images`;
 
-const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
+const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat, type = 'watch' }) => {
     const [images, setImages] = useState<string[]>([]);
     const [uploading, setUploading] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -40,31 +26,20 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
     const [zoomImg, setZoomImg] = useState<string | null>(null);
     const [showCamera, setShowCamera] = useState(false);
     const [cameraSize, setCameraSize] = useState<{ width: number; height: number }>({ width: 640, height: 480 });
-    const webcamRef = React.useRef<Webcam>(null);
+    const cameraRef = React.useRef<any>(null);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
     const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
 
-    useEffect(() => {
-        if (open && id_achat) {
-            fetchImages();
-        } else {
-            setImages([]);
-        }
-        setSelectedFile(null);
-        setError(null);
-    }, [open, id_achat]);
-
-    const fetchImages = async () => {
+    const fetchImages = useCallback(async () => {
         const token = localStorage.getItem('token');
         if (!token || !id_achat) return;
         try {
-            const res = await axios.get(`${API_BASE}/list/${id_achat}`, {
+            const res = await axios.get(`${API_BASE}/list/${type}/${id_achat}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             console.log('Fetched images:', res.data); // Debug log
             // If res.data is an array of objects, extract the correct property
             if (Array.isArray(res.data) && res.data.length > 0 && typeof res.data[0] === 'object') {
-                // Try common property names
                 const key = Object.keys(res.data[0]).find(k => ['url', 'path', 'filename', 'name'].includes(k));
                 if (key) {
                     setImages(res.data.map((img: any) => img[key]));
@@ -77,7 +52,17 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
         } catch (err) {
             setImages([]);
         }
-    };
+    }, [id_achat, type]);
+
+    useEffect(() => {
+        if (open && id_achat) {
+            fetchImages();
+        } else {
+            setImages([]);
+        }
+        setSelectedFile(null);
+        setError(null);
+    }, [open, id_achat, type, fetchImages]);
 
     const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -94,7 +79,7 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
         formData.append('image', selectedFile);
         formData.append('id_achat', String(id_achat));
         try {
-            await axios.post(`${API_BASE}/upload/${id_achat}`, formData, {
+            await axios.post(`${API_BASE}/upload/${type}/${id_achat}`, formData, {
                 headers: {
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'multipart/form-data',
@@ -284,34 +269,45 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
                     </Box>
                     <Box sx={{ width: '100%', maxWidth: 640, height: 480, mb: 2, borderRadius: 2, overflow: 'hidden', boxShadow: 2, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Box sx={{ width: '100%', height: '100%' }}>
-                            <Webcam
-                                ref={webcamRef}
-                                width={cameraSize.width}
-                                height={cameraSize.height}
+                            <CameraComponent
+                                ref={cameraRef}
+                                aspectRatio={4 / 3}
+                                errorMessages={{
+                                    noCameraAccessible: "No camera accessible",
+                                    permissionDenied: "Permission denied",
+                                    switchCamera: "Switch camera",
+                                    canvas: "Canvas not supported"
+                                }}
                             />
                         </Box>
                     </Box>
                     <Box mt={2} display="flex" gap={2}>
-                        <Button 
-                            variant="contained" 
-                            color="primary" 
-                            onClick={() => {
-                                if (webcamRef.current) {
-                                    const imageSrc = webcamRef.current.getScreenshot();
-                                    if (imageSrc) {
-                                        setSelectedFile(dataURLtoFile(imageSrc, 'capture.jpg'));
+                        <Button variant="contained" color="primary" onClick={async () => {
+                            if (cameraRef.current) {
+                                const photo = cameraRef.current.takePhoto();
+                                // Resize base64 image using canvas
+                                const resizedBase64 = await resizeBase64Img(photo, cameraSize.width, cameraSize.height);
+                                // Convert base64 to File
+                                fetch(resizedBase64)
+                                    .then(res => res.blob())
+                                    .then(blob => {
+                                        const file = new File([blob], `photo_${Date.now()}.png`, { type: 'image/png' });
+                                        setSelectedFile(file);
                                         setShowCamera(false);
-                                    }
-                                }
-                            }}
-                        >
+                                    });
+                            }
+                        }}>
                             Capture
                         </Button>
-                        <Button 
-                            variant="outlined" 
-                            onClick={() => setShowCamera(false)}
-                        >
-                            Cancel
+                        <Button variant="outlined" onClick={() => setShowCamera(false)}>Cancel</Button>
+                        <Button variant="text" onClick={() => {
+                            if (cameraRef.current && cameraRef.current.devices && cameraRef.current.devices.length > 1) {
+                                const currentIdx = cameraRef.current.devices.findIndex((d: any) => d.deviceId === cameraRef.current.deviceId);
+                                const nextIdx = (currentIdx + 1) % cameraRef.current.devices.length;
+                                cameraRef.current.setDeviceId(cameraRef.current.devices[nextIdx].deviceId);
+                            }
+                        }}>
+                            Switch Camera
                         </Button>
                     </Box>
                 </Box>
@@ -327,7 +323,7 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
                     <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
                     <Button color="error" variant="contained" onClick={async () => {
                         if (deleteTarget) {
-                            const result = await handleDeleteImage(deleteTarget);
+                            await handleDeleteImage(deleteTarget);
                             setDeleteTarget(null);
                             //  setSnack(result);
                         }
@@ -364,7 +360,7 @@ const ImgDialog: React.FC<ImgDialogProps> = ({ open, onClose, id_achat }) => {
         if (!id_achat) return { open: true, message: 'No purchase ID', severity: 'error' };
         const token = localStorage.getItem('token');
         try {
-            await axios.delete(`${API_BASE}/delete/${id_achat}/${filename}`, {
+            await axios.delete(`${API_BASE}/delete/${type}/${id_achat}/${filename}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
             fetchImages();

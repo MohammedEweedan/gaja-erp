@@ -1,40 +1,37 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, LinearProgress, IconButton, List, ListItem, ListItemText, ListItemSecondaryAction, Alert } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import { Dialog as MuiDialog, DialogTitle as MuiDialogTitle, DialogContent as MuiDialogContent, DialogActions as MuiDialogActions } from '@mui/material';
 
-interface AttchWatchFilesProps {
+interface AttchDiamondFilesProps {
   open: boolean;
   onClose: () => void;
-  row?: any; // optional now
+  row?: any;
   id_achat?: number;
   onUploadSuccess: () => void;
   token: string;
-
 }
-const apiUrl = "";
-const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, id_achat, onUploadSuccess, token }) => {
+
+const apiUrl = (process.env.REACT_APP_API_IP as string) || '';
+
+const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, row, id_achat, onUploadSuccess, token }) => {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [fileToDelete, setFileToDelete] = useState<string | null>(null);
 
-  // Fetch uploaded files
-  const fetchFiles = async () => {
-
+  const fetchFiles = useCallback(async () => {
     setFiles([]);
-
     const currentId = id_achat || row?.id_achat;
     if (!open || !currentId) {
       setUploadedFiles([]);
       return;
     }
     try {
-      const res = await fetch(`${apiUrl}/uploads/WOpurchase/upload-attachment/${currentId}`, {
+      const res = await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}`, {
         ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {})
       });
       if (res.ok) {
@@ -47,29 +44,22 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
       console.error('Error fetching uploaded files:', err);
       setUploadedFiles([]);
     }
-  };
+  }, [id_achat, open, row, token]);
 
-  // Fetch uploaded files when dialog opens or id_achat changes
   React.useEffect(() => {
-
-
     fetchFiles();
-  }, [open, id_achat, row]);
+  }, [open, id_achat, row, fetchFiles]);
 
-  // Helper to refresh file list
   const refreshFiles = fetchFiles;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      // Append new files to the existing list, avoiding duplicates by name
       const newFiles = Array.from(e.target.files);
       setFiles(prev => {
         const existingNames = new Set(prev.map(f => f.name));
         return [...prev, ...newFiles.filter(f => !existingNames.has(f.name))];
       });
     }
-
-
   };
 
   const handleRemoveFile = (index: number) => {
@@ -83,43 +73,38 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
     }
     setUploading(true);
     setError(null);
-    setProgress(0);
+  // reset progress if any
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
 
     try {
-      // Use the new endpoint for watch purchase attachments
-      await fetch(`${apiUrl}/uploads/WOpurchase/upload-attachment/${id_achat || row?.id_achat}`, {
+      await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${id_achat || row?.id_achat}`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: formData,
       });
-      setFiles([]); // Reset file input after upload
-      setError(null); // Clear any error
+      setFiles([]);
+      setError(null);
       setSuccessMessage('Files uploaded successfully!');
-      setTimeout(() => setSuccessMessage(null), 3000); // Auto-hide after 3s
-      onUploadSuccess();
-      fetchFiles(); // Refresh the file list after adding new files
-
-      // Do not close the dialog automatically
-      // onClose();
+      setTimeout(() => setSuccessMessage(null), 3000);
+      onUploadSuccess?.();
+      fetchFiles();
     } catch (err: any) {
       console.error('Upload error:', err);
     } finally {
       setUploading(false);
-      setProgress(0);
+      // reset progress if any
     }
   };
 
-  // Delete an uploaded file
   const handleDeleteFile = async (fileUrl: string) => {
     const currentId = id_achat || row?.id_achat;
     if (!currentId) return;
     const filename = decodeURIComponent(fileUrl.split('/').pop() || '');
     try {
-      const res = await fetch(`${apiUrl}/uploads/WOpurchase/upload-attachment/${currentId}/${filename}`, {
+      const res = await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}/${filename}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (res.ok) {
         await refreshFiles();
@@ -150,7 +135,7 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Attach Files to Purchase</DialogTitle>
+      <DialogTitle>Attach Files to Diamond Purchase</DialogTitle>
       <DialogContent>
         <Box mb={2}>
           {successMessage && (
@@ -170,7 +155,6 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
               onChange={handleFileChange}
             />
           </Button>
-          {/* Only show the file input list if there are files to upload */}
           {!uploading && files.length > 0 && (
             <List>
               {files.map((file, idx) => (
@@ -185,7 +169,6 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
               ))}
             </List>
           )}
-          {/* Uploaded files list */}
           {uploadedFiles.length > 0 && (
             <Box mt={2}>
               <Typography variant="subtitle1">Uploaded Files:</Typography>
@@ -211,7 +194,6 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
         <Button onClick={onClose} disabled={uploading}>Cancel</Button>
         <Button onClick={handleUpload} color="primary" variant="contained" disabled={uploading || files.length === 0}>Upload</Button>
       </DialogActions>
-      {/* Delete confirmation dialog */}
       <MuiDialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <MuiDialogTitle>Confirm Delete</MuiDialogTitle>
         <MuiDialogContent>
@@ -226,4 +208,4 @@ const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({ open, onClose, row, i
   );
 };
 
-export default AttchWatchFiles;
+export default AttchDiamondFiles;
