@@ -1,21 +1,26 @@
-import React from 'react';
-import { Snackbar, Alert } from '@mui/material';
+import React from "react";
+import { Snackbar, Alert } from "@mui/material";
 
 interface SnackbarNotificationProps {
   open: boolean;
   message: string;
-  severity: 'success' | 'error' | 'warning' | 'info';
+  severity: "success" | "error" | "warning" | "info";
   onClose: () => void;
 }
 
-const SnackbarNotification: React.FC<SnackbarNotificationProps> = ({ open, message, severity, onClose }) => (
+const SnackbarNotification: React.FC<SnackbarNotificationProps> = ({
+  open,
+  message,
+  severity,
+  onClose,
+}) => (
   <Snackbar
     open={open}
     autoHideDuration={6000}
     onClose={onClose}
-    anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+    anchorOrigin={{ vertical: "top", horizontal: "right" }}
   >
-    <Alert onClose={onClose} severity={severity} sx={{ width: '100%' }}>
+    <Alert onClose={onClose} severity={severity} sx={{ width: "100%" }}>
       {message}
     </Alert>
   </Snackbar>

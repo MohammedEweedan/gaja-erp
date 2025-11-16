@@ -1,8 +1,15 @@
-import React, { useState, useEffect } from "react";
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Box,
-  Typography,
   Grid,
   TextField,
   Button,
@@ -13,13 +20,34 @@ import {
   CircularProgress,
   Alert,
   Divider,
+  Chip,
+  Stack,
+  Paper,
+  Typography,
+  Tooltip,
+  Snackbar,
+  Card,
+  CardContent,
+  useMediaQuery,
 } from "@mui/material";
-import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { useTheme } from "@mui/material/styles";
+import api from "../../api";
+import { Close as CloseIcon } from "@mui/icons-material";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDateFns } from "@mui/x-date-pickers/AdapterDateFns";
-import { addDays } from "date-fns";
-import { createLeaveRequest, getLeaveTypes } from "../../services/leaveService";
+import { enGB } from "date-fns/locale";
+import { DatePicker } from "@mui/x-date-pickers/DatePicker";
+import { DateCalendar } from "@mui/x-date-pickers/DateCalendar";
+import { PickersDay, PickersDayProps } from "@mui/x-date-pickers/PickersDay";
+import {
+  createLeaveRequest,
+  getLeaveTypes,
+  getHolidays,
+  getLeaveBalance,
+  getLeaveRequests,
+} from "../../services/leaveService";
 
+/** ---------------- Types ---------------- */
 interface LeaveTypeOption {
   int_can: number;
   desig_can: string;
@@ -28,18 +56,109 @@ interface LeaveTypeOption {
 }
 
 interface LeaveRequestForm {
-  leaveCode: number | ""; // <- will be TS_Codes.int_can
+  leaveCode: number | "";
   startDate: Date | null;
   endDate: Date | null;
   reason: string;
   contactNumber: string;
 }
-const isFriday = (d: Date) => d.getDay() === 5; // PDF: Fridays off
 
-const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
+type HistoryRow = {
+  int_con?: number | string;
+  id?: number | string;
+  id_can?: number | string;
+  code?: string | number;
+  typeCode?: string | number;
+  typeName?: string;
+  idCan?: string | number;
+  date_depart?: string;
+  date_end?: string;
+  nbr_jour?: number;
+  state?: string;
+  startDate?: string;
+  endDate?: string;
+  days?: number;
+  status?: string;
+};
+
+/** ---------------- Sidebar-adaptive props (optional) ---------------- */
+type SidebarAdaptive = {
+  /** If your layout toggles a sidebar, pass this to animate content width. */
+  sidebarOpen?: boolean;
+  /** Widths (px) of the sidebar in open/collapsed states. Defaults work with typical drawers. */
+  sidebarWidth?: number; // e.g., 280
+  sidebarCollapsedWidth?: number; // e.g., 72
+};
+
+/** ---------------- Helpers ---------------- */
+const firstHolidayInRange = (
+  start: Date,
+  end: Date,
+  isHolidayFn: (d: Date) => boolean
+) => {
+  const s = new Date(start);
+  s.setHours(0, 0, 0, 0);
+  const e = new Date(end);
+  e.setHours(0, 0, 0, 0);
+  if (e < s) return null;
+  const d = new Date(s);
+  while (d <= e) {
+    if (isHolidayFn(d)) return new Date(d);
+    d.setDate(d.getDate() + 1);
+  }
+  return null;
+};
+
+const isFriday = (d: Date) => d.getDay() === 5; // Friday off
+const MAX_SINGLE_REQUEST_CALENDAR_DAYS = 30;
+
+const firstDefined = (...vals: any[]) =>
+  vals.find((v) => v !== undefined && v !== null && String(v).trim?.() !== "");
+
+const toISO10 = (v: any) => {
+  if (!v) return "";
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+  }
+  return "";
+};
+
+const parseISOLocal = (iso10: string) => {
+  if (!iso10) return new Date(NaN);
+  const [y, m, d] = iso10.split("-").map((n) => Number(n));
+  return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+};
+
+const toDMY = (date: Date | string | null | undefined) => {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : new Date(date);
+  if (isNaN(d.getTime())) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = d.getFullYear();
+  return `${dd}-${mm}-${yy}`;
+};
+
+/** ---------------- Component ---------------- */
+const LeaveRequestScreen: React.FC<
+  { employeeId?: number | string } & SidebarAdaptive
+> = ({
   employeeId,
+  sidebarOpen,
+  sidebarWidth = 280,
+  sidebarCollapsedWidth = 72,
 }) => {
   const { t } = useTranslation();
+  const theme = useTheme();
+  const upMd = useMediaQuery(theme.breakpoints.up("md"));
+  const upLg = useMediaQuery(theme.breakpoints.up("lg"));
+
   const [formData, setFormData] = useState<LeaveRequestForm>({
     leaveCode: "",
     startDate: null,
@@ -47,19 +166,59 @@ const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
     reason: "",
     contactNumber: "",
   });
+
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeOption[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
+
   const [calculatedDays, setCalculatedDays] = useState<number>(0);
+  const [daysRequested, setDaysRequested] = useState<number>(0);
+
+  const [holidaySet, setHolidaySet] = useState<Set<string>>(new Set());
+  const [remainingDays, setRemainingDays] = useState<number | null>(null);
+  const [daysError, setDaysError] = useState<string | null>(null);
+  const [submitLock, setSubmitLock] = useState(false);
+
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showError, setShowError] = useState(false);
+
+  const [leaveHistory, setLeaveHistory] = useState<
+    Array<{
+      id?: string | number;
+      startISO: string;
+      endISO: string;
+      status?: string;
+    }>
+  >([]);
+
+  // Sidebar-adaptive wrapper (works even if you don’t pass props; also respects CSS var)
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const effectiveSidebarWidth =
+    typeof window !== "undefined"
+      ? Number(
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--sidebar-width")
+            .replace("px", "")
+        ) || (sidebarOpen ? sidebarWidth : sidebarCollapsedWidth)
+      : sidebarOpen
+        ? sidebarWidth
+        : sidebarCollapsedWidth;
+
+  useEffect(() => {
+    if (!contentRef.current) return;
+    contentRef.current.style.setProperty(
+      "--content-ml",
+      `${effectiveSidebarWidth}px`
+    );
+  }, [effectiveSidebarWidth]);
 
   useEffect(() => {
     const fetchLeaveTypes = async () => {
       try {
         setLoading(true);
-        // Expecting TS_Codes: [{ int_can, desig_can, code, max_day, ... }]
-        const types = await getLeaveTypes(); // array of raw rows you pasted
+        const types = await getLeaveTypes();
         setLeaveTypes(Array.isArray(types) ? types : []);
       } catch (err) {
         setError(t("leave.request.fetchError"));
@@ -71,28 +230,434 @@ const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
     fetchLeaveTypes();
   }, [t]);
 
-  // Calculate working days excluding Fridays (client-side approximation; server does the definitive calc)
+  const StatTile: React.FC<{ title: string; value: React.ReactNode }> = ({
+    title,
+    value,
+  }) => (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        borderRadius: 2,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0.5,
+        height: "100%",
+        bgcolor: (t) =>
+          t.palette.mode === "dark" ? "background.default" : "background.paper",
+      }}
+    >
+      <Typography
+        variant="overline"
+        color="text.secondary"
+        sx={{ letterSpacing: 0.5 }}
+      >
+        {title}
+      </Typography>
+      <Typography variant="h6" sx={{ fontWeight: 700 }}>
+        {value}
+      </Typography>
+    </Paper>
+  );
+
+  const refreshBalanceAndHistory = useCallback(async () => {
+    const empId = String(employeeId ?? "");
+    if (!empId) return;
+
+    const [bal, reqs] = await Promise.allSettled([
+      getLeaveBalance(empId),
+      getLeaveRequests(empId),
+    ]);
+
+    if (bal.status === "fulfilled") {
+      const b: any = bal.value;
+      const rem = Number(
+        b?.remaining ?? b?.Remaining ?? b?.data?.remaining ?? 0
+      );
+      setRemainingDays(Number.isFinite(rem) ? rem : 0);
+    }
+
+    const histA: HistoryRow[] =
+      bal.status === "fulfilled" && Array.isArray(bal.value?.leaveHistory)
+        ? bal.value.leaveHistory
+        : [];
+    const histB: HistoryRow[] =
+      reqs.status === "fulfilled" && Array.isArray(reqs.value)
+        ? reqs.value
+        : [];
+
+    const byId = new Map<string, HistoryRow>();
+    [...histA, ...histB].forEach((r) => {
+      const k = String(r.int_con ?? r.id ?? Math.random());
+      byId.set(k, r);
+    });
+
+    const norm = Array.from(byId.values())
+      .map((r) => {
+        const startISO = toISO10(
+          firstDefined(
+            r.startDate,
+            (r as any).DATE_START,
+            r.date_depart,
+            (r as any).DATE_DEPART,
+            (r as any).start_date
+          )
+        );
+        const endISO = toISO10(
+          firstDefined(
+            r.endDate,
+            (r as any).DATE_END,
+            r.date_end,
+            (r as any).DATE_FIN,
+            (r as any).end_date
+          )
+        );
+        const status = String(
+          firstDefined(
+            r.status,
+            (r as any).STATUS,
+            r.state,
+            (r as any).STATUT
+          ) || ""
+        ).toLowerCase();
+        return { id: r.int_con ?? r.id, startISO, endISO, status };
+      })
+      .filter((r) => r.startISO && r.endISO);
+
+    setLeaveHistory(norm);
+  }, [employeeId]);
+
+  const sumEmergencyDays = (
+    history: { startISO: string; endISO: string; status?: string }[],
+    year: number,
+    month?: number,
+    isNonWorkingFn?: (d: Date) => boolean
+  ) => {
+    const relevant = history.filter((r) => {
+      const st = parseISOLocal(r.startISO);
+      const en = parseISOLocal(r.endISO);
+      if (isNaN(st.getTime()) || isNaN(en.getTime())) return false;
+      const yMatches =
+        st.getFullYear() === year ||
+        en.getFullYear() === year ||
+        (st.getFullYear() < year && en.getFullYear() > year);
+      if (!yMatches) return false;
+      return true;
+    });
+
+    let total = 0;
+    for (const r of relevant) {
+      const st = parseISOLocal(r.startISO);
+      const en = parseISOLocal(r.endISO);
+      const winStart = new Date(year, month ?? 0, 1, 0, 0, 0, 0);
+      const winEnd = new Date(
+        year,
+        month != null ? month : 11,
+        month != null ? new Date(year, month + 1, 0).getDate() : 31,
+        23,
+        59,
+        59,
+        999
+      );
+      const a = st > winStart ? st : winStart;
+      const b = en < winEnd ? en : winEnd;
+      if (b >= a) {
+        total += countWorkingDays(a, b, isNonWorking);
+      }
+    }
+    return total;
+  };
+
+  // Load holidays
   useEffect(() => {
-    if (formData.startDate && formData.endDate) {
-      const start = formData.startDate;
-      const end = formData.endDate;
+    const loadHolidays = async () => {
+      try {
+        const resp: any = await getHolidays();
+        const arr = Array.isArray(resp) ? resp : resp?.data || [];
+        const set = new Set<string>();
+        arr.forEach((h: any) => {
+          const iso = toISO10(firstDefined(h.DATE_H, h.date, h.holiday_date));
+          if (iso) set.add(iso);
+        });
+        try {
+          const raw = localStorage.getItem("custom_holidays");
+          if (raw) {
+            const extra = JSON.parse(raw);
+            if (Array.isArray(extra)) {
+              extra.forEach((h: any) => {
+                const iso = toISO10(
+                  firstDefined(h.DATE_H, h.date, h.holiday_date)
+                );
+                if (iso) set.add(iso);
+              });
+            }
+          }
+        } catch {}
+        setHolidaySet(set);
+      } catch {}
+    };
+    loadHolidays();
+  }, []);
 
-      if (start > end) {
-        setCalculatedDays(0);
-        return;
-      }
+  useEffect(() => {
+    refreshBalanceAndHistory().catch(() => {
+      setRemainingDays(null);
+      setLeaveHistory([]);
+    });
+  }, [refreshBalanceAndHistory]);
 
-      let count = 0;
-      let current = new Date(start);
-      while (current <= end) {
-        if (!isFriday(current)) count++;
-        current = addDays(current, 1);
-      }
-      setCalculatedDays(count);
+  const fmtISO = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+  };
+
+  const computeEndDate = useCallback((start: Date, calendarDays: number) => {
+    if (!start || !Number.isFinite(calendarDays) || calendarDays <= 0)
+      return null;
+    const d = new Date(start);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + (calendarDays - 1));
+    return d;
+  }, []);
+
+  const isHoliday = useCallback(
+    (d: Date) => holidaySet.has(fmtISO(d)),
+    [holidaySet]
+  );
+  const isNonWorking = useCallback(
+    (d: Date) => isFriday(d) || isHoliday(d),
+    [isHoliday]
+  );
+
+  const uploadDoctorNote = async (requestId: number | string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    await api.post(`/leave/leave-request/${requestId}/doctor-note`, fd, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  };
+
+  const toDate = (v: any): Date | null => {
+    if (!v) return null;
+    if (v instanceof Date) return v;
+    if (typeof (v as any).toDate === "function") {
+      const d = (v as any).toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d : null;
+    }
+    if (typeof v === "string") {
+      const d = new Date(v);
+      return !isNaN(d.getTime()) ? d : null;
+    }
+    try {
+      const d = new Date(v as any);
+      return !isNaN(d.getTime()) ? d : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const countEffectiveDays = useCallback(
+    (start: Date, end: Date, lt?: LeaveTypeOption | null): number => {
+      if (!start || !end) return 0;
+      if (isSickLike(lt)) return countCalendarDays(start, end);
+      return countWorkingDays(start, end, isNonWorking);
+    },
+    [isNonWorking]
+  );
+
+  const isApprovedLike = (status?: string) => {
+    const s = String(status || "").toLowerCase();
+    return [
+      "approved",
+      "accepted",
+      "validated",
+      "approuved",
+      "approuvé",
+      "validé",
+      "approved by hr",
+      "approved_by_hr",
+    ].some((tk) => s.includes(tk));
+  };
+  const isPendingLike = (status?: string) => {
+    const s = String(status || "").toLowerCase();
+    return [
+      "pending",
+      "submitted",
+      "awaiting",
+      "waiting",
+      "in review",
+      "under review",
+      "en attente",
+    ].some((tk) => s.includes(tk));
+  };
+
+  const [doctorNoteFile, setDoctorNoteFile] = useState<File | null>(null);
+  const [doctorNotePreview, setDoctorNotePreview] = useState<string | null>(
+    null
+  );
+  const [uploadingNote, setUploadingNote] = useState(false);
+
+  const onDoctorNoteChange = (file: File | null) => {
+    if (!file) {
+      setDoctorNoteFile(null);
+      setDoctorNotePreview(null);
+      return;
+    }
+    if (file.type !== "image/jpeg") {
+      setError(
+        t("leave.request.noteTypeError", "Doctor's note must be a JPG image.")
+      );
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError(
+        t("leave.request.noteSizeError", "Doctor's note must be under 5MB.")
+      );
+      return;
+    }
+    setError(null);
+    setDoctorNoteFile(file);
+    setDoctorNotePreview(URL.createObjectURL(file));
+  };
+
+  const validateNoOverlap = useCallback(
+    (startISO: string, endISO: string) => {
+      const s = parseISOLocal(startISO);
+      const e = parseISOLocal(endISO);
+      if (isNaN(s.getTime()) || isNaN(e.getTime()))
+        return { ok: false, conflicts: [] as typeof leaveHistory };
+
+      const conflicts = leaveHistory.filter((r) => {
+        const st = parseISOLocal(r.startISO);
+        const en = parseISOLocal(r.endISO);
+        if (isNaN(st.getTime()) || isNaN(en.getTime())) return false;
+        if (!isApprovedLike(r.status) && !isPendingLike(r.status)) return false;
+        return s <= en && e >= st;
+      });
+
+      return { ok: conflicts.length === 0, conflicts };
+    },
+    [leaveHistory]
+  );
+
+  const isSickLike = (lt?: LeaveTypeOption | null) => {
+    if (!lt) return false;
+    const code = (lt.code || "").toUpperCase();
+    const name = (lt.desig_can || "").toUpperCase();
+    return code === "SL" || name.includes("SICK");
+  };
+
+  const isEmergencyLike = (lt?: LeaveTypeOption | null) => {
+    if (!lt) return false;
+    const code = (lt.code || "").toUpperCase();
+    const name = (lt.desig_can || "").toUpperCase();
+    return code === "EL" || name.includes("EMERGENCY");
+  };
+
+  const EMERGENCY_DAYS_PER_YEAR_MAX = 12;
+  const EMERGENCY_DAYS_PER_MONTH_MAX = 3;
+
+  const countWorkingDays = (
+    start: Date,
+    end: Date,
+    isNonWorkingFn: (d: Date) => boolean
+  ) => {
+    const s = new Date(start);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(end);
+    e.setHours(0, 0, 0, 0);
+    if (e < s) return 0;
+    let c = 0;
+    const d = new Date(s);
+    while (d <= e) {
+      if (!isNonWorkingFn(d)) c++;
+      d.setDate(d.getDate() + 1);
+      if (c > 1000) break;
+    }
+    return c;
+  };
+
+  const countCalendarDays = (start: Date, end: Date) => {
+    const s = new Date(start);
+    s.setHours(0, 0, 0, 0);
+    const e = new Date(end);
+    e.setHours(0, 0, 0, 0);
+    return e < s
+      ? 0
+      : Math.floor((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const violatesSameDayDuplicate = (startISO: string, endISO: string) => {
+    const { ok } = validateNoOverlap(startISO, endISO);
+    return !ok;
+  };
+
+  const activeLeaveType = useMemo(
+    () =>
+      leaveTypes.find((lt) => lt.int_can === Number(formData.leaveCode)) ||
+      null,
+    [leaveTypes, formData.leaveCode]
+  );
+  const perTypeMaxDays = activeLeaveType?.max_day ?? null;
+
+  useEffect(() => {
+    if (remainingDays != null && daysRequested > remainingDays) {
+      setDaysRequested(remainingDays);
+      setDaysError(t("leave.request.maxReached", "Exceeds remaining balance"));
+    } else if (perTypeMaxDays != null && daysRequested > perTypeMaxDays) {
+      setDaysRequested(perTypeMaxDays);
+      setDaysError(
+        t(
+          "leave.request.maxPerType",
+          `Exceeds ${activeLeaveType?.desig_can} limit (${perTypeMaxDays})`
+        )
+      );
+    } else if (daysRequested > MAX_SINGLE_REQUEST_CALENDAR_DAYS) {
+      setDaysRequested(MAX_SINGLE_REQUEST_CALENDAR_DAYS);
+      setDaysError(
+        t(
+          "leave.request.maxSpan",
+          `Single request capped at ${MAX_SINGLE_REQUEST_CALENDAR_DAYS} days`
+        )
+      );
     } else {
+      setDaysError(null);
+    }
+
+    if (formData.startDate && daysRequested > 0) {
+      const end = computeEndDate(formData.startDate, daysRequested);
+      setFormData((prev) => ({ ...prev, endDate: end }));
+      if (end)
+        setCalculatedDays(
+          countEffectiveDays(formData.startDate, end, activeLeaveType)
+        );
+      else setCalculatedDays(0);
+    } else {
+      setFormData((prev) => ({ ...prev, endDate: null }));
       setCalculatedDays(0);
     }
-  }, [formData.startDate, formData.endDate]);
+  }, [
+    formData.startDate,
+    daysRequested,
+    computeEndDate,
+    activeLeaveType,
+    countEffectiveDays,
+    remainingDays,
+    perTypeMaxDays,
+    activeLeaveType?.desig_can,
+    t,
+  ]);
+
+  const startISOForLive = formData.startDate ? toISO10(formData.startDate) : "";
+  const endISOForLive = formData.endDate
+    ? toISO10(formData.endDate)
+    : startISOForLive;
+  const liveOverlap =
+    !!startISOForLive &&
+    !!endISOForLive &&
+    !validateNoOverlap(startISOForLive, endISOForLive).ok;
 
   const handleChange = (e: any) => {
     const { name, value } = e.target;
@@ -109,41 +674,323 @@ const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
     setFormData((prev) => ({ ...prev, [name]: date }));
   };
 
+  const startDateDep = formData.startDate;
+  const endDateDep = formData.endDate;
+
+  const CustomDay = useMemo(() => {
+    return function CustomDayComponent(props: PickersDayProps) {
+      const { day } = props;
+      const dayDate: Date = new Date(day as any);
+      const s0 = startDateDep
+        ? new Date(new Date(startDateDep).setHours(0, 0, 0, 0))
+        : null;
+      const e0 = endDateDep
+        ? new Date(new Date(endDateDep).setHours(0, 0, 0, 0))
+        : null;
+      const inRange = !!s0 && !!e0 && dayDate >= s0 && dayDate <= e0;
+      const nonWorking = isNonWorking(dayDate);
+      const disable = nonWorking && !isSickLike(activeLeaveType);
+      return (
+        <PickersDay
+          {...props}
+          disabled={disable}
+          sx={{
+            bgcolor: inRange
+              ? nonWorking
+                ? "rgba(244,67,54,0.18)"
+                : "rgba(33,150,243,0.18)"
+              : undefined,
+            border: inRange
+              ? nonWorking
+                ? "1px solid #f44336"
+                : "1px solid #b7a27d"
+              : undefined,
+            borderRadius: 1.2,
+            opacity: nonWorking ? 0.6 : 1,
+          }}
+        />
+      );
+    };
+  }, [startDateDep, endDateDep, isNonWorking, activeLeaveType]);
+
+  const validateBusinessRules = () => {
+    if (!formData.leaveCode || !formData.startDate || !daysRequested) {
+      return t(
+        "leave.request.validation.required",
+        "Please complete all required fields."
+      );
+    }
+    if (remainingDays != null && daysRequested > remainingDays) {
+      return t("leave.request.maxReached", "Exceeds remaining balance");
+    }
+    if (!formData.endDate || formData.startDate > formData.endDate) {
+      return t(
+        "leave.request.validation.invalidDateRange",
+        "Invalid date range."
+      );
+    }
+    if (isNonWorking(formData.startDate)) {
+      return t(
+        "leave.request.validation.startNonWorking",
+        "Start date cannot be a Friday or holiday."
+      );
+    }
+    if (isEmergencyLike(activeLeaveType)) {
+      if (currentRequestEmergencyDays > emergencyYearRemaining) {
+        return t(
+          "leave.request.emergencyYearCap",
+          `Emergency leave exceeds remaining annual quota (${emergencyYearRemaining}/${EMERGENCY_DAYS_PER_YEAR_MAX}).`
+        );
+      }
+      if (currentRequestEmergencyDays > emergencyMonthRemaining) {
+        return t(
+          "leave.request.emergencyMonthCap",
+          `Emergency leave exceeds remaining monthly quota (${emergencyMonthRemaining}/${EMERGENCY_DAYS_PER_MONTH_MAX}).`
+        );
+      }
+    }
+    if (perTypeMaxDays != null && calculatedDays > perTypeMaxDays) {
+      return t(
+        "leave.request.maxPerType",
+        `Exceeds ${activeLeaveType?.desig_can} limit (${perTypeMaxDays})`
+      );
+    }
+    const span =
+      Math.floor(
+        (formData.endDate.getTime() - formData.startDate.getTime()) /
+          (1000 * 60 * 60 * 24)
+      ) + 1;
+    if (span > MAX_SINGLE_REQUEST_CALENDAR_DAYS) {
+      return t(
+        "leave.request.maxSpan",
+        `Single request capped at ${MAX_SINGLE_REQUEST_CALENDAR_DAYS} days`
+      );
+    }
+
+    if (!isSickLike(activeLeaveType)) {
+      if (isHoliday(formData.startDate)) {
+        return t(
+          "leave.request.holidayStartBlocked",
+          "Start date falls on a public holiday. Please select dates strictly before or after the holiday."
+        );
+      }
+      if (formData.endDate && isHoliday(formData.endDate)) {
+        return t(
+          "leave.request.holidayEndBlocked",
+          "End date falls on a public holiday. Please select dates strictly before or after the holiday."
+        );
+      }
+      {
+        const offending = firstHolidayInRange(
+          formData.startDate,
+          formData.endDate ?? formData.startDate,
+          isHoliday
+        );
+        if (offending) {
+          const dd = toDMY(offending);
+          return t(
+            "leave.request.holidayInsideBlocked",
+            `Your request includes a public holiday (${dd}). Choose a range entirely before or entirely after the holiday.`
+          );
+        }
+      }
+      if (isNonWorking(formData.startDate)) {
+        return t(
+          "leave.request.validation.startNonWorking",
+          "Start date cannot be a Friday or holiday."
+        );
+      }
+    }
+
+    if (!formData.leaveCode || !formData.startDate || !daysRequested) {
+      return t(
+        "leave.request.validation.required",
+        "Please complete all required fields."
+      );
+    }
+    if (remainingDays != null && daysRequested > remainingDays) {
+      return t("leave.request.maxReached", "Exceeds remaining balance");
+    }
+    if (!formData.endDate || formData.startDate > formData.endDate) {
+      return t(
+        "leave.request.validation.invalidDateRange",
+        "Invalid date range."
+      );
+    }
+
+    if (isHoliday(formData.startDate)) {
+      return t(
+        "leave.request.holidayStartBlocked",
+        "Start date falls on a public holiday. Please select dates strictly before or after the holiday."
+      );
+    }
+    if (formData.endDate && isHoliday(formData.endDate)) {
+      return t(
+        "leave.request.holidayEndBlocked",
+        "End date falls on a public holiday. Please select dates strictly before or after the holiday."
+      );
+    }
+    {
+      const offending = firstHolidayInRange(
+        formData.startDate,
+        formData.endDate ?? formData.startDate,
+        isHoliday
+      );
+      if (offending) {
+        const dd = toDMY(offending);
+        return t(
+          "leave.request.holidayInsideBlocked",
+          `Your request includes a public holiday (${dd}). Choose a range entirely before or entirely after the holiday.`
+        );
+      }
+    }
+
+    if (isNonWorking(formData.startDate)) {
+      return t(
+        "leave.request.validation.startNonWorking",
+        "Start date cannot be a Friday or holiday."
+      );
+    }
+
+    const startISO = toISO10(formData.startDate);
+    const endISO = toISO10(formData.endDate ?? formData.startDate);
+    const { ok, conflicts } = validateNoOverlap(startISO, endISO);
+    if (!ok) {
+      const first = conflicts[0];
+      return t(
+        "leave.request.overlap",
+        `Your request overlaps an existing ${first.status?.toUpperCase()} leave (${toDMY(first.startISO)} → ${toDMY(first.endISO)}). Please choose different dates.`
+      );
+    }
+    return null;
+  };
+
+  const yearNow = (formData.startDate ?? new Date()).getFullYear();
+  const monthNow = (formData.startDate ?? new Date()).getMonth();
+
+  const emergencyUsedThisYear = useMemo(
+    () => sumEmergencyDays(leaveHistory, yearNow, undefined, isNonWorking),
+    [leaveHistory, yearNow, isNonWorking, sumEmergencyDays]
+  );
+  const emergencyUsedThisMonth = useMemo(
+    () => sumEmergencyDays(leaveHistory, yearNow, monthNow, isNonWorking),
+    [leaveHistory, yearNow, monthNow, isNonWorking, sumEmergencyDays]
+  );
+
+  const currentRequestEmergencyDays = useMemo(() => {
+    if (!isEmergencyLike(activeLeaveType)) return 0;
+    if (!formData.startDate || !formData.endDate) return 0;
+    return countWorkingDays(formData.startDate, formData.endDate, isNonWorking);
+  }, [activeLeaveType, formData.startDate, formData.endDate, isNonWorking]);
+
+  const emergencyYearRemaining = Math.max(
+    0,
+    EMERGENCY_DAYS_PER_YEAR_MAX - emergencyUsedThisYear
+  );
+  const emergencyMonthRemaining = Math.max(
+    0,
+    EMERGENCY_DAYS_PER_MONTH_MAX - emergencyUsedThisMonth
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLock) return;
     setError(null);
     setSuccess(false);
+    await refreshBalanceAndHistory();
 
-    if (
-      !formData.leaveCode ||
-      !formData.startDate ||
-      !formData.endDate ||
-      !formData.reason
-    ) {
-      setError(t("leave.request.validation.required"));
-      return;
-    }
-    if (formData.startDate > formData.endDate) {
-      setError(t("leave.request.validation.invalidDateRange"));
+    const businessError = validateBusinessRules();
+    if (businessError) {
+      setError(businessError);
+      setShowError(true);
       return;
     }
 
     try {
       setSubmitting(true);
+      setSubmitLock(true);
 
-      await createLeaveRequest({
+      const startISO = toISO10(formData.startDate);
+      const endISO = toISO10(formData.endDate ?? formData.startDate);
+
+      if (violatesSameDayDuplicate(startISO, endISO)) {
+        setError(
+          t(
+            "leave.request.overlapSameDay",
+            "You already have a pending or approved request overlapping these dates. Please adjust the period."
+          )
+        );
+        setShowError(true);
+        return;
+      }
+
+      const payload: any = {
         employeeId: String(employeeId ?? ""),
-        // Resolve the selected leave type row to get the code string expected by BE
-        leaveType: (leaveTypes.find((lt) => lt.int_can === Number(formData.leaveCode))?.code) || String(formData.leaveCode),
+        leaveType:
+          leaveTypes.find((lt) => lt.int_can === Number(formData.leaveCode))
+            ?.code ?? String(formData.leaveCode),
         leaveCode: Number(formData.leaveCode),
-        startDate: formData.startDate!.toISOString().split("T")[0],
-        endDate: formData.endDate!.toISOString().split("T")[0],
-        reason: formData.reason,
-        contactNumber: formData.contactNumber,
-        days: calculatedDays,
-      });
+        startDate: startISO,
+        endDate: endISO,
+        reason: formData.reason?.trim?.() || undefined,
+        contactNumber: formData.contactNumber?.trim(),
+        days: calculatedDays > 0 ? calculatedDays : undefined,
+        clientDedupKey: `${employeeId || ""}:${startISO}:${endISO}:${formData.leaveCode}`,
+      };
+
+      const created = await createLeaveRequest(payload);
+
+      let newRequestId: string | number | undefined =
+        created?.id ??
+        created?.int_con ??
+        created?.data?.id ??
+        created?.data?.int_con;
+
+      if (!newRequestId) {
+        try {
+          const list = await getLeaveRequests(String(employeeId ?? ""));
+          const match = (Array.isArray(list) ? list : []).find((r: any) => {
+            const s = toISO10(
+              firstDefined(r.startDate, r.DATE_START, r.date_depart)
+            );
+            const e = toISO10(firstDefined(r.endDate, r.DATE_END, r.date_end));
+            const st = String(
+              firstDefined(r.status, r.STATUS, r.state, r.STATUT) || ""
+            ).toLowerCase();
+            return s === startISO && e === endISO && st.includes("pending");
+          });
+          if (match) newRequestId = match.id ?? match.int_con;
+        } catch {}
+      }
+
+      if (doctorNoteFile && newRequestId != null) {
+        try {
+          setUploadingNote(true);
+          await uploadDoctorNote(newRequestId, doctorNoteFile);
+        } catch (e: any) {
+          console.error("Doctor note upload failed", e);
+          setError(
+            e?.response?.data?.message ||
+              t(
+                "leave.request.noteUploadError",
+                "Leave created, but doctor's note failed to upload."
+              )
+          );
+        } finally {
+          setUploadingNote(false);
+        }
+      }
+
+      setDoctorNoteFile(null);
+      setDoctorNotePreview(null);
+
+      setLeaveHistory((prev) => [
+        ...prev,
+        { id: `local-${Date.now()}`, startISO, endISO, status: "pending" },
+      ]);
 
       setSuccess(true);
+      setShowSuccess(true);
       setFormData({
         leaveCode: "",
         startDate: null,
@@ -151,12 +998,16 @@ const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
         reason: "",
         contactNumber: "",
       });
-      setTimeout(() => setSuccess(false), 5000);
+      setDaysRequested(0);
+      setCalculatedDays(0);
+
+      await refreshBalanceAndHistory();
     } catch (err: any) {
       setError(err?.message || t("leave.request.submitError"));
-      console.error("Error submitting leave request:", err);
+      setShowError(true);
     } finally {
       setSubmitting(false);
+      setTimeout(() => setSubmitLock(false), 1500);
     }
   };
 
@@ -173,125 +1024,496 @@ const LeaveRequestScreen: React.FC<{ employeeId?: number | string }> = ({
     );
   }
 
+  /** ---------- UI (Responsive & Sidebar-Adaptive) ---------- */
   return (
-    <Box>
-      <form onSubmit={handleSubmit}>
-        <Grid container spacing={2}>
-          {error && (
+    <Box
+      ref={contentRef}
+      sx={{
+        width: "100%",
+        // If your shell sets --sidebar-width, we use that; else we fallback to props.
+        ml: { xs: 0, lg: "var(--content-ml, 0px)" },
+        transition: "margin-left 200ms ease, width 200ms ease",
+        px: { xs: 1.5, sm: 2, md: 2.5 },
+        py: { xs: 1.5, sm: 2 },
+      }}
+    >
+      <Stack spacing={0.5} sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={700}>
+          {t("leave.request.title", "Request Time Off")}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {t(
+            "leave.request.subtitle",
+            "Select a leave type and a start date. Working days exclude Fridays and company holidays."
+          )}
+        </Typography>
+      </Stack>
+
+      {/* Form */}
+      <Box component="form" onSubmit={handleSubmit} noValidate>
+        <Grid container spacing={2.5}>
+          {/* Alerts row */}
+          {(error || success) && (
             <Grid>
-              <Alert severity="error">{error}</Alert>
+              {error && <Alert severity="error">{error}</Alert>}
+              {success && (
+                <Alert severity="success" sx={{ mt: error ? 1 : 0 }}>
+                  {t(
+                    "leave.request.success",
+                    "Your request has been submitted."
+                  )}
+                </Alert>
+              )}
             </Grid>
           )}
-          {success && (
-            <Grid>
-              <Alert severity="success">{t("leave.request.success")}</Alert>
-            </Grid>
-          )}
 
+          {/* Left Column: Calendar + Legend */}
           <Grid>
-            <FormControl fullWidth required>
-              <InputLabel id="leave-type-label">
-                {t("leave.request.leaveType")}
-              </InputLabel>
-              <Select
-                labelId="leave-type-label"
-                name="leaveCode"
-                value={formData.leaveCode}
-                onChange={(e) =>
-                  setFormData((p) => ({
-                    ...p,
-                    leaveCode: Number((e.target as any).value),
-                  }))
-                }
-                label={t("leave.request.leaveType")}
-              >
-                {leaveTypes.map((lt) => (
-                  <MenuItem key={lt.int_can} value={lt.int_can}>
-                    {lt.code ? `${lt.code} — ${lt.desig_can}` : lt.desig_can}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-
-          <Grid>
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
-              <DatePicker
-                label={t("leave.request.startDate")}
-                value={formData.startDate}
-                onChange={(date) => handleDateChange("startDate", date)}
-                minDate={new Date()}
-                shouldDisableDate={isFriday}
-              />
-            </LocalizationProvider>
-          </Grid>
-
-          <Grid>
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
-              <DatePicker
-                label={t("leave.request.endDate")}
-                value={formData.endDate}
-                onChange={(date) => handleDateChange("endDate", date)}
-                minDate={formData.startDate || new Date()}
-                shouldDisableDate={isFriday}
-              />
-            </LocalizationProvider>
-          </Grid>
-
-          <Grid>
-            <TextField
-              fullWidth
-              label={t("leave.request.contactNumber")}
-              name="contactNumber"
-              value={formData.contactNumber}
-              onChange={handleChange}
+            <Card
               variant="outlined"
-            />
-          </Grid>
-
-          <Grid>
-            <TextField
-              fullWidth
-              multiline
-              rows={4}
-              label={t("leave.request.reason")}
-              name="reason"
-              value={formData.reason}
-              onChange={handleChange}
-              variant="outlined"
-              required
-            />
-          </Grid>
-
-          <Grid>
-            <Divider sx={{ my: 2 }} />
-            <Box
-              display="flex"
-              justifyContent="space-between"
-              alignItems="center"
+              sx={{ borderRadius: 3, overflow: "hidden" }}
             >
-              <Typography variant="h6">
-                {t("leave.request.daysRequested")}: {calculatedDays}
-              </Typography>
-              <Button
-                type="submit"
-                variant="contained"
-                color="primary"
-                disabled={submitting || calculatedDays === 0}
-                startIcon={
-                  submitting ? (
-                    <CircularProgress size={20} color="inherit" />
-                  ) : null
-                }
-              >
-                {submitting
-                  ? t("common.submitting")
-                  : t("leave.request.submit")}
-              </Button>
-            </Box>
+              <CardContent sx={{ pb: 1 }}>
+                <LocalizationProvider
+                  dateAdapter={AdapterDateFns}
+                  adapterLocale={enGB}
+                >
+                  <DateCalendar
+                    value={formData.startDate}
+                    onChange={(value) =>
+                      handleDateChange("startDate", toDate(value))
+                    }
+                    disablePast
+                    shouldDisableDate={(day) => {
+                      const d = toDate(day);
+                      if (!d) return true;
+                      if (isSickLike(activeLeaveType)) return false;
+                      return isNonWorking(d);
+                    }}
+                    slots={{ day: CustomDay }}
+                    sx={{
+                      mx: "auto",
+                      "& .MuiPickersDay-root": {
+                        height: 36,
+                        width: 36,
+                        fontSize: 12,
+                      },
+                      "& .MuiDayCalendar-weekDayLabel": {
+                        fontSize: 11,
+                        opacity: 0.7,
+                      },
+                    }}
+                  />
+                </LocalizationProvider>
+
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  sx={{ mt: 1 }}
+                  alignItems="center"
+                  flexWrap="wrap"
+                >
+                  <Chip
+                    size="small"
+                    label={t("leave.legend.range", "Selected range")}
+                  />
+                  <Tooltip
+                    title={
+                      t(
+                        "leave.legend.holidayFri",
+                        "Holiday/Friday (disabled)"
+                      ) as string
+                    }
+                  >
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      label={t("leave.legend.nonWorking", "Non-working")}
+                    />
+                  </Tooltip>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          {/* Right Column: Summary + Fields */}
+          <Grid>
+            <Grid container spacing={2}>
+              {/* Summary (sticky on desktop) */}
+              <Grid order={{ xs: 2, md: 0 }}>
+                <Box
+                  sx={{
+                    position: { md: "sticky" },
+                    top: { md: theme.spacing(2) },
+                    zIndex: 1,
+                  }}
+                >
+                  <Grid container spacing={1.5}>
+                    <Grid>
+                      <StatTile
+                        title={t("leave.request.remaining", "Remaining")}
+                        value={remainingDays ?? "—"}
+                      />
+                    </Grid>
+                    <Grid>
+                      <StatTile
+                        title={t(
+                          "leave.request.daysRequested",
+                          "Days requested"
+                        )}
+                        value={daysRequested || 0}
+                      />
+                    </Grid>
+                    <Grid>
+                      <StatTile
+                        title={t("leave.request.effective", "Net Vacation")}
+                        value={calculatedDays || 0}
+                      />
+                    </Grid>
+                    <Grid>
+                      <StatTile
+                        title={t("leave.request.endDate", "End date")}
+                        value={formData.endDate ? toDMY(formData.endDate) : "—"}
+                      />
+                    </Grid>
+
+                    {isEmergencyLike(activeLeaveType) && (
+                      <>
+                        <Grid>
+                          <StatTile
+                            title={t(
+                              "leave.request.emergencyYear",
+                              "Emergency (Y rem)"
+                            )}
+                            value={emergencyYearRemaining}
+                          />
+                        </Grid>
+                        <Grid>
+                          <StatTile
+                            title={t(
+                              "leave.request.emergencyMonth",
+                              "Emergency (M rem)"
+                            )}
+                            value={emergencyMonthRemaining}
+                          />
+                        </Grid>
+                      </>
+                    )}
+
+                    {perTypeMaxDays != null && (
+                      <Grid>
+                        <Chip
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          sx={{ mt: 0.5 }}
+                          label={`${t("leave.request.perTypeLimit", "Type limit")}: ${perTypeMaxDays}`}
+                        />
+                      </Grid>
+                    )}
+                  </Grid>
+                </Box>
+              </Grid>
+
+              {/* Form Fields */}
+              <Grid order={{ xs: 0, md: 1 }}>
+                <Grid container spacing={2}>
+                  {/* Leave Type (FULL WIDTH) */}
+                  <Grid>
+                    <FormControl fullWidth required>
+                      <InputLabel id="leave-type-label">
+                        {t("leave.request.leaveType", "Leave type")}
+                      </InputLabel>
+                      <Select
+                        labelId="leave-type-label"
+                        name="leaveCode"
+                        value={formData.leaveCode}
+                        onChange={(e) =>
+                          setFormData((p) => ({
+                            ...p,
+                            leaveCode: Number((e.target as any).value),
+                          }))
+                        }
+                        label={t("leave.request.leaveType", "Leave type")}
+                      >
+                        {leaveTypes.map((lt) => (
+                          <MenuItem key={lt.int_can} value={lt.int_can}>
+                            {lt.code
+                              ? `${lt.code} — ${lt.desig_can}`
+                              : lt.desig_can}
+                            {typeof lt.max_day === "number"
+                              ? `  (${lt.max_day} ${t("leave.request.days", "days")})`
+                              : ""}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Start Date */}
+                  <Grid>
+                    <LocalizationProvider
+                      dateAdapter={AdapterDateFns}
+                      adapterLocale={enGB}
+                    >
+                      <DatePicker
+                        label={t("leave.request.startDate", "Start date")}
+                        value={formData.startDate}
+                        onChange={(value) =>
+                          handleDateChange("startDate", toDate(value))
+                        }
+                        minDate={new Date()}
+                        shouldDisableDate={(day) => {
+                          const d = toDate(day);
+                          if (!d) return true;
+                          if (isSickLike(activeLeaveType)) return false;
+                          return isNonWorking(d);
+                        }}
+                        slotProps={{ textField: { fullWidth: true } }}
+                        format="dd-MM-yyyy"
+                      />
+                    </LocalizationProvider>
+                    <TextField
+                      type="number"
+                      margin="normal"
+                      label={t("leave.request.daysRequested", "Days requested")}
+                      value={daysRequested || ""}
+                      onChange={(e) => {
+                        const raw = Number(
+                          (e.target as HTMLInputElement).value
+                        );
+                        const v = Math.max(0, Number.isFinite(raw) ? raw : 0);
+                        let capped = v;
+                        if (remainingDays != null)
+                          capped = Math.min(capped, remainingDays);
+                        if (perTypeMaxDays != null)
+                          capped = Math.min(capped, perTypeMaxDays);
+                        capped = Math.min(
+                          capped,
+                          MAX_SINGLE_REQUEST_CALENDAR_DAYS
+                        );
+                        setDaysRequested(capped);
+                        if (v !== capped) {
+                          setDaysError(
+                            t(
+                              "leave.request.maxReached",
+                              "Adjusted to allowed maximum for your balance/policy."
+                            )
+                          );
+                        } else {
+                          setDaysError(null);
+                        }
+                      }}
+                      inputProps={{
+                        min: 0,
+                        max:
+                          remainingDays != null
+                            ? Math.min(
+                                remainingDays,
+                                perTypeMaxDays ?? Number.MAX_SAFE_INTEGER,
+                                MAX_SINGLE_REQUEST_CALENDAR_DAYS
+                              )
+                            : (perTypeMaxDays ??
+                              MAX_SINGLE_REQUEST_CALENDAR_DAYS),
+                      }}
+                      helperText={
+                        daysError ||
+                        (remainingDays != null
+                          ? t("leave.request.remaining", "Remaining: ") +
+                            remainingDays
+                          : "")
+                      }
+                      error={!!daysError}
+                      fullWidth
+                    />
+                  </Grid>
+
+                  {/* Days Requested (AFTER Start, BEFORE End) */}
+                  <Grid></Grid>
+
+                  {/* End Date (auto) */}
+                  <Grid>
+                    <TextField
+                      label={t("leave.request.endDate", "End date (auto)")}
+                      value={formData.endDate ? toDMY(formData.endDate) : ""}
+                      InputProps={{ readOnly: true }}
+                      fullWidth
+                    />
+                  </Grid>
+
+                  {/* Contact number */}
+                  <Grid>
+                    <TextField
+                      fullWidth
+                      label={t(
+                        "leave.request.contactNumber",
+                        "Contact number during leave"
+                      )}
+                      name="contactNumber"
+                      value={formData.contactNumber}
+                      onChange={handleChange}
+                      variant="outlined"
+                    />
+                  </Grid>
+
+                  {/* Reason */}
+                  <Grid>
+                    <TextField
+                      fullWidth
+                      multiline
+                      minRows={4}
+                      label={t("leave.request.reason", "Reason")}
+                      name="reason"
+                      value={formData.reason}
+                      onChange={handleChange}
+                      variant="outlined"
+                    />
+                  </Grid>
+
+                  {/* Doctor note (Sick only) */}
+                  {isSickLike(activeLeaveType) && (
+                    <Grid>
+                      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                        <Stack spacing={1.5}>
+                          <Typography variant="subtitle1">
+                            {t(
+                              "leave.request.doctorNoteTitle",
+                              "Doctor’s note (optional, JPG)"
+                            )}
+                          </Typography>
+
+                          <Stack
+                            direction="row"
+                            spacing={2}
+                            alignItems="center"
+                            flexWrap="wrap"
+                          >
+                            <Button
+                              variant="outlined"
+                              component="label"
+                              disabled={uploadingNote || submitting}
+                            >
+                              {doctorNoteFile
+                                ? t(
+                                    "leave.request.replaceNote",
+                                    "Replace doctor’s note"
+                                  )
+                                : t(
+                                    "leave.request.uploadNote",
+                                    "Upload doctor’s note (JPG)"
+                                  )}
+                              <input
+                                hidden
+                                type="file"
+                                accept="image/jpeg"
+                                onChange={(e) =>
+                                  onDoctorNoteChange(
+                                    e.target.files?.[0] ?? null
+                                  )
+                                }
+                              />
+                            </Button>
+                            {doctorNoteFile && (
+                              <Chip
+                                label={doctorNoteFile.name}
+                                onDelete={() => onDoctorNoteChange(null)}
+                                deleteIcon={<CloseIcon />}
+                                variant="outlined"
+                              />
+                            )}
+                          </Stack>
+
+                          {doctorNotePreview && (
+                            <Box sx={{ mt: 1 }}>
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                sx={{ display: "block", mb: 0.5 }}
+                              >
+                                {t("leave.request.notePreview", "Preview")}
+                              </Typography>
+                              <Box
+                                component="img"
+                                src={doctorNotePreview}
+                                alt="Doctor note preview"
+                                sx={{
+                                  maxWidth: "100%",
+                                  width: 360,
+                                  maxHeight: 260,
+                                  borderRadius: 1,
+                                  border: "1px solid",
+                                  borderColor: "divider",
+                                  display: "block",
+                                }}
+                              />
+                            </Box>
+                          )}
+                        </Stack>
+                      </Paper>
+                    </Grid>
+                  )}
+
+                  {/* Submit */}
+                  <Grid>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Box
+                      sx={{
+                        display: "flex",
+                        gap: 1,
+                        justifyContent: "stretch",
+                      }}
+                    >
+                      <Button
+                        type="submit"
+                        variant="contained"
+                        color="primary"
+                        fullWidth
+                        disabled={
+                          submitting ||
+                          uploadingNote ||
+                          submitLock ||
+                          calculatedDays === 0 ||
+                          !formData.startDate ||
+                          !formData.leaveCode ||
+                          !!daysError ||
+                          liveOverlap
+                        }
+                        startIcon={
+                          submitting ? (
+                            <CircularProgress size={20} color="inherit" />
+                          ) : null
+                        }
+                      >
+                        {submitting
+                          ? t("common.submitting", "Submitting…")
+                          : t("leave.request.submit", "Submit request")}
+                      </Button>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
-      </form>
+      </Box>
+
+      {/* Toasts */}
+      <Snackbar
+        open={showSuccess}
+        autoHideDuration={3000}
+        onClose={() => setShowSuccess(false)}
+        message={t("leave.request.success", "Your request has been submitted.")}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
+      <Snackbar
+        open={showError && !!error}
+        autoHideDuration={4000}
+        onClose={() => setShowError(false)}
+        message={String(
+          error || t("leave.request.submitError", "Could not submit request.")
+        )}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      />
     </Box>
   );
 };

@@ -1,10 +1,24 @@
-import React, { RefObject } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Checkbox, FormControlLabel } from '@mui/material';
-import { Box } from '@mui/system';
-import { Dialog as MuiDialog, DialogTitle as MuiDialogTitle, DialogContent as MuiDialogContent, DialogActions as MuiDialogActions } from '@mui/material';
+import React, { RefObject } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Checkbox,
+  FormControlLabel,
+  TextField,
+} from "@mui/material";
+import { Box } from "@mui/system";
+import {
+  Dialog as MuiDialog,
+  DialogTitle as MuiDialogTitle,
+  DialogContent as MuiDialogContent,
+  DialogActions as MuiDialogActions,
+} from "@mui/material";
 import axios from "../../../api";
 
-import WatchStandardInvoiceContent from './WatchStandardInvoiceContent';
+import WatchStandardInvoiceContent from "./WatchStandardInvoiceContent";
 
 // Define minimal local types for Invoice and Client
 export type Client = {
@@ -40,7 +54,11 @@ export type Invoice = {
   ACHAT_pic?: ACHAT_pic[];
 
   // ...add more fields as needed for the dialog
-}
+  // optional remaining amounts
+  rest_of_money?: number;
+  rest_of_moneyUSD?: number;
+  rest_of_moneyEUR?: number;
+};
 type ACHAT_pic = {
   id_art: number;
   ID_PIC: number;
@@ -65,10 +83,7 @@ type ACHATs = {
     TYPE_SUPPLIER: string;
   };
   DistributionPurchase?: DistributionPurchase[];
-
 };
-
-
 
 type DistributionPurchase = {
   distributionID: number;
@@ -80,7 +95,6 @@ type DistributionPurchase = {
   CreationDate?: string;
   PurchaseType?: string;
   distributionISOK?: boolean;
-
 
   OriginalAchatWatch?: {
     id_achat: number;
@@ -160,17 +174,33 @@ interface PrintInvoiceDialogProps {
   onCartRefresh?: () => void; // Cart refresh
   showCloseInvoiceActions?: boolean;
   showCloseInvoice?: boolean; // NEW: control close actions visibility
+  createdBy?: string; // pass created by from parent (SalesReportsTable)
 }
 
 const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
-  open, invoice, data, printRef, onClose, onInvoiceClosed, onCartRefresh, showCloseInvoiceActions = true, showCloseInvoice
+  open,
+  invoice,
+  data,
+  printRef,
+  onClose,
+  onInvoiceClosed,
+  onCartRefresh,
+  showCloseInvoiceActions = true,
+  showCloseInvoice,
+  createdBy,
 }) => {
   const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [invoiceNumFact, setInvoiceNumFact] = React.useState<number | null>(null);
-  const [makeTransactionToCashier, setMakeTransactionToCashier] = React.useState(false);
+  const [invoiceNumFact, setInvoiceNumFact] = React.useState<number | null>(
+    null
+  );
+  const [makeTransactionToCashier, setMakeTransactionToCashier] =
+    React.useState(false);
   const [closeWarningOpen, setCloseWarningOpen] = React.useState(false);
+  const [hasRest, setHasRest] = React.useState(false);
+  const [restOfMoney, setRestOfMoney] = React.useState<string>("0");
+  const [restOfMoneyUSD, setRestOfMoneyUSD] = React.useState<string>("0");
+  const [restOfMoneyEUR, setRestOfMoneyEUR] = React.useState<string>("0");
   const [showImage] = React.useState(true);
-
 
   // Initialize invoice number from the provided invoice when available
   React.useEffect(() => {
@@ -179,23 +209,69 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     }
   }, [invoice]);
 
+  // Prefill rest amounts when invoice opens or changes
+  React.useEffect(() => {
+    if (invoice) {
+      try {
+        setRestOfMoney(
+          invoice.rest_of_money != null
+            ? String((invoice as any).rest_of_money)
+            : "0"
+        );
+      } catch {
+        setRestOfMoney("0");
+      }
+      try {
+        setRestOfMoneyUSD(
+          (invoice as any).rest_of_moneyUSD != null
+            ? String((invoice as any).rest_of_moneyUSD)
+            : "0"
+        );
+      } catch {
+        setRestOfMoneyUSD("0");
+      }
+      try {
+        setRestOfMoneyEUR(
+          (invoice as any).rest_of_moneyEUR != null
+            ? String((invoice as any).rest_of_moneyEUR)
+            : "0"
+        );
+      } catch {
+        setRestOfMoneyEUR("0");
+      }
+      // mark hasRest if any of the values are > 0
+      const anyRest =
+        Number((invoice as any).rest_of_money || 0) > 0 ||
+        Number((invoice as any).rest_of_moneyUSD || 0) > 0 ||
+        Number((invoice as any).rest_of_moneyEUR || 0) > 0;
+      setHasRest(!!anyRest);
+    } else {
+      setRestOfMoney("0");
+      setRestOfMoneyUSD("0");
+      setRestOfMoneyEUR("0");
+      setHasRest(false);
+    }
+  }, [invoice, open]);
+
   // Print only the DialogContent (invoice area)
   const handlePrint = () => {
     // Find the DialogContent DOM node
-    const dialogContent = document.querySelector('.MuiDialogContent-root');
+    const dialogContent = document.querySelector(".MuiDialogContent-root");
     if (!dialogContent) return;
 
     // Clone the content
     const printContents = dialogContent.innerHTML;
 
     // Get all stylesheets
-    let styles = '';
-    Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).forEach((node) => {
+    let styles = "";
+    Array.from(
+      document.querySelectorAll('link[rel="stylesheet"], style')
+    ).forEach((node) => {
       styles += node.outerHTML;
     });
 
     // Open a new window for printing
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    const printWindow = window.open("", "_blank", "width=800,height=600");
     if (!printWindow) return;
 
     printWindow.document.write(`
@@ -265,10 +341,6 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     }, 300);
   };
 
-
-
-
-
   /*
    if (data && data.items && data.items.length > 0) {
      const type = (data.items[0] as any)?.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || '';
@@ -277,59 +349,131 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
    }
  */
   // Always create a new object for dataWithTotalAmountFinal to force re-render
-  const dataWithTotalAmountFinal = React.useMemo(() => ({
-    ...data,
-    num_fact: invoiceNumFact ?? invoice?.num_fact,
-    TotalAmountFinal: data.items[0].total_remise_final
-  }), [data, invoiceNumFact, invoice]);
-
+  const dataWithTotalAmountFinal = React.useMemo(
+    () => ({
+      ...data,
+      num_fact: invoiceNumFact ?? invoice?.num_fact,
+      TotalAmountFinal: data.items[0].total_remise_final,
+    }),
+    [data, invoiceNumFact, invoice]
+  );
 
   // Handler for closing this invoice
-  const handleCloseInvoice = async () => {
-    const token = localStorage.getItem('token');
+  const handleCloseInvoice = async (rest_of_money?: number) => {
+    const token = localStorage.getItem("token");
     // Prefer ps/usr from current invoice when present
-    const psParam = invoice?.ps != null ? String(invoice.ps) : String(ps ?? '');
-    const usrParam = invoice?.usr != null ? String(invoice.usr) : String(Cuser ?? '');
+    const psParam = invoice?.ps != null ? String(invoice.ps) : String(ps ?? "");
+    // Use current logged-in user's id_user from localStorage when available
+    let usrFromStorage: string | null = null;
+    const userLocalStr = localStorage.getItem("user");
+    if (userLocalStr) {
+      try {
+        const u = JSON.parse(userLocalStr);
+        usrFromStorage =
+          u?.id_user != null
+            ? String(u.id_user)
+            : u?.Cuser != null
+              ? String(u.Cuser)
+              : null;
+      } catch {
+        usrFromStorage = localStorage.getItem("Cuser");
+      }
+    }
+    // Always prefer the id_user from storage when generating numbers etc.,
+    // but when closing an existing invoice we must use the invoice's `usr`
+    // so the backend WHERE clause matches the invoice rows.
+    const usrParam =
+      usrFromStorage ??
+      (invoice?.usr != null ? String(invoice.usr) : String(Cuser ?? ""));
     if (!psParam || !usrParam) {
-      alert('User info missing. Cannot close invoice.');
+      alert("User info missing. Cannot close invoice.");
       return;
     }
     try {
       // Optionally show a loading indicator here
       // Ensure we have a valid invoice number
-      let num_fact: number | null = (invoice && invoice.num_fact) ? invoice.num_fact : (invoiceNumFact ?? null);
+      let num_fact: number | null =
+        invoice && invoice.num_fact
+          ? invoice.num_fact
+          : (invoiceNumFact ?? null);
       if (!num_fact || Number(num_fact) === 0) {
         const newNum = await handleAddNew();
         if (!newNum) {
-          alert('Failed to generate invoice number.');
+          alert("Failed to generate invoice number.");
           return;
         }
         num_fact = newNum;
       }
 
-
-
-
-
-
-
-      const qs = new URLSearchParams({
-        ps: psParam,
-        usr: usrParam,
+      // Use invoice's usr when available to ensure backend finds the invoice rows
+      const closingUsr =
+        invoice && invoice.usr != null ? String(invoice.usr) : usrParam;
+      const closingPs =
+        invoice && invoice.ps != null ? String(invoice.ps) : psParam;
+      const paramsObj: any = {
+        ps: closingPs,
+        usr: closingUsr,
         num_fact: String(num_fact),
         MakeCashVoucher: String(!!makeTransactionToCashier),
-      });
+      };
+      if (
+        typeof rest_of_money !== "undefined" &&
+        !isNaN(Number(rest_of_money))
+      ) {
+        paramsObj.rest_of_money = String(rest_of_money);
+      }
+      // optionally include currency-specific rest amounts
+      if (
+        typeof restOfMoneyUSD !== "undefined" &&
+        restOfMoneyUSD !== null &&
+        restOfMoneyUSD !== "" &&
+        !isNaN(Number(restOfMoneyUSD))
+      ) {
+        paramsObj.rest_of_moneyUSD = String(restOfMoneyUSD);
+      }
+      if (
+        typeof restOfMoneyEUR !== "undefined" &&
+        restOfMoneyEUR !== null &&
+        restOfMoneyEUR !== "" &&
+        !isNaN(Number(restOfMoneyEUR))
+      ) {
+        paramsObj.rest_of_moneyEUR = String(restOfMoneyEUR);
+      }
+      // Log params for debugging to ensure rest_of_money is sent
+      try {
+        console.log("Closing invoice - CloseNF params:", paramsObj);
+      } catch (e) {
+        /* ignore logging errors */
+      }
       const response = await axios.get(`${apiUrlinv}/CloseNF`, {
-        params: qs,
-        headers: { Authorization: `Bearer ${token}` }
+        params: paramsObj,
+        headers: { Authorization: `Bearer ${token}` },
       });
+      try {
+        console.log("CloseNF response data:", response && response.data);
+      } catch (e) {
+        /* ignore logging errors */
+      }
 
       const result = response.data;
 
       // Optionally update state/UI here
       if (result?.new_num_fact) setInvoiceNumFact(Number(result.new_num_fact));
       if (Number(result?.gltranRowsCreated ?? 0) <= 0) {
-        console.warn('CloseNF completed but no journal entries were created.');
+        console.warn("CloseNF completed but no journal entries were created.");
+      }
+      // Fetch the invoice from server to confirm rest_of_money was saved
+      try {
+        const verifyRes = await axios.get(`${apiUrlinv}/Getinvoice/`, {
+          params: { ps: psParam, num_fact: String(num_fact) },
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        console.log(
+          "Verify invoice after CloseNF:",
+          verifyRes && verifyRes.data
+        );
+      } catch (verifyErr) {
+        console.warn("Error fetching invoice for verification:", verifyErr);
       }
       if (onInvoiceClosed) onInvoiceClosed(); // Refresh parent page
       if (onCartRefresh) onCartRefresh(); // Refresh cart
@@ -339,42 +483,52 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     }
   };
 
-
   const apiIp = `${process.env.REACT_APP_API_IP}`;
   let ps: string | null = null;
   let Cuser: string | null = null;
-  const userStr = localStorage.getItem('user');
+  const userStr = localStorage.getItem("user");
   if (userStr) {
     try {
       const userObj = JSON.parse(userStr);
-      ps = userObj.ps ?? localStorage.getItem('ps');
-      Cuser = userObj.Cuser ?? localStorage.getItem('Cuser');
+      ps = userObj.ps ?? localStorage.getItem("ps");
+      Cuser = userObj.Cuser ?? localStorage.getItem("Cuser");
     } catch {
-      ps = localStorage.getItem('ps');
-      Cuser = localStorage.getItem('Cuser');
+      ps = localStorage.getItem("ps");
+      Cuser = localStorage.getItem("Cuser");
     }
   } else {
-    ps = localStorage.getItem('ps');
-    Cuser = localStorage.getItem('Cuser');
+    ps = localStorage.getItem("ps");
+    Cuser = localStorage.getItem("Cuser");
   }
-
-
-
 
   const apiUrlinv = `${apiIp}/invoices`;
   const handleAddNew = async (): Promise<number | null> => {
-    const token = localStorage.getItem('token');
-    const psParam = invoice?.ps != null ? String(invoice.ps) : String(ps ?? '');
-    const usrParam = invoice?.usr != null ? String(invoice.usr) : String(Cuser ?? '');
+    const token = localStorage.getItem("token");
+    const psParam = invoice?.ps != null ? String(invoice.ps) : String(ps ?? "");
+    // Prefer id_user from localStorage when available
+    let usrFromStorage: string | null = null;
+    const userLocalStr = localStorage.getItem("user");
+    if (userLocalStr) {
+      try {
+        const u = JSON.parse(userLocalStr);
+        usrFromStorage =
+          u?.id_user != null
+            ? String(u.id_user)
+            : u?.Cuser != null
+              ? String(u.Cuser)
+              : null;
+      } catch {
+        usrFromStorage = localStorage.getItem("Cuser");
+      }
+    }
+    const usrParam =
+      usrFromStorage ??
+      (invoice?.usr != null ? String(invoice.usr) : String(Cuser ?? ""));
     try {
-      
-      const response = await axios.get(
-        `${apiUrlinv}/SetNF`,
-        {
-          params: { ps: psParam, usr: usrParam },
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const response = await axios.get(`${apiUrlinv}/SetNF`, {
+        params: { ps: psParam, usr: usrParam },
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const result = response.data;
       setInvoiceNumFact(result.new_num_fact); // Set the new invoice number in state
       return Number(result.new_num_fact) || null;
@@ -390,22 +544,52 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     setConfirmOpen(false);
     const nf = await handleAddNew();
     if (!nf) {
-      alert('Failed to generate invoice number.');
+      alert("Failed to generate invoice number.");
     }
   };
 
   const handleCloseInvoiceClick = () => setCloseWarningOpen(true);
   const handleCloseWarningCancel = () => setCloseWarningOpen(false);
   const handleCloseWarningConfirm = async () => {
-    setCloseWarningOpen(false);
-    await handleCloseInvoice();
+    // validate rest input if user indicated there is a rest
+    if (hasRest) {
+      const val = parseFloat(restOfMoney as any);
+      if (isNaN(val)) {
+        alert("Please enter a valid rest of money amount (LYD).");
+        return;
+      }
+      const valUSD =
+        restOfMoneyUSD !== "" ? parseFloat(restOfMoneyUSD as any) : 0;
+      if (restOfMoneyUSD !== "" && isNaN(valUSD)) {
+        alert("Please enter a valid rest amount for USD.");
+        return;
+      }
+      const valEUR =
+        restOfMoneyEUR !== "" ? parseFloat(restOfMoneyEUR as any) : 0;
+      if (restOfMoneyEUR !== "" && isNaN(valEUR)) {
+        alert("Please enter a valid rest amount for EUR.");
+        return;
+      }
+      setCloseWarningOpen(false);
+      await handleCloseInvoice(val);
+    } else {
+      setCloseWarningOpen(false);
+      await handleCloseInvoice();
+    }
   };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle sx={{ p: 3, background: '#fff', color: '#000' }}>
-        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', alignItems: 'center', background: '#fff' }}>
-
+      <DialogTitle sx={{ p: 3, background: "#fff", color: "#000" }}>
+        <Box
+          sx={{
+            display: "flex",
+            gap: 2,
+            justifyContent: "flex-end",
+            alignItems: "center",
+            background: "#fff",
+          }}
+        >
           {/* Show Image Checkbox
           
             <FormControlLabel
@@ -416,7 +600,6 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           
           */}
 
-
           {/* Show close invoice button if invoice is not closed */}
           {invoice && showCloseInvoice && (
             <>
@@ -424,7 +607,9 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 control={
                   <Checkbox
                     checked={makeTransactionToCashier}
-                    onChange={e => setMakeTransactionToCashier(e.target.checked)}
+                    onChange={(e) =>
+                      setMakeTransactionToCashier(e.target.checked)
+                    }
                     color="warning"
                     size="small"
                   />
@@ -433,9 +618,9 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 sx={{
                   mb: 0,
                   fontSize: 14,
-                  '.MuiFormControlLabel-label': { fontSize: 16 },
-                  color: 'warning.main',
-                  mr: 'auto', // push to left
+                  ".MuiFormControlLabel-label": { fontSize: 16 },
+                  color: "warning.main",
+                  mr: "auto", // push to left
                 }}
               />
 
@@ -445,18 +630,20 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 onClick={handleCloseInvoiceClick}
               >
                 Close This Invoice
-              </Button></>
+              </Button>
+            </>
           )}
 
-          {!showCloseInvoiceActions && (!invoiceNumFact || invoiceNumFact === 0) && (
-            <Button
-              variant="contained"
-              color="secondary"
-              onClick={handleGenerateNewNumberClick}
-            >
-              Generate New Invoice Number
-            </Button>
-          )}
+          {!showCloseInvoiceActions &&
+            (!invoiceNumFact || invoiceNumFact === 0) && (
+              <Button
+                variant="contained"
+                color="secondary"
+                onClick={handleGenerateNewNumberClick}
+              >
+                Generate New Invoice Number
+              </Button>
+            )}
 
           {/* Only show close actions if prop is true */}
           {invoiceNumFact && !showCloseInvoiceActions ? (
@@ -465,7 +652,9 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 control={
                   <Checkbox
                     checked={makeTransactionToCashier}
-                    onChange={e => setMakeTransactionToCashier(e.target.checked)}
+                    onChange={(e) =>
+                      setMakeTransactionToCashier(e.target.checked)
+                    }
                     color="warning"
                     size="small"
                   />
@@ -474,9 +663,9 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 sx={{
                   mb: 0,
                   fontSize: 14,
-                  '.MuiFormControlLabel-label': { fontSize: 16 },
-                  color: 'warning.main',
-                  mr: 'auto', // push to left
+                  ".MuiFormControlLabel-label": { fontSize: 16 },
+                  color: "warning.main",
+                  mr: "auto", // push to left
                 }}
               />
               <Button
@@ -490,58 +679,116 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           ) : null}
         </Box>
       </DialogTitle>
-      <DialogContent sx={{ p: 3, background: '#fff', color: '#000' }}>
-
+      <DialogContent sx={{ p: 3, background: "#fff", color: "#000" }}>
         <WatchStandardInvoiceContent
           ref={printRef as unknown as React.Ref<HTMLDivElement>}
           data={dataWithTotalAmountFinal}
           num_fact={invoiceNumFact ?? invoice?.num_fact}
-          key={invoiceNumFact ?? invoice?.num_fact ?? 'default'}
+          key={invoiceNumFact ?? invoice?.num_fact ?? "default"}
           showImage={showImage}
+          createdBy={createdBy}
         />
       </DialogContent>
-      <DialogActions sx={{ background: 'info', color: '#000' }}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handlePrint}
-            sx={{ ml: 2 }}
-          >
-            Print
-          </Button>
-
-
-
-
-
+      <DialogActions sx={{ background: "info", color: "#000" }}>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handlePrint}
+          sx={{ ml: 2 }}
+        >
+          Print
+        </Button>
       </DialogActions>
-
-
-
-      
 
       {/* Confirmation Dialog for Generate New Invoice Number */}
       <MuiDialog open={confirmOpen} onClose={handleConfirmClose}>
         <MuiDialogTitle>Confirmation</MuiDialogTitle>
-        <MuiDialogContent>Are you ready to generate new number?</MuiDialogContent>
+        <MuiDialogContent>
+          Are you ready to generate new number?
+        </MuiDialogContent>
         <MuiDialogActions>
           <Button onClick={handleConfirmClose}>Cancel</Button>
-          <Button onClick={handleConfirmYes} color="primary" variant="contained">Yes</Button>
+          <Button
+            onClick={handleConfirmYes}
+            color="primary"
+            variant="contained"
+          >
+            Yes
+          </Button>
         </MuiDialogActions>
       </MuiDialog>
 
       {/* Warning Dialog for Close Invoice */}
       <MuiDialog open={closeWarningOpen} onClose={handleCloseWarningCancel}>
-        <MuiDialogTitle sx={{ color: 'warning.main' }}>Warning</MuiDialogTitle>
+        <MuiDialogTitle sx={{ color: "warning.main" }}>Warning</MuiDialogTitle>
         <MuiDialogContent>
-          <span style={{ color: '#ed6c02', fontWeight: 600, fontSize: 18 }}>
+          <div
+            style={{
+              color: "#ed6c02",
+              fontWeight: 600,
+              fontSize: 18,
+              marginBottom: 12,
+            }}
+          >
             Do you want to close this invoice?
-          </span>
+          </div>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={hasRest}
+                onChange={(e) => setHasRest(e.target.checked)}
+                color="warning"
+              />
+            }
+            label="There is a rest of money for this invoice"
+          />
+          {hasRest && (
+            <div style={{ marginTop: 8 }}>
+              <TextField
+                label="Rest (LYD)"
+                value={restOfMoney}
+                onChange={(e) => setRestOfMoney(e.target.value)}
+                type="number"
+                InputProps={{ inputProps: { min: 0, step: "0.01" } }}
+                fullWidth
+                size="small"
+              />
+            </div>
+          )}
+
+          {hasRest && (
+            <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+              <TextField
+                label="Rest (USD)"
+                value={restOfMoneyUSD}
+                onChange={(e) => setRestOfMoneyUSD(e.target.value)}
+                type="number"
+                InputProps={{ inputProps: { min: 0, step: "0.01" } }}
+                fullWidth
+                size="small"
+              />
+              <TextField
+                label="Rest (EUR)"
+                value={restOfMoneyEUR}
+                onChange={(e) => setRestOfMoneyEUR(e.target.value)}
+                type="number"
+                InputProps={{ inputProps: { min: 0, step: "0.01" } }}
+                fullWidth
+                size="small"
+              />
+            </div>
+          )}
         </MuiDialogContent>
         <MuiDialogActions>
           <Button onClick={handleCloseWarningCancel}>Cancel</Button>
-          <Button onClick={handleCloseWarningConfirm} color="warning" variant="contained">Yes</Button>
+          <Button
+            onClick={handleCloseWarningConfirm}
+            color="warning"
+            variant="contained"
+          >
+            Yes
+          </Button>
         </MuiDialogActions>
       </MuiDialog>
     </Dialog>

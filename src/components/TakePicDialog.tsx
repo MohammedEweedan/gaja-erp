@@ -4,7 +4,7 @@ import PhotoCamera from '@mui/icons-material/PhotoCamera';
 import MuiAlert from '@mui/material/Alert';
 import Snackbar from '@mui/material/Snackbar';
 import { Camera as CameraComponent } from 'react-camera-pro';
-import axios from '../../api';
+import axios from '../api';
 
 interface TakePicDialogProps {
     open: boolean;

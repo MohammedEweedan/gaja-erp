@@ -1,20 +1,9 @@
- 
- 
-
- import Users from "./GSCards";
-
- 
+import Users from "./GSCards";
 
 export default function GeneralSettings(props: any) {
-  
-
   return (
     <>
-     
-       
-          <Users/>
-         
-      
+      <Users />
     </>
   );
 }

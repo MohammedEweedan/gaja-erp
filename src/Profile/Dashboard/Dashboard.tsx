@@ -74,8 +74,6 @@ export default function Dashboard() {
               boxShadow: 3, 
               borderRadius: 2, 
               backgroundColor: 'background.paper',
-              border: '1px solid',
-              borderColor: accent,
               height: '100%',
               transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
               '&:hover': {

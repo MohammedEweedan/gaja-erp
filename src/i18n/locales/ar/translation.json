@@ -20,6 +20,7 @@
     "welcome": "مرحباً بعودتك",
     "signInToContinue": "سجل الدخول للمتابعة إلى نظام جادا",
     "email": "البريد الإلكتروني",
+    "redirecting": "جاري التوجيه إلى الصفحة الرئيسية...",
     "password": "كلمة المرور",
     "rememberMe": "تذكرني",
     "forgotPassword": "نسيت كلمة المرور؟",
@@ -122,6 +123,7 @@
     "title": "نظرة عامة تحليلية",
     "sales": "المبيعات",
     "revenue": "الإيرادات",
+    "markets": "الأسواق",
     "expenses": "المصروفات",
     "purchases": "المشتريات",
     "inventory": "المخزون",
@@ -177,6 +179,12 @@
     "previous": "السابق",
     "next": "التالي",
     "month": "الشهر",
+    "save": "حفظ",
+    "selectAll": "اختيار الكل",
+    "clear": "مسح",
+    "select": "اختيار",
+    "apply": "تطبيق",
+    "selected": "اختيار",
     "week": "الأسبوع",
     "day": "اليوم",
     "agenda": "الجدول الزمني",
@@ -203,7 +211,6 @@
     "refresh": "تحديث",
     "export": "تصدير",
     "saving": "جاري الحفظ…",
-    "save": "حفظ",
     "vendors": "الموردون",
     "createdBy": "أنشأ بواسطة",
     "comment": "ملاحظة",
@@ -482,6 +489,48 @@
     }
   },
   "hr": {
+    "timesheets": {
+      "previewDate": "تاريخ المعاينة",
+      "previewDay": "معاينة اليوم",
+      "syncMonthToTimesheet": "مزامنة الشهر إلى كشف الساعات",
+      "loadMonthNoWrite": "تحميل الشهر (بدون كتابة)",
+      "dailyPreview": "معاينة الحضور اليومي",
+      "employee": "الموظف",
+      "exportAll": "تصدير",
+      "psPoint": "نقطة البيع",
+      "allPs": "جميع نقاط البيع",
+      "searchEmployee": "بحث عن موظف",
+      "exportDialogTitle": "تصدير جدول الحضور",
+      "exportMode": "طريقة التصدير",
+      "exportSingle": "موظف واحد",
+      "exportAllEmployees": "جميع الموظفين",
+      "export": "تصدير",
+      "date": "التاريخ",
+      "onlyAbsent": "فقط الغياب",
+      "onlyHolidayWorked": "فقط العمل في عطلة",
+      "onlyOnLeave": "فقط في الراحة",
+      "justification": "التبرير (j)",
+      "result": "النتيجة (R)",
+      "in": "الدخول (E)",
+      "out": "الخروج (S)",
+      "psWorkingHours": "ساعات عمل نقاط البيع (P0–P4)",
+      "savePsHours": "حفظ ساعات نقاط البيع",
+      "manualPunchEntry": "إدخال يدوي للبصمة",
+      "inE": "الدخول (E)",
+      "outS": "الخروج (S)",
+      "saveManualPunch": "حفظ الإدخال اليدوي",
+      "allEmployeesUpToToday": "جميع الموظفين — حتى اليوم",
+      "from": "من",
+      "toAutoToday": "إلى (تلقائيًا اليوم)",
+      "psOptional": "نقطة البيع (اختياري)",
+      "filterEmployees": "تصفية الموظفين (الاسم أو الرقم)",
+      "loadUpToToday": "تحميل حتى اليوم",
+      "psTodayTitle": "نقطة البيع ${psLabel} — حضور اليوم",
+      "loading": "جارٍ التحميل...",
+      "noEmployeesForPs": "لا يوجد موظفون لهذه النقطة.",
+      "month": "الشهر",
+      "year": "السنة"
+    },
     "jobs": {
         "title": "الوظائف",
         "add": "إضافة وظيفة",
@@ -510,6 +559,39 @@
           "NBR_YEAR_FOR_JOB": "سنوات الخبرة مطلوبة"
         }
       },
+    "specialities": {
+      "title": "التخصصات",
+      "add": "إضافة تخصص",
+      "edit": "تعديل التخصص",
+      "name": "اسم التخصص",
+      "empty": "لا توجد تخصصات",
+      "table": {
+        "id": "المعرف",
+        "name": "الاسم"
+      },
+      "required": {
+        "name": "اسم التخصص مطلوب"
+      }
+    },
+    "contractTypes": {
+      "title": "أنواع العقود",
+      "add": "إضافة نوع عقد",
+      "edit": "تعديل نوع العقد",
+      "name": "اسم العقد",
+      "code": "كود العقد",
+      "description": "الوصف",
+      "empty": "لا توجد أنواع عقود",
+      "confirmDelete": "هل أنت متأكد من حذف نوع العقد هذا؟",
+      "table": {
+        "id": "المعرف",
+        "name": "الاسم",
+        "code": "الكود",
+        "description": "الوصف"
+      },
+      "required": {
+        "name": "اسم العقد مطلوب"
+      }
+    },
     "header": {
       "title": "مساحة عمل الموارد البشرية"
     },
@@ -584,7 +666,7 @@
     },
     "org": {
       "title": "الهيكل التنظيمي",
-      "subtitle": "مبني على حقل JO_RELATION (المسؤول المباشر)."
+      "subtitle": "مبني على حقل JOB_RELATION (المسؤول المباشر)."
     },
     "leave": {
       "title": "إدارة الإجازات"
@@ -699,6 +781,7 @@
       "filter": "فلتر حسب الحالة",
       "all": "الكل",
       "pending": "قيد الانتظار",
+      "accepted": "موافق عليه",
       "approved": "موافق عليه",
       "rejected": "مرفوض",
       "cancelled": "ملغى",
@@ -725,6 +808,14 @@
       "fetchError": "خطأ في جلب بيانات التقويم",
       "noEvents": "لا توجد أحداث في هذه الفترة"
     },
+    "vacations": {
+      "title": "إجازات",
+      "subtitle": "إدارة الإجازات",
+      "employee": "موظف",
+      "allEmployees": "جميع الموظفين",
+      "selected": "إظهار بيانات",
+      "pickEmployee": "اختر موظفًا لعرض بيانات الإجازات"
+    },
     "request": {
       "leaveType": "نوع الإجازة",
       "startDate": "تاريخ البداية",
@@ -745,12 +836,47 @@
       "totalLeaves": "إجمالي الإجازات",
       "usedLeaves": "الإجازات المستخدمة",
       "remainingLeaves": "الإجازات المتبقية",
+      "accrued": "المتراكم هذا العام",
+      "accruedDays": "الأيام المتراكمة",
       "leaveHistory": "تاريخ الإجازات",
       "type": "النوع",
       "period": "الفترة",
       "days": "الأيام",
       "status": "الحالة",
-      "fetchError": "خطأ في جلب رصيد الإجازة"
+      "fetchError": "خطأ في جلب رصيد الإجازة",
+      "employeeDetails": "بيانات الموظف",
+      "name": "الاسم",
+      "employeeId": "رقم الموظف",
+      "jobTitle": "المسمى الوظيفي",
+      "department": "القسم",
+      "ps": "PS",
+      "costCenter": "مركز التكلفة",
+      "monthlyLedger": "دفتر الإجازات الشهري",
+      "exportExcel": "تصدير إلى إكسل",
+      "exportCsv": "تصدير CSV",
+      "month": "الشهر",
+      "credit": "رصيد مضاف",
+      "debit": "رصيد مخصوم",
+      "balance": "الرصيد",
+      "exportPdf": "تصدير إلى PDF",
+      "details": "تفاصيل",
+      "noLedger": "لا يوجد دفتر لعرضه",
+      "zeroedDueToYearlyLimit": "<< تصفير بسبب الحد السنوي >>",
+      "rule45": "باستخدام 45 يومًا/سنة (العمر ≥ 50 أو الخبرة ≥ 20).",
+      "rule30": "باستخدام 30 يومًا/سنة (العمر < 50 والخبرة < 20).",
+      "turns50": "يبلغ 50 عامًا في",
+      "exp20": "خبرة 20 عامًا في"
+    },
+    "holidays": {
+      "title": "العطلات الرسمية",
+      "date": "التاريخ",
+      "name": "الاسم",
+      "type": "النوع",
+      "addGlobal": "إضافة عطلة عامة",
+      "flags": "الخصائص",
+      "none": "لا توجد عطلات في هذا العرض",
+      "pto": "مدفوعة",
+      "doublePay": "أجر مضاعف"
     },
     "types": {
       "annual": "إجازة سنوية",

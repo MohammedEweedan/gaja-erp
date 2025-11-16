@@ -17,11 +17,13 @@ import WorkspacePremiumIcon from '@mui/icons-material/WorkspacePremium';
 import PsychologyAltIcon from '@mui/icons-material/PsychologyAlt';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import LeaderboardIcon from '@mui/icons-material/Leaderboard';
+import Specialities from './Pages/Specialities';
 
 import Jobs from './Pages/Jobs';
 import { useTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import EmployeeProfile from "../../../src/HR/Setting/EmployeeProfile";
+import ContractTypes from "./Pages/ContractTypes";
 
 const HRSettingsCards: React.FC = () => {
   const [selectedCard, setSelectedCard] = React.useState<number | null>(null);
@@ -65,14 +67,14 @@ const HRSettingsCards: React.FC = () => {
         title: t("hr.settings.specialities.title"),
         description: t("hr.settings.specialities.desc"),
         icon: <PsychologyAltIcon fontSize="large" />,
-        component: <div>Specialities Page</div>,
+        component: <Specialities />,
       },
       {
         id: 6,
         title: t("hr.settings.contractsTypes.title"),
         description: t("hr.settings.contractsTypes.desc"),
         icon: <AssignmentIcon fontSize="large" />,
-        component: <div>Contracts Types Page</div>,
+        component: <ContractTypes />,
       },
       {
         id: 7,

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useEffect, useState } from 'react';
 import { Autocomplete, Box, TextField, Typography, CircularProgress } from '@mui/material';
 import axios from "../api";

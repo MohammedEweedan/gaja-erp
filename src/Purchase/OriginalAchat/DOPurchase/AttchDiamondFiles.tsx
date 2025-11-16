@@ -1,7 +1,27 @@
-import React, { useCallback, useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, LinearProgress, IconButton, List, ListItem, ListItemText, ListItemSecondaryAction, Alert } from '@mui/material';
-import DeleteIcon from '@mui/icons-material/Delete';
-import { Dialog as MuiDialog, DialogTitle as MuiDialogTitle, DialogContent as MuiDialogContent, DialogActions as MuiDialogActions } from '@mui/material';
+import React, { useCallback, useState } from "react";
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Box,
+  Typography,
+  LinearProgress,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  Alert,
+} from "@mui/material";
+import DeleteIcon from "@mui/icons-material/Delete";
+import {
+  Dialog as MuiDialog,
+  DialogTitle as MuiDialogTitle,
+  DialogContent as MuiDialogContent,
+  DialogActions as MuiDialogActions,
+} from "@mui/material";
 
 interface AttchDiamondFilesProps {
   open: boolean;
@@ -12,9 +32,16 @@ interface AttchDiamondFilesProps {
   token: string;
 }
 
-const apiUrl = (process.env.REACT_APP_API_IP as string) || '';
+const apiUrl = "https://system.gaja.ly/api";
 
-const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, row, id_achat, onUploadSuccess, token }) => {
+const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({
+  open,
+  onClose,
+  row,
+  id_achat,
+  onUploadSuccess,
+  token,
+}) => {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,9 +58,12 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
       return;
     }
     try {
-      const res = await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}`, {
-        ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {})
-      });
+      const res = await fetch(
+        `${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}`,
+        {
+          ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+        }
+      );
       if (res.ok) {
         const data = await res.json();
         setUploadedFiles(data.files || []);
@@ -41,7 +71,7 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
         setUploadedFiles([]);
       }
     } catch (err) {
-      console.error('Error fetching uploaded files:', err);
+      console.error("Error fetching uploaded files:", err);
       setUploadedFiles([]);
     }
   }, [id_achat, open, row, token]);
@@ -55,42 +85,45 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
-      setFiles(prev => {
-        const existingNames = new Set(prev.map(f => f.name));
-        return [...prev, ...newFiles.filter(f => !existingNames.has(f.name))];
+      setFiles((prev) => {
+        const existingNames = new Set(prev.map((f) => f.name));
+        return [...prev, ...newFiles.filter((f) => !existingNames.has(f.name))];
       });
     }
   };
 
   const handleRemoveFile = (index: number) => {
-    setFiles(prev => prev.filter((_, i) => i !== index));
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleUpload = async () => {
     if (!files.length || !(id_achat || row?.id_achat)) {
-      setError('No files or purchase selected');
+      setError("No files or purchase selected");
       return;
     }
     setUploading(true);
     setError(null);
-  // reset progress if any
+    // reset progress if any
     const formData = new FormData();
-    files.forEach(file => formData.append('files', file));
+    files.forEach((file) => formData.append("files", file));
 
     try {
-      await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${id_achat || row?.id_achat}`, {
-        method: 'POST',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: formData,
-      });
+      await fetch(
+        `${apiUrl}/uploads/DOpurchase/upload-attachment/${id_achat || row?.id_achat}`,
+        {
+          method: "POST",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: formData,
+        }
+      );
       setFiles([]);
       setError(null);
-      setSuccessMessage('Files uploaded successfully!');
+      setSuccessMessage("Files uploaded successfully!");
       setTimeout(() => setSuccessMessage(null), 3000);
       onUploadSuccess?.();
       fetchFiles();
     } catch (err: any) {
-      console.error('Upload error:', err);
+      console.error("Upload error:", err);
     } finally {
       setUploading(false);
       // reset progress if any
@@ -100,19 +133,22 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
   const handleDeleteFile = async (fileUrl: string) => {
     const currentId = id_achat || row?.id_achat;
     if (!currentId) return;
-    const filename = decodeURIComponent(fileUrl.split('/').pop() || '');
+    const filename = decodeURIComponent(fileUrl.split("/").pop() || "");
     try {
-      const res = await fetch(`${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}/${filename}`, {
-        method: 'DELETE',
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      });
+      const res = await fetch(
+        `${apiUrl}/uploads/DOpurchase/upload-attachment/${currentId}/${filename}`,
+        {
+          method: "DELETE",
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        }
+      );
       if (res.ok) {
         await refreshFiles();
       } else {
-        setError('Failed to delete file');
+        setError("Failed to delete file");
       }
     } catch (err) {
-      setError('Failed to delete file');
+      setError("Failed to delete file");
     }
   };
 
@@ -139,7 +175,9 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
       <DialogContent>
         <Box mb={2}>
           {successMessage && (
-            <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>
+            <Alert severity="success" sx={{ mb: 2 }}>
+              {successMessage}
+            </Alert>
           )}
           <Button
             variant="outlined"
@@ -148,12 +186,7 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
             style={{ marginBottom: 16 }}
           >
             Add File
-            <input
-              type="file"
-              multiple
-              hidden
-              onChange={handleFileChange}
-            />
+            <input type="file" multiple hidden onChange={handleFileChange} />
           </Button>
           {!uploading && files.length > 0 && (
             <List>
@@ -161,7 +194,11 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
                 <ListItem key={idx}>
                   <ListItemText primary={file.name} />
                   <ListItemSecondaryAction>
-                    <IconButton edge="end" onClick={() => handleRemoveFile(idx)} disabled={uploading}>
+                    <IconButton
+                      edge="end"
+                      onClick={() => handleRemoveFile(idx)}
+                      disabled={uploading}
+                    >
                       <DeleteIcon />
                     </IconButton>
                   </ListItemSecondaryAction>
@@ -175,9 +212,15 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
               <List>
                 {uploadedFiles.map((fileUrl, idx) => (
                   <ListItem key={idx}>
-                    <a href={fileUrl} target="_blank" rel="noopener noreferrer">{fileUrl.split('/').pop()}</a>
+                    <a href={fileUrl} target="_blank" rel="noopener noreferrer">
+                      {fileUrl.split("/").pop()}
+                    </a>
                     <ListItemSecondaryAction>
-                      <IconButton edge="end" aria-label="delete" onClick={() => handleAskDeleteFile(fileUrl)}>
+                      <IconButton
+                        edge="end"
+                        aria-label="delete"
+                        onClick={() => handleAskDeleteFile(fileUrl)}
+                      >
                         <DeleteIcon />
                       </IconButton>
                     </ListItemSecondaryAction>
@@ -191,8 +234,17 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose} disabled={uploading}>Cancel</Button>
-        <Button onClick={handleUpload} color="primary" variant="contained" disabled={uploading || files.length === 0}>Upload</Button>
+        <Button onClick={onClose} disabled={uploading}>
+          Cancel
+        </Button>
+        <Button
+          onClick={handleUpload}
+          color="primary"
+          variant="contained"
+          disabled={uploading || files.length === 0}
+        >
+          Upload
+        </Button>
       </DialogActions>
       <MuiDialog open={deleteDialogOpen} onClose={handleCancelDelete}>
         <MuiDialogTitle>Confirm Delete</MuiDialogTitle>
@@ -200,8 +252,16 @@ const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({ open, onClose, ro
           <Typography>Are you sure you want to delete this file?</Typography>
         </MuiDialogContent>
         <MuiDialogActions>
-          <Button onClick={handleCancelDelete} color="primary">No</Button>
-          <Button onClick={handleConfirmDelete} color="error" variant="contained">Yes</Button>
+          <Button onClick={handleCancelDelete} color="primary">
+            No
+          </Button>
+          <Button
+            onClick={handleConfirmDelete}
+            color="error"
+            variant="contained"
+          >
+            Yes
+          </Button>
         </MuiDialogActions>
       </MuiDialog>
     </Dialog>

@@ -1,5 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import axios from 'axios';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+  useCallback,
+} from "react";
+import axios from "axios";
 
 type RawUser = {
   ps?: any;
@@ -10,18 +17,19 @@ type RawUser = {
 };
 
 type StoredUser = {
-  id: string;                 // email as id (your legacy login stores this)
+  id: string; // email as id (your legacy login stores this)
   ps?: any;
-  Cuser?: any;                // id_user
-  roles?: any;                // Users.Roles (preferred) or legacy Action_user
+  Cuser?: any; // id_user
+  roles?: any; // Users.Roles (preferred) or legacy Action_user
+  Prvilege?: any;
   name_user?: string;
 };
 
 export interface User {
   id: string;
   email: string;
-  name: string;               // normalized for UI
-  role?: string;              // first role if available
+  name: string; // normalized for UI
+  role?: string; // first role if available
   // legacy / domain-specific fields (kept so the rest of the app keeps working)
   ps?: any;
   Cuser?: any;
@@ -31,21 +39,29 @@ export interface User {
 
 interface AuthContextType {
   user: User | null;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  login: (
+    email: string,
+    password: string
+  ) => Promise<{ success: boolean; error?: string }>;
   // (Optional) overload if some screens use object args:
   // login: (payload: { identifier: string; password: string }) => Promise<{ success: boolean; error?: string }>;
   logout: (onSuccess?: () => void) => void;
+  updatePs?: (ps: any) => void;
+  refreshUser?: () => void;
+  setPrivilege?: (priv: any) => void;
   isAuthenticated: boolean;
   loading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const USER_KEY = 'user';
-const TOKEN_KEY = 'token';
+const USER_KEY = "user";
+const TOKEN_KEY = "token";
 const BASE_URL = process.env.REACT_APP_API_IP;
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({
+  children,
+}) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,17 +77,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const normalized: User = {
           id: legacy.id,
           email: legacy.id, // your legacy stored only email in `id`
-          name: legacy.name_user || legacy.id?.split('@')?.[0] || 'User',
-          role: Array.isArray(legacy.roles) ? legacy.roles[0] : legacy.roles,
+          name: legacy.name_user || legacy.id?.split("@")?.[0] || "User",
+          // Prefer `roles`, fall back to `Prvilege` (server may set either)
+          role: Array.isArray(legacy.roles ? legacy.roles : legacy.Prvilege)
+            ? legacy.roles
+              ? legacy.roles[0]
+              : (legacy.Prvilege || [])[0]
+            : (legacy.roles ?? legacy.Prvilege),
           ps: legacy.ps,
           Cuser: legacy.Cuser,
-          roles: legacy.roles,
+          roles: legacy.roles ?? legacy.Prvilege,
           name_user: legacy.name_user,
         };
         setUser(normalized);
       }
     } catch (e) {
-      console.error('Failed to parse stored user', e);
+      console.error("Failed to parse stored user", e);
       localStorage.removeItem(USER_KEY);
       localStorage.removeItem(TOKEN_KEY);
     } finally {
@@ -85,14 +106,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const res = await axios.post(
         `${BASE_URL}/api/login`,
         { email, password },
-        { headers: { 'Content-Type': 'application/json' } }
+        { headers: { "Content-Type": "application/json" } }
       );
 
       const token: string | undefined = res?.data?.token;
-  const backendUser: RawUser | undefined = res?.data?.user;
+      const backendUser: RawUser | undefined = res?.data?.user;
 
       if (!token || !backendUser) {
-        return { success: false, error: 'Invalid credentials response' };
+        return { success: false, error: "Invalid credentials response" };
       }
 
       // Persist token for interceptors/protected routes
@@ -112,8 +133,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const normalized: User = {
         id: email,
         email,
-        name: backendUser.name_user || email.split('@')[0],
-        role: Array.isArray(storedUser.roles) ? storedUser.roles[0] : storedUser.roles,
+        name: backendUser.name_user || email.split("@")[0],
+        role: Array.isArray(storedUser.roles)
+          ? storedUser.roles[0]
+          : storedUser.roles,
         ps: storedUser.ps,
         Cuser: storedUser.Cuser,
         roles: storedUser.roles,
@@ -123,10 +146,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return { success: true };
     } catch (error: any) {
-      console.error('Login failed:', error);
+      console.error("Login failed:", error);
       return {
         success: false,
-        error: error?.response?.data?.message || error?.message || 'Login failed',
+        error:
+          error?.response?.data?.message || error?.message || "Login failed",
       };
     }
   }, []);
@@ -138,10 +162,110 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     onSuccess?.();
   }, []);
 
+  const updatePs = useCallback((ps: any) => {
+    try {
+      const stored = localStorage.getItem(USER_KEY);
+      if (stored) {
+        const legacy: StoredUser = JSON.parse(stored);
+        legacy.ps = ps;
+        localStorage.setItem(USER_KEY, JSON.stringify(legacy));
+      }
+
+      // Update in-memory normalized user
+      setUser((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ps,
+        } as User;
+      });
+    } catch (e) {
+      console.error("Failed to update PS in storage", e);
+    }
+  }, []);
+
+  const setPrivilege = useCallback(
+    (priv: any) => {
+      try {
+        // Update stored legacy user shape
+        const storedRaw = localStorage.getItem(USER_KEY);
+        let legacy: StoredUser = storedRaw
+          ? JSON.parse(storedRaw)
+          : ({} as StoredUser);
+        legacy.Prvilege = priv;
+        // keep Roles in sync for legacy code paths
+        legacy.roles = legacy.roles ?? priv;
+        if (!legacy.id && user?.email) legacy.id = user.email;
+        localStorage.setItem(USER_KEY, JSON.stringify(legacy));
+
+        // Update in-memory normalized user immediately so UI updates reactively
+        setUser((prev) => {
+          const base: User =
+            prev ||
+            ({
+              id: legacy.id || user?.email || "",
+              email: legacy.id || user?.email || "",
+              name:
+                legacy.name_user ||
+                legacy.id?.split("@")?.[0] ||
+                user?.name ||
+                "User",
+              role: Array.isArray(priv) ? priv[0] : priv,
+              ps: legacy.ps,
+              Cuser: legacy.Cuser,
+              roles: legacy.roles ?? legacy.Prvilege,
+              name_user: legacy.name_user,
+            } as User);
+
+          return {
+            ...base,
+            roles: legacy.roles ?? legacy.Prvilege,
+            role: Array.isArray(legacy.roles ?? legacy.Prvilege)
+              ? (legacy.roles ?? legacy.Prvilege)[0]
+              : (legacy.roles ?? legacy.Prvilege),
+          } as User;
+        });
+      } catch (e) {
+        // don't throw; keep legacy behavior intact
+        // eslint-disable-next-line no-console
+        console.error("Failed to set privilege", e);
+      }
+    },
+    [user]
+  );
+
+  const refreshUser = useCallback(() => {
+    try {
+      const stored = localStorage.getItem(USER_KEY);
+      if (!stored) return;
+      const legacy: StoredUser = JSON.parse(stored);
+      const normalized: User = {
+        id: legacy.id,
+        email: legacy.id,
+        name: legacy.name_user || legacy.id?.split("@")?.[0] || "User",
+        role: Array.isArray(legacy.roles ? legacy.roles : legacy.Prvilege)
+          ? legacy.roles
+            ? legacy.roles[0]
+            : (legacy.Prvilege || [])[0]
+          : (legacy.roles ?? legacy.Prvilege),
+        ps: legacy.ps,
+        Cuser: legacy.Cuser,
+        roles: legacy.roles ?? legacy.Prvilege,
+        name_user: legacy.name_user,
+      };
+      setUser(normalized);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   const value: AuthContextType = {
     user,
     login,
     logout,
+    updatePs,
+    refreshUser,
+    setPrivilege,
     isAuthenticated: !!user && !!localStorage.getItem(TOKEN_KEY),
     loading,
   };
@@ -151,7 +275,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within an AuthProvider');
+  if (!context) throw new Error("useAuth must be used within an AuthProvider");
   return context;
 };
 

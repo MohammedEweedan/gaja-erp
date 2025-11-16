@@ -1,18 +1,32 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from "react";
 import axios from "../../../api";
 import {
-  Box, IconButton, Tooltip, Button, Dialog,
-  DialogActions, DialogContent, DialogTitle, TextField,
-  Typography, createTheme, ThemeProvider, Avatar, Card, CardHeader, CardActions, Autocomplete,
-  Divider
-} from '@mui/material';
-import CategoryIcon from '@mui/icons-material/Category';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import AddIcon from '@mui/icons-material/Add';
-import ImportExportIcon from '@mui/icons-material/ImportExport';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import * as XLSX from 'xlsx';
+  Box,
+  IconButton,
+  Tooltip,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+  Typography,
+  createTheme,
+  ThemeProvider,
+  Avatar,
+  Card,
+  CardHeader,
+  CardActions,
+  Autocomplete,
+  Divider,
+} from "@mui/material";
+import CategoryIcon from "@mui/icons-material/Category";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import AddIcon from "@mui/icons-material/Add";
+import ImportExportIcon from "@mui/icons-material/ImportExport";
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import * as XLSX from "xlsx";
 
 type ItemsTypes = {
   id_unite: number;
@@ -22,8 +36,8 @@ type ItemsTypes = {
 
 const initialItemsTypeState: ItemsTypes = {
   id_unite: 0,
-  desig_unit: '',
-  Main_Name: '',
+  desig_unit: "",
+  Main_Name: "",
 };
 
 const ItemsTypes = () => {
@@ -37,27 +51,47 @@ const ItemsTypes = () => {
 
   const apiIp = process.env.REACT_APP_API_IP;
   const apiUrl = `${apiIp}/itemstypes`;
-  const themeMode = localStorage.getItem('themeMode') as 'light' | 'dark' || 'dark';
+  const themeMode =
+    (localStorage.getItem("themeMode") as "light" | "dark") || "dark";
 
   const theme = createTheme({
     palette: {
       mode: themeMode,
       background: {
-        default: themeMode === localStorage.getItem('themeMode') ? '#121212' : '#fafafa',
-        paper: themeMode === localStorage.getItem('themeMode')? '#1E1E1E' : '#fff',
+        default:
+          themeMode === localStorage.getItem("themeMode")
+            ? "#121212"
+            : "#fafafa",
+        paper:
+          themeMode === localStorage.getItem("themeMode") ? "#1E1E1E" : "#fff",
       },
-      text: { primary: themeMode === 'dark' ? '#9e9e9e' : '#374151', secondary: themeMode === 'dark' ? '#9e9e9e' : '#374151' },
+      text: {
+        primary: themeMode === "dark" ? "#9e9e9e" : "#374151",
+        secondary: themeMode === "dark" ? "#9e9e9e" : "#374151",
+      },
     },
     components: {
-      MuiFormLabel: { styleOverrides: { root: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
-      MuiInputLabel: { styleOverrides: { root: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
-      MuiFormControlLabel: { styleOverrides: { label: { color: themeMode === 'dark' ? '#9e9e9e' : '#374151' } } },
-    }
+      MuiFormLabel: {
+        styleOverrides: {
+          root: { color: themeMode === "dark" ? "#9e9e9e" : "#374151" },
+        },
+      },
+      MuiInputLabel: {
+        styleOverrides: {
+          root: { color: themeMode === "dark" ? "#9e9e9e" : "#374151" },
+        },
+      },
+      MuiFormControlLabel: {
+        styleOverrides: {
+          label: { color: themeMode === "dark" ? "#9e9e9e" : "#374151" },
+        },
+      },
+    },
   });
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem("token");
       const response = await axios.get<ItemsTypes[]>(`${apiUrl}/all`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -74,11 +108,14 @@ const ItemsTypes = () => {
   }, []);
 
   const groupedData = useMemo(() => {
-    return data.reduce((acc, item) => {
-      acc[item.Main_Name] = acc[item.Main_Name] || [];
-      acc[item.Main_Name].push(item);
-      return acc;
-    }, {} as Record<string, ItemsTypes[]>);
+    return data.reduce(
+      (acc, item) => {
+        acc[item.Main_Name] = acc[item.Main_Name] || [];
+        acc[item.Main_Name].push(item);
+        return acc;
+      },
+      {} as Record<string, ItemsTypes[]>
+    );
   }, [data]);
 
   const handleEdit = (item: ItemsTypes) => {
@@ -101,21 +138,26 @@ const ItemsTypes = () => {
 
   const validateForm = () => {
     const newErrors: any = {};
-    if (!editItemType?.desig_unit) newErrors.desig_unit = 'Item Type Name is required';
-    if (!editItemType?.Main_Name) newErrors.main_type = 'Main Type is required';
+    if (!editItemType?.desig_unit)
+      newErrors.desig_unit = "Item Type Name is required";
+    if (!editItemType?.Main_Name) newErrors.main_type = "Main Type is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSave = async () => {
     if (!validateForm() || !editItemType) return;
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem("token");
 
     try {
       if (isEditMode) {
-        await axios.put(`${apiUrl}/Update/${editItemType.id_unite}`, editItemType, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await axios.put(
+          `${apiUrl}/Update/${editItemType.id_unite}`,
+          editItemType,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
+        );
       } else {
         await axios.post(`${apiUrl}/Add`, editItemType, {
           headers: { Authorization: `Bearer ${token}` },
@@ -124,13 +166,13 @@ const ItemsTypes = () => {
       await fetchData();
       handleCloseDialog();
     } catch (error: any) {
-      alert(error.response?.data?.message || 'Save failed');
+      alert(error.response?.data?.message || "Save failed");
     }
   };
 
   const handleDelete = async (item: ItemsTypes) => {
     if (!window.confirm(`Delete "${item.desig_unit}"?`)) return;
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem("token");
 
     try {
       await axios.delete(`${apiUrl}/Delete/${item.id_unite}`, {
@@ -144,7 +186,11 @@ const ItemsTypes = () => {
 
   const handleExportExcel = () => {
     const headers = ["ID", "Main Type", "Item Type Name"];
-    const rows = data.map(row => [row.id_unite, row.Main_Name, row.desig_unit]);
+    const rows = data.map((row) => [
+      row.id_unite,
+      row.Main_Name,
+      row.desig_unit,
+    ]);
     const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "ItemsTypes");
@@ -152,138 +198,172 @@ const ItemsTypes = () => {
   };
 
   return (
- 
-      <Box p={2}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {selectedMainType && (
-              <Button
-                variant="outlined"
-                color="inherit"
-                onClick={() => setSelectedMainType(null)}
-                startIcon={<ArrowBackIcon />}
-              >
-                Back
-              </Button>
-            )}
-            <Typography variant="h5" fontWeight="bold">
-              {selectedMainType ? `Item Types in "${selectedMainType}"` : 'Main Product Types'}
-            </Typography>
-
-
-          </Box>
-
-          <Box sx={{ display: 'flex', gap: 2 }}>
-
-
+    <Box p={2}>
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 2,
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
+          {selectedMainType && (
             <Button
               variant="outlined"
-              color="secondary"
-              onClick={handleExportExcel}
-              startIcon={<ImportExportIcon />}
+              color="inherit"
+              onClick={() => setSelectedMainType(null)}
+              startIcon={<ArrowBackIcon />}
             >
-              Export Excel
+              Back
             </Button>
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={handleAddNew}
-              startIcon={<AddIcon />}
-            >
-              New Item Type
-            </Button>
-          </Box>
+          )}
+          <Typography variant="h5" fontWeight="bold">
+            {selectedMainType
+              ? `Item Types in "${selectedMainType}"`
+              : "Main Product Types"}
+          </Typography>
         </Box>
-        <Divider sx={{ mb: 2, borderColor: 'grey.300' }} />
 
+        <Box sx={{ display: "flex", gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="secondary"
+            onClick={handleExportExcel}
+            startIcon={<ImportExportIcon />}
+          >
+            Export Excel
+          </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            onClick={handleAddNew}
+            startIcon={<AddIcon />}
+          >
+            New Item Type
+          </Button>
+        </Box>
+      </Box>
+      <Divider sx={{ mb: 2, borderColor: "grey.300" }} />
 
-        <Box
-
-
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-            gap: 2,
-
-          }}
-
-
-        >
-
-
-
-          {!selectedMainType
-            ? Object.keys(groupedData).map((mainType) => (
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))",
+          gap: 2,
+        }}
+      >
+        {!selectedMainType
+          ? Object.keys(groupedData).map((mainType) => (
               <Card
                 key={mainType}
-                sx={{ alignContent: 'center', justifyItems: 'center', height: 100, cursor: 'pointer', bgcolor: theme.palette.background.paper }}
+                sx={{
+                  alignContent: "center",
+                  justifyItems: "center",
+                  height: 100,
+                  cursor: "pointer",
+                  bgcolor: theme.palette.background.paper,
+                }}
                 onClick={() => setSelectedMainType(mainType)}
               >
                 <CardHeader
-                  avatar={<Avatar><CategoryIcon /></Avatar>}
+                  avatar={
+                    <Avatar>
+                      <CategoryIcon />
+                    </Avatar>
+                  }
                   title={<Typography fontWeight="bold">{mainType}</Typography>}
                 />
               </Card>
             ))
-            : groupedData[selectedMainType].map((item) => (
-              <Card key={item.id_unite} sx={{ width: 250, bgcolor: theme.palette.background.paper }}>
-                <CardHeader title={<Typography>{item.desig_unit}</Typography>} />
-                <CardActions sx={{ justifyContent: 'flex-end' }}>
+          : groupedData[selectedMainType].map((item) => (
+              <Card
+                key={item.id_unite}
+                sx={{ width: 250, bgcolor: theme.palette.background.paper }}
+              >
+                <CardHeader
+                  title={<Typography>{item.desig_unit}</Typography>}
+                />
+                <CardActions sx={{ justifyContent: "flex-end" }}>
                   <Tooltip title="Edit">
-                    <IconButton color="primary" onClick={() => handleEdit(item)} size="small">
+                    <IconButton
+                      color="primary"
+                      onClick={() => handleEdit(item)}
+                      size="small"
+                    >
                       <EditIcon />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Delete">
-                    <IconButton color="error" onClick={() => handleDelete(item)} size="small">
+                    <IconButton
+                      color="error"
+                      onClick={() => handleDelete(item)}
+                      size="small"
+                    >
                       <DeleteOutlineIcon />
                     </IconButton>
                   </Tooltip>
                 </CardActions>
               </Card>
             ))}
-        </Box>
-
-        <Dialog open={openDialog} onClose={handleCloseDialog}>
-          <DialogTitle>{isEditMode ? 'Edit Item Type' : 'New Item Type'}</DialogTitle>
-          <DialogContent>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-              <TextField
-                label="Item Type Name"
-                value={editItemType?.desig_unit || ''}
-                onChange={(e) => setEditItemType({ ...editItemType!, desig_unit: e.target.value })}
-                error={!!errors.desig_unit}
-                helperText={errors.desig_unit}
-              />
-              <Autocomplete
-                freeSolo
-                options={['Gold', 'Diamond', 'Watches', 'Boxes', 'Accessories', 'Chains']}
-                value={editItemType?.Main_Name || ''}
-                onChange={(_, newValue) =>
-                  setEditItemType({ ...editItemType!, Main_Name: newValue || '' })
-                }
-                onInputChange={(_, newInputValue) =>
-                  setEditItemType({ ...editItemType!, Main_Name: newInputValue })
-                }
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Main Type"
-                    error={!!errors.main_type}
-                    helperText={errors.main_type}
-                  />
-                )}
-              />
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleCloseDialog} color="secondary">Cancel</Button>
-            <Button onClick={handleSave} color="primary">{isEditMode ? 'Save Changes' : 'Save'}</Button>
-          </DialogActions>
-        </Dialog>
       </Box>
-    
+
+      <Dialog open={openDialog} onClose={handleCloseDialog}>
+        <DialogTitle>
+          {isEditMode ? "Edit Item Type" : "New Item Type"}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+            <TextField
+              label="Item Type Name"
+              value={editItemType?.desig_unit || ""}
+              onChange={(e) =>
+                setEditItemType({
+                  ...editItemType!,
+                  desig_unit: e.target.value,
+                })
+              }
+              error={!!errors.desig_unit}
+              helperText={errors.desig_unit}
+            />
+            <Autocomplete
+              freeSolo
+              options={[
+                "Gold",
+                "Diamond",
+                "Watches",
+                "Boxes",
+                "Accessories",
+                "Chains",
+              ]}
+              value={editItemType?.Main_Name || ""}
+              onChange={(_, newValue) =>
+                setEditItemType({ ...editItemType!, Main_Name: newValue || "" })
+              }
+              onInputChange={(_, newInputValue) =>
+                setEditItemType({ ...editItemType!, Main_Name: newInputValue })
+              }
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Main Type"
+                  error={!!errors.main_type}
+                  helperText={errors.main_type}
+                />
+              )}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog} color="secondary">
+            Cancel
+          </Button>
+          <Button onClick={handleSave} color="primary">
+            {isEditMode ? "Save Changes" : "Save"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 };
 
