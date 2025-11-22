@@ -49,6 +49,7 @@ import TrendingFlatIcon from "@mui/icons-material/TrendingFlat";
 import GradeIcon from "@mui/icons-material/Grade";
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import DevicesOtherIcon from "@mui/icons-material/DevicesOther";
+import LocalOfferIcon from "@mui/icons-material/LocalOffer";
 import CompareArrowsIcon from "@mui/icons-material/CompareArrows";
 import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import EmojiEventsIcon from "@mui/icons-material/EmojiEvents";
@@ -57,11 +58,13 @@ import WatchIcon from "@mui/icons-material/Watch";
 import {
   CurrencyExchange,
   GifBox,
+  GridGoldenratio,
   History,
   Inventory2,
   Logout,
   Paid,
   PaidTwoTone,
+  Person2Outlined,
   Sell,
   TransitEnterexit,
 } from "@mui/icons-material";
@@ -91,6 +94,7 @@ import DInventory from "../Inventory/DInventory";
 import WInventory from "../Inventory/WInventory";
 import VacationsPage from "../HR/Compensation/VacationsPage";
 import TimeSheetsPage from "../HR/Compensation/TimeSheetsPage";
+import PayrollPage from "../HR/Compensation/PayrollPage";
 import BInventory from "../Inventory/BInventory";
 import GNew_I from "../Invoices/ListCardInvoice/Gold Invoices/GNew_I";
 import InvoiceTypeSelector from "../Invoices/InvoiceTypeSelector";
@@ -586,6 +590,7 @@ const realRoutes = [
   "/invoice/salesReports",
   "/invoice/otherReports",
   "/invoice/customersReports",
+  "/invoice/sellerReports",
   "/inventory/diamondinventory",
   "/inventory/watchesinventory",
   "/inventory/boxesinventory",
@@ -598,6 +603,7 @@ const realRoutes = [
   "/humanResources/regulationscompensations/vacations",
   "/invoice/customerProfile",
   "/humanResources/regulationscompensations/timesheets",
+  "/humanResources/regulationscompensations/payroll",
 ];
 
 let routeToEncrypted: Record<string, string> = {};
@@ -805,6 +811,8 @@ function getPageComponent(pathname: string) {
       return <VacationsPage />;
     case "/humanResources/regulationscompensations/timesheets":
       return <TimeSheetsPage />;
+    case "/humanResources/regulationscompensations/payroll":
+      return <PayrollPage />;
     case "/invoice/customerProfile":
       return <CustomerProfileRoute />;
     default:
@@ -937,7 +945,7 @@ function buildNavigation(
               {
                 segment: "goldInvoice",
                 title: t("nav.invoice.createNew"),
-                icon: <History {...iconSx} />,
+                icon: <GridGoldenratio {...iconSx} />,
               },
               {
                 segment: "salesReports",
@@ -947,12 +955,17 @@ function buildNavigation(
               {
                 segment: "otherReports",
                 title: t("nav.invoice.otherReports"),
-                icon: <History {...iconSx} />,
+                icon: <LocalOfferIcon {...iconSx} />,
               },
               {
                 segment: "customersReports",
                 title: t("nav.invoice.customersReports"),
-                icon: <History {...iconSx} />,
+                icon: <Person2Outlined {...iconSx} />,
+              },
+              {
+                segment: "sellerReports",
+                title: t("nav.invoice.sellerReports"),
+                icon: <TrendingUpIcon {...iconSx} />,
               },
             ],
           },
@@ -1037,6 +1050,11 @@ function buildNavigation(
                 title: t("nav.hr.compensations.root"),
                 icon: <CategoryIcon {...iconSx} />,
                 children: [
+                  {
+                    segment: "payroll",
+                    title: t("nav.hr.compensations.payroll"),
+                    icon: <PaidTwoTone {...iconSx} />,
+                  },
                   {
                     segment: "vacations",
                     title: t("nav.hr.compensations.vacations"),

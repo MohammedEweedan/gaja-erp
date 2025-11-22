@@ -4,8 +4,8 @@ const Logo2 = () => {
   const theme = useTheme();
   const logo =
     theme.palette.mode === 'dark' || theme.palette.mode === 'system'
-      ? '/GJ LOGO.png'
-      : '/GJ LOGO.png';
+      ? '/GJ_LOGO.png'
+      : '/GJ_LOGO.png';
 
   return (
     <img

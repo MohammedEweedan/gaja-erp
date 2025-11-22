@@ -58,7 +58,8 @@
       "createNew": "إنشاء فاتورة جديدة",
       "salesReports": "تقرير المبيعات",
       "otherReports": "تقرير أخرى",
-      "customersReports": "تقرير العملاء"
+      "customersReports": "تقرير العملاء",
+      "sellerReports": "تقرير البائع"
     },
     "inventory": {
       "root": "المخزون",
@@ -104,6 +105,7 @@
         "promotions": "الترقيات",
         "warningLetter": "إنذار خطي",
         "productivity": "الإنتاجية",
+        "payroll": "الإيصالات",
         "transfer": "النقل",
         "evaluation": "التقييم",
         "missions": "المهام",
@@ -886,5 +888,13 @@
       "paternity": "إجازة أبوة",
       "unpaid": "إجازة غير مدفوعة"
     }
-  }
+  },
+  "Breakdown": "التفاصيل",
+  "Adjustments": "التسويات",
+  "Actions": "إجراءات",
+  "Export CSV": "تصدير CSV",
+  "Export PDF": "تصدير PDF",
+  "Save Month": "حفظ الشهر",
+  "Close Month": "إقفال الشهر",
+  "Profile Picture": "صورة الملف"
 }

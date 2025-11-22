@@ -230,6 +230,26 @@ const SalesReportsTable = ({
     }
   };
 
+  // Navigate to Customer Profile from a row
+  const openCustomerProfile = React.useCallback((row: any) => {
+    let id: number | null = null;
+    try {
+      id = row?.Client?.id_client || row?.Client?.Id_client || row?.client || null;
+      const name = row?.Client?.client_name || "";
+      const phone = row?.Client?.tel_client || "";
+      if (id) localStorage.setItem("customerFocusId", String(id));
+      if (name) localStorage.setItem("customerFocusName", String(name));
+      if (phone) localStorage.setItem("customerFocusPhone", String(phone));
+    } catch {}
+    // Prefer encrypted customer route to carry the id in URL
+    if (id) {
+      const path = buildEncryptedClientPath(Number(id));
+      navigate(path);
+    } else {
+      navigate("/invoice/customerProfile");
+    }
+  }, [navigate]);
+
   useEffect(() => {
     fetchUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1346,7 +1366,7 @@ function getMaxTotalByType(typeStr: string) {
       });
     }
     return base;
-  }, [sortedData, globalFilter, saleKinds, productTypes, paymentStatus, restOnly]);
+  }, [sortedData, globalFilter, saleKinds, paymentStatus, restOnly]);
   // Totals of "rest" fields for the currently filtered dataset
   const totalRestLYD = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
@@ -1599,7 +1619,8 @@ function getMaxTotalByType(typeStr: string) {
                     size="small"
                     color="primary"
                     onClick={() => {
-                      const path = "/invoice/customerProfile";
+                      // Prefer encrypted dynamic customer path so Home router resolves directly
+                      let path = "/invoice/customerProfile";
                       try {
                         if (typeof window !== "undefined") {
                           // Persist whatever we have immediately
@@ -1627,6 +1648,12 @@ function getMaxTotalByType(typeStr: string) {
                               "customerFocusPhone",
                               String(telPart)
                             );
+                          // Build encrypted route when we have a concrete id
+                          if (clientId) {
+                            try {
+                              path = buildEncryptedClientPath(Number(clientId));
+                            } catch {}
+                          }
                         }
                       } catch {}
                       // Enforce hard redirect and stop further handling to avoid router interference

@@ -17,7 +17,7 @@ import {
   Autocomplete,
 } from "@mui/material";
 import axios from "../api";
-import { decodeClientToken } from "../utils/routeCrypto";
+import { decodeClientToken, buildEncryptedClientPath } from "../utils/routeCrypto";
 import { MaterialReactTable, type MRT_ColumnDef } from "material-react-table";
 
 import PrintInvoiceDialog from "../Invoices/ListCardInvoice/Gold Invoices/PrintInvoiceDialog";
@@ -62,8 +62,8 @@ const CustomersReports = ({
   const mm = String(today.getMonth() + 1).padStart(2, "0");
   const dd = String(today.getDate()).padStart(2, "0");
   const currentDate = `${yyyy}-${mm}-${dd}`;
-  const [periodFrom, setPeriodFrom] = useState(`${yyyy}-01-01`);
-  const [periodTo, setPeriodTo] = useState(currentDate);
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsData, setDetailsData] = useState<any>(null);
   const [isChira, setIsChira] = useState<"all" | "yes" | "no">("all");
@@ -162,6 +162,71 @@ const CustomersReports = ({
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customers]);
+
+  // Fallback preselection: try name/phone if id was not provided or not matched
+  useEffect(() => {
+    if (typeof focusCustomerId === "number") return; // explicit id wins
+    if (selectedCustomer && selectedCustomer.id_client) return; // already selected
+    try {
+      const hintName = localStorage.getItem("customerFocusName") || "";
+      const hintPhone = localStorage.getItem("customerFocusPhone") || "";
+      if (!customers || customers.length === 0) return;
+      let match: Client | null = null;
+      if (hintPhone) {
+        match =
+          customers.find((c) => String(c.tel_client) === String(hintPhone)) ||
+          null;
+      }
+      if (!match && hintName) {
+        match =
+          customers.find((c) => String(c.client_name) === String(hintName)) ||
+          null;
+      }
+      if (match) setSelectedCustomer(match);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, selectedCustomer, focusCustomerId]);
+
+  // When user changes the selected customer from the dropdown, navigate to that customer's profile route
+  useEffect(() => {
+    if (!selectedCustomer || !selectedCustomer.id_client) return;
+    try {
+      const newId = Number(selectedCustomer.id_client);
+      if (!newId || Number.isNaN(newId)) return;
+      // Determine currently focused id from either prop, /c/<token>, or localStorage
+      let currentId: number | null = null;
+      if (typeof focusCustomerId === "number") currentId = Number(focusCustomerId);
+      else {
+        const path = typeof window !== "undefined" ? window.location.pathname : "";
+        if (path.startsWith("/c/")) {
+          const token = path.slice(3);
+          const id = decodeClientToken(token);
+          if (id) currentId = Number(id);
+        } else {
+          try {
+            const raw = localStorage.getItem("customerFocusId");
+            if (raw !== null && raw !== "") currentId = Number(raw);
+          } catch {}
+        }
+      }
+      if (currentId === newId) return; // already on this customer
+      // Persist hints and navigate to dynamic encrypted path
+      try {
+        localStorage.setItem("customerFocusId", String(newId));
+        if (selectedCustomer.client_name)
+          localStorage.setItem("customerFocusName", String(selectedCustomer.client_name));
+        if (selectedCustomer.tel_client)
+          localStorage.setItem("customerFocusPhone", String(selectedCustomer.tel_client));
+      } catch {}
+      const path = buildEncryptedClientPath(newId);
+      if (typeof window !== "undefined") {
+        try {
+          window.location.assign(path);
+          return;
+        } catch {}
+      }
+    } catch {}
+  }, [selectedCustomer, focusCustomerId]);
 
   // Fetch all images for a given picint (or id_achat)
   const fetchImages = async (picint: string) => {
@@ -388,6 +453,7 @@ const CustomersReports = ({
     isWholeSale,
     selectedCustomer,
     currency,
+    fetchRevenueData,
   ]);
 
   // Defensive: ensure data is always an array
@@ -564,8 +630,8 @@ const CustomersReports = ({
     };
   }
 
-  // --- Export Table to HTML with all data, details, and images ---
-  async function exportTableToHtml() {
+  // --- Export Table to PDF (via print dialog) with all data, details, and images ---
+  async function exportTableToPdf() {
     // Convert all product images to base64 for export
     async function blobUrlToBase64(blobUrl: string): Promise<string> {
       return new Promise((resolve, reject) => {
@@ -805,11 +871,17 @@ const CustomersReports = ({
             </body>
         </html>
         `;
-    // Open in new window for user to save/print
+    // Open in new window for user to save/print as PDF
     const win = window.open("", "_blank");
     if (win) {
       win.document.write(html);
       win.document.close();
+      try {
+        win.focus();
+        setTimeout(() => {
+          win.print();
+        }, 300);
+      } catch {}
     }
   }
 
@@ -877,10 +949,11 @@ const CustomersReports = ({
     const dateB = new Date(b.date).getTime();
     return dateA - dateB;
   });
-  // Opening balance: sum all before periodFrom
-  const openingRows = allStatementRows.filter(
-    (r) => new Date(r.date) < new Date(periodFrom)
-  );
+  // Dates window (robust when fields are empty)
+  const fromDate = periodFrom ? new Date(periodFrom) : new Date(-8640000000000000);
+  const toDate = periodTo ? new Date(periodTo) : new Date(8640000000000000);
+  // Opening balance: sum all before fromDate
+  const openingRows = allStatementRows.filter((r) => new Date(r.date) < fromDate);
   // Opening balance for LYD: only LYD transactions
   const openingBalance = openingRows.reduce((sum, r) => {
     // For invoices (debit), only add LYD debit
@@ -915,9 +988,7 @@ const CustomersReports = ({
   }, 0);
   // Main period rows
   const mainRows = allStatementRows.filter(
-    (r) =>
-      new Date(r.date) >= new Date(periodFrom) &&
-      new Date(r.date) <= new Date(periodTo)
+    (r) => new Date(r.date) >= fromDate && new Date(r.date) <= toDate
   );
   // Running balances
   let runningBalance = openingBalance;
@@ -1619,9 +1690,6 @@ const CustomersReports = ({
             flexWrap: "wrap",
           }}
         >
-          <Typography variant="h5" sx={{ mr: 2 }}>
-            {MODEL_LABELS[type]} - Customer Reports
-          </Typography>
           <FormControl size="small" sx={{ minWidth: 140 }}>
             <InputLabel id="type-select-label">Type</InputLabel>
             <Select
@@ -1696,6 +1764,9 @@ const CustomersReports = ({
             sx={{ width: "25%" }}
             options={customers}
             autoHighlight
+            isOptionEqualToValue={(option: Client, value: Client) =>
+              value != null && Number(option.id_client) === Number(value.id_client)
+            }
             getOptionLabel={(option: Client) =>
               `${option.client_name} (${option.tel_client || "No Phone"})`
             }
@@ -1714,76 +1785,14 @@ const CustomersReports = ({
               <TextField {...params} label="Customer" required />
             )}
           />
-          <Button
-            variant="contained"
-            color="secondary"
-            sx={{ fontWeight: 600, boxShadow: 2 }}
-            onClick={() => {
-              // Refresh data for selected customer and filters
-              setLoading(true);
-              setErrorMsg(null);
-              if (!selectedCustomer || !selectedCustomer.id_client) {
-                setData([]);
-                setLoading(false);
-                return;
-              }
-              const token = localStorage.getItem("token");
-              if (!token) return;
-              axios
-                .get(`/invoices/allDetailsPC`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                  params: {
-                    ps: ps,
-                    ...(type !== "all" ? { type } : {}),
-                    ...(isChira !== "all"
-                      ? { is_chira: isChira === "yes" ? 1 : 0 }
-                      : {}),
-                    ...(isWholeSale !== "all"
-                      ? { is_whole_sale: isWholeSale === "yes" ? 1 : 0 }
-                      : {}),
-                    from: periodFrom || undefined,
-                    to: periodTo || undefined,
-                    ...(selectedCustomer && selectedCustomer.id_client
-                      ? { client: selectedCustomer.id_client }
-                      : {}),
-                  },
-                })
-                .then((res) => {
-                  if (
-                    typeof res.data === "string" &&
-                    res.data.trim().startsWith("<!DOCTYPE html")
-                  ) {
-                    setErrorMsg(
-                      "Server returned an HTML page instead of data. This may indicate a backend error, downtime, or invalid API endpoint."
-                    );
-                    setData([]);
-                    return;
-                  }
-                  let result = Array.isArray(res.data) ? res.data : [];
-
-                  setData(result);
-                })
-                .catch((err) => {
-                  setErrorMsg(
-                    "Failed to fetch data from server. Please check your connection or contact support."
-                  );
-                  setData([]);
-                })
-                .finally(() => setLoading(false));
-              // Also refresh revenue data
-              fetchRevenueData();
-            }}
-          >
-            Preview Data
-          </Button>
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained"
             color="info"
             sx={{ fontWeight: 600, boxShadow: 2 }}
-            onClick={exportTableToHtml}
+            onClick={exportTableToPdf}
           >
-            Export to HTML
+            Export to PDF
           </Button>
         </Box>
         {/* Unified Statement Table */}

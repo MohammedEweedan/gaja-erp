@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // src/components/Header/Header.tsx
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";

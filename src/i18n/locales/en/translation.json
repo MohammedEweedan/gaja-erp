@@ -87,8 +87,9 @@
       "root": "Sales & Invoices",
       "createNew": "Create New Invoice",
       "salesReports": "Sales Report",
-      "otherReports": "Other Reports",
-      "customersReports": "Customers Reports"
+      "otherReports": "Product Reports",
+      "customersReports": "Customers Reports",
+      "sellerReports": "Seller Reports"
     },
     "inventory": {
       "root": "Inventory",
@@ -111,6 +112,7 @@
         "root": "Compensations",
         "vacations": "Vacations",
         "timesheets": "Time Sheets",
+        "payroll": "Payroll",
         "promotions": "Promotions",
         "warningLetter": "Warning Letter",
         "productivity": "Productivity",
@@ -731,5 +733,31 @@
       "confirmDeletionMsg": "Are you sure you want to delete this product #{{num}}?",
       "irreversible": "This action cannot be undone!"
     }
-  }
+  },
+  "Breakdown": "Breakdown",
+  "Adjustments": "Adjustments",
+  "Actions": "Actions",
+  "Export CSV": "Export CSV",
+  "Export PDF": "Export PDF",
+  "Save Month": "Save Month",
+  "Close Month": "Close Month",
+  "Profile Picture": "Profile Picture",
+  "Employees": "Employees",
+  "Period": "Period",
+  "Working Days": "Working Days",
+  "Deduction Days": "Deduction Days",
+  "Present Days": "Present Days",
+  "Holidays Worked": "Holidays Worked",
+  "Food Allowance": "Food Allowance",
+  "Fuel Allowance": "Fuel Allowance",
+  "Communication Allowance": "Communication Allowance",
+  "Base Pay": "Base Pay",
+  "Allowance Pay": "Allowance Pay",
+  "Sales Qty": "Sales Qty",
+  "Sales Total (LYD)": "Sales Total (LYD)",
+  "Gold Commission": "Gold Commission",
+  "Diamond Commission": "Diamond Commission",
+  "Total (LYD)": "Total (LYD)",
+  "Total (USD)": "Total (USD)",
+  "Search": "Search"
 }
