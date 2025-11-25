@@ -112,6 +112,7 @@ import { CacheProvider } from "@emotion/react";
 import { DYNAMIC_PREFIXES, decodeEmployeeToken, decodeClientToken, decodeSellerToken } from "../utils/routeCrypto";
 import SellerReports from "../Invoices/SellerReports";
 import EmployeeProfile from "../HR/Setting/EmployeeProfile";
+import CommissionsPage from "../HR/Setting/CommissionsPage";
 
 // Resolve-focused CustomerProfile wrapper for static route
 function CustomerProfileRoute() {
@@ -591,6 +592,7 @@ const realRoutes = [
   "/invoice/otherReports",
   "/invoice/customersReports",
   "/invoice/sellerReports",
+  "/invoice/commissions",
   "/inventory/diamondinventory",
   "/inventory/watchesinventory",
   "/inventory/boxesinventory",
@@ -787,6 +789,8 @@ function getPageComponent(pathname: string) {
       return <CustomersReports />;
     case "/invoice/sellerReports":
       return <SellerReports />;
+    case "/humanResources/regulationscompensations/commissions":
+      return <CommissionsPage />;
     case "/inventory/goldinventory":
       return <GInventoryWrapper type="gold" />;
     case "/inventory/diamondinventory":
@@ -1064,6 +1068,11 @@ function buildNavigation(
                     segment: "timesheets",
                     title: t("nav.hr.compensations.timesheets"),
                     icon: <AccessTimeIcon {...iconSx} />,
+                  },
+                  {
+                    segment: "commissions",
+                    title: t("nav.invoice.commissions") || "Commissions",
+                    icon: <GradeIcon {...iconSx} />,
                   },
                   {
                     segment: "promotions",

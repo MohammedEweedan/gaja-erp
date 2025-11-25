@@ -529,13 +529,7 @@ export default function UsersDialog({
                             height: 36,
                             bgcolor: "primary.main",
                           }}
-                        >
-                          {u?.name_user ? (
-                            String(u.name_user).charAt(0).toUpperCase()
-                          ) : (
-                            <PersonIcon />
-                          )}
-                        </Avatar>
+                        />
                         <Typography variant="subtitle2">
                           {u?.name_user ??
                             u?.name ??

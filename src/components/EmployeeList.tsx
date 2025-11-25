@@ -113,13 +113,7 @@ export function EmployeeList<T extends MinimalEmployee>({
                         ? e.PICTURE_URL
                         : undefined
                     }
-                  >
-                    {e.NAME.split(" ")
-                      .map((s) => s[0])
-                      .slice(0, 2)
-                      .join("")
-                      .toUpperCase()}
-                  </Avatar>
+                  />
                 </ListItemAvatar>
                 <ListItemText
                   primary={

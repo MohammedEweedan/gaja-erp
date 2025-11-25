@@ -59,7 +59,8 @@
       "salesReports": "تقرير المبيعات",
       "otherReports": "تقرير أخرى",
       "customersReports": "تقرير العملاء",
-      "sellerReports": "تقرير البائع"
+      "sellerReports": "تقرير البائع",
+      "commissions": "اعدادات العمولات"
     },
     "inventory": {
       "root": "المخزون",

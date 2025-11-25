@@ -89,7 +89,8 @@
       "salesReports": "Sales Report",
       "otherReports": "Product Reports",
       "customersReports": "Customers Reports",
-      "sellerReports": "Seller Reports"
+      "sellerReports": "Seller Reports",
+      "commissions": "Commission Settings"
     },
     "inventory": {
       "root": "Inventory",

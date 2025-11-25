@@ -44,6 +44,12 @@ import {
   Switch,
   FormControlLabel,
   InputLabel,
+  Radio,
+  RadioGroup,
+  FormLabel,
+  Checkbox,
+  FormGroup,
+  FormHelperText,
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -496,6 +502,19 @@ function employeeKey(e: Employee): string {
   return `noid-${name}|${email}|${phone}|${ps}`;
 }
 
+function formatPs(ps: any): string | undefined {
+  if (ps == null || ps === "") return undefined;
+  const s = String(ps).trim();
+  if (!s) return undefined;
+  const sUp = s.toUpperCase();
+  // If it's already like P1/P2/... keep it
+  if (/^P[0-9]+$/.test(sUp)) return sUp;
+  // If it's purely numeric, prefix with P
+  if (/^[0-9]+$/.test(s)) return `P${s}`;
+  // Otherwise, return the code uppercased (e.g., OG, HQ)
+  return sUp;
+}
+
 const SectionHeading: React.FC<React.PropsWithChildren> = ({ children }) => (
   <Typography
     variant="subtitle1"
@@ -592,9 +611,7 @@ const OrgCard: React.FC<{ e: Employee; posName?: string }> = ({
             borderRadius: 1,
             fontSize: 16,
           }}
-        >
-          {initials(e.NAME)}
-        </Avatar>
+        />
         <Box>
           <Typography fontWeight={700} lineHeight={1.2}>
             {e.NAME}
@@ -642,7 +659,7 @@ const OrgNodeAll: React.FC<{
       <Box onClick={() => onSelect(node)}>
         <OrgCard
           e={node}
-          posName={node.PS ? posNameById.get(Number(node.PS)) : undefined}
+          posName={formatPs(node.PS)}
         />
       </Box>
       {kids.length > 0 && depth < MAX_DEPTH && (
@@ -845,8 +862,62 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
 
   const handleSaveJob = async () => {
     try {
-      await api.post("/jobs/jobs", jobForm);
+      const payload = {
+        job_name: jobForm.job_name,
+        year_job: jobForm.year_job,
+        job_degree: (jobForm as any).job_degree ?? jobForm.Job_degree,
+        job_level: (jobForm as any).job_level ?? jobForm.Job_level,
+        job_title: (jobForm as any).job_title ?? jobForm.Job_title,
+        job_code: (jobForm as any).job_code ?? jobForm.Job_code,
+        job_categories: jobForm.job_categories,
+      } as any;
+      await api.post("/jobs/job", payload);
       showSnackbar(t("hr.jobs.created", "Job created successfully"), "success");
+      if (form.ID_EMP) {
+        const empPatch: any = {};
+        const rawJobTitle = (jobForm as any).job_title ?? jobForm.Job_title;
+        const clampedTitle = rawJobTitle ? String(rawJobTitle).slice(0, 20) : undefined;
+        if (clampedTitle) empPatch.TITLE = clampedTitle;
+        if (form.JOB_RELATION !== undefined && form.JOB_RELATION !== null && form.JOB_RELATION !== "") {
+          const raw = form.JOB_RELATION as any;
+          const mgrId = typeof raw === 'number' ? raw : Number(String(raw).match(/\d+/)?.[0] || NaN);
+          if (Number.isFinite(mgrId)) empPatch.JOB_RELATION = Number(mgrId);
+        }
+        if (form.NAME) empPatch.NAME = form.NAME;
+        if (Object.keys(empPatch).length > 0) {
+          try {
+            await api.patch(`/employees/${form.ID_EMP}`, empPatch);
+            if (clampedTitle) {
+              setForm((prev)=>({ ...prev, TITLE: clampedTitle } as any));
+              setSelected((prev)=> prev ? ({ ...prev, TITLE: clampedTitle } as any) : prev);
+              setData((prev)=> prev.map(e=> e.ID_EMP===form.ID_EMP ? ({ ...e, TITLE: clampedTitle } as any) : e));
+            }
+            showSnackbar(t('hr.org.reassigned', 'Reassigned successfully'), 'success');
+          } catch (e:any) {
+            const msg = e?.response?.data?.message || e?.message || 'Reassignment failed';
+            // Fallback: try PUT with NAME if available (some backends require NAME on PUT)
+            const displayName = (form.NAME || `${form.FIRST_NAME || ''} ${form.SURNAME || ''}`.trim());
+            if (displayName) {
+              try {
+                await api.put(`/employees/${form.ID_EMP}`, { NAME: displayName, TITLE: clampedTitle, JOB_RELATION: empPatch.JOB_RELATION });
+                if (clampedTitle) {
+                  setForm((prev)=>({ ...prev, TITLE: clampedTitle } as any));
+                  setSelected((prev)=> prev ? ({ ...prev, TITLE: clampedTitle } as any) : prev);
+                  setData((prev)=> prev.map(e=> e.ID_EMP===form.ID_EMP ? ({ ...e, TITLE: clampedTitle } as any) : e));
+                }
+                showSnackbar(t('hr.org.reassigned', 'Reassigned successfully'), 'success');
+              } catch (e2:any) {
+                const msg2 = e2?.response?.data?.message || e2?.message || 'Reassignment failed';
+                showSnackbar(`${t('hr.org.reassignFailed','Reassignment failed')}: ${msg2}`, 'error');
+              }
+            } else {
+              showSnackbar(`${t('hr.org.reassignFailed','Reassignment failed')}: ${msg}`, 'error');
+            }
+          }
+        }
+        await fetchEmployees();
+      }
+
       await fetchJobs();
       setJobDialogOpen(false);
       setJobForm({
@@ -899,6 +970,57 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
   const [schedError, setSchedError] = useState<string | null>(null);
   const [scheduleSlots, setScheduleSlots] = useState<ScheduleSlot[]>([]);
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
+
+  // Attendance profiles (group multiple employees)
+  type AttendanceProfile = { name: string; days: string[]; start: string; end: string };
+  const [attendanceProfiles, setAttendanceProfiles] = useState<AttendanceProfile[]>(() => {
+    try {
+      const raw = localStorage.getItem('attendanceProfiles');
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  });
+  useEffect(()=>{
+    try { localStorage.setItem('attendanceProfiles', JSON.stringify(attendanceProfiles)); } catch {}
+  },[attendanceProfiles]);
+  const [attUseProfile, setAttUseProfile] = useState<boolean>(true);
+  const [attProfileName, setAttProfileName] = useState<string>("");
+  const [attDays, setAttDays] = useState<Set<string>>(new Set(["Mon","Tue","Wed","Thu","Fri"]));
+  const [attStart, setAttStart] = useState<string>("09:00");
+  const [attEnd, setAttEnd] = useState<string>("17:00");
+  const toggleDay = (d: string) => setAttDays((s)=>{ const n=new Set(s); if(n.has(d)) n.delete(d); else n.add(d); return n; });
+  const [attMgrOpen, setAttMgrOpen] = useState<boolean>(false);
+  const [attMgrDraft, setAttMgrDraft] = useState<AttendanceProfile>({ name: "", days: ["Mon","Tue","Wed","Thu","Fri"], start: "09:00", end: "17:00" });
+
+  // Seller user mapping (for Seller Reports linkage)
+  const [sellerUsers, setSellerUsers] = useState<Array<{ id_user: number; name_user: string }>>([]);
+  const [sellerUserId, setSellerUserId] = useState<number | null>(null);
+  // Commission role (Sales Rep / Senior / Lead / Manager)
+  const [commissionRole, setCommissionRole] = useState<string>("");
+  const [posOptions, setPosOptions] = useState<Array<{ Id_point: number; name_point: string }>>([]);
+  const [commissionPs, setCommissionPs] = useState<number[]>([]);
+  const fetchSellerUsers = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await api.get(`/users/ListUsers`, { headers: { Authorization: token ? `Bearer ${token}` : undefined } });
+      const arr = Array.isArray(res.data) ? res.data : [];
+      setSellerUsers(arr);
+    } catch {}
+  }, []);
+  useEffect(()=>{ fetchSellerUsers(); }, [fetchSellerUsers]);
+
+  // Fetch POS list for branch/PS scopes
+  const fetchPos = useCallback(async () => {
+    try {
+      const apiIp = process.env.REACT_APP_API_IP || "";
+      const token = localStorage.getItem('token') || '';
+      const res = await api.get(`${apiIp}/ps/all`, { headers: { Authorization: token ? `Bearer ${token}` : undefined } });
+      const arr = Array.isArray(res.data) ? res.data : [];
+      setPosOptions(arr);
+    } catch {}
+  }, []);
+  useEffect(()=>{ fetchPos(); }, [fetchPos]);
 
   const openSchedFor = useCallback(
     (id: number, name: string, start?: string | null, end?: string | null) => {
@@ -1129,6 +1251,9 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     setSalaryInUSD(false);
     setEmployedElsewhere(false);
     setUnavailable([]);
+    setSellerUserId(null);
+    setCommissionRole("");
+    setCommissionPs([]);
   };
 
   const openEdit = (row: Employee) => {
@@ -1154,13 +1279,55 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
             ? parsed.__availability__.slots
             : []
         );
+        // attendance config
+        if (parsed?.__attendance__) {
+          const a = parsed.__attendance__;
+          setAttUseProfile(a?.mode === 'profile');
+          setAttProfileName(a?.profile || "");
+          const ds = Array.isArray(a?.days) ? a.days : [];
+          setAttDays(new Set(ds as string[]));
+          if (a?.start) setAttStart(String(a.start).slice(0,5));
+          if (a?.end) setAttEnd(String(a.end).slice(0,5));
+        }
+        // seller mapping
+        if (parsed?.__sales__ && (parsed.__sales__.userId != null)) {
+          const sid = Number(parsed.__sales__.userId);
+          setSellerUserId(Number.isFinite(sid) ? sid : null);
+        } else {
+          setSellerUserId(null);
+        }
+        // commission role
+        if (parsed?.__commissions__ && parsed.__commissions__.role) {
+          setCommissionRole(String(parsed.__commissions__.role));
+          const ps = parsed.__commissions__.ps;
+          setCommissionPs(Array.isArray(ps) ? ps.map((x:any)=> Number(x)).filter((n:number)=> Number.isFinite(n)) : []);
+        } else {
+          setCommissionRole("");
+          setCommissionPs([]);
+        }
       } else {
         setEmployedElsewhere(false);
         setUnavailable([]);
+        setAttUseProfile(true);
+        setAttProfileName("");
+        setAttDays(new Set(["Mon","Tue","Wed","Thu","Fri"]));
+        setAttStart("09:00");
+        setAttEnd("17:00");
+        setSellerUserId(null);
+        setCommissionRole("");
+        setCommissionPs([]);
       }
     } catch {
       setEmployedElsewhere(false);
       setUnavailable([]);
+      setAttUseProfile(true);
+      setAttProfileName("");
+      setAttDays(new Set(["Mon","Tue","Wed","Thu","Fri"]));
+      setAttStart("09:00");
+      setAttEnd("17:00");
+      setSellerUserId(null);
+      setCommissionRole("");
+      setCommissionPs([]);
     }
   };
 
@@ -1391,6 +1558,20 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
         __availability__: {
           employedElsewhere,
           slots: unavailable.filter((s) => s.start && s.end),
+        },
+        __attendance__: {
+          mode: attUseProfile ? 'profile' : 'custom',
+          profile: attUseProfile ? attProfileName : null,
+          days: Array.from(attDays),
+          start: attStart ? `${attStart}:00` : null,
+          end: attEnd ? `${attEnd}:00` : null,
+        },
+        __sales__: {
+          userId: sellerUserId,
+        },
+        __commissions__: {
+          role: commissionRole || null,
+          ps: commissionPs,
         },
         __note__: "Temporary FE embed until BE fields exist",
       };
@@ -1633,9 +1814,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                         crossOrigin: "anonymous",
                         referrerPolicy: "no-referrer",
                       }}
-                    >
-                      {initials(employee.NAME)}
-                    </Avatar>
+                    />
                   </TableCell>
                   <TableCell>
                     <Typography fontWeight="medium">{employee.NAME}</Typography>
@@ -1644,10 +1823,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                   <TableCell>{employee.PHONE || "-"}</TableCell>
                   <TableCell>{employee.EMAIL || "-"}</TableCell>
                   <TableCell>
-                    {employee.PS
-                      ? posNameById.get(Number(employee.PS)) ||
-                        `P${employee.PS}`
-                      : "-"}
+                    {employee.PS ? formatPs(employee.PS) : "-"}
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -1742,6 +1918,20 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
 
   const setField = (k: keyof Employee, v: any) =>
     setForm((f) => ({ ...f, [k]: v }));
+
+  // Persist title immediately when position changes in Profile
+  const handleChangeTitle = async (nextTitle: string) => {
+    setForm((prev) => ({ ...prev, TITLE: nextTitle } as any));
+    setSelected((prev) => (prev ? ({ ...prev, TITLE: nextTitle } as any) : prev));
+    if (form.ID_EMP) {
+      try {
+        await api.patch(`/employees/${form.ID_EMP}`, { TITLE: nextTitle });
+      } catch (e: any) {
+        const msg = e?.response?.data?.message || e?.message || 'Failed to save position';
+        showSnackbar(msg, 'error');
+      }
+    }
+  };
 
   const fileToDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -2110,9 +2300,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                     fontSize: 28,
                     fontWeight: 700,
                   }}
-                >
-                  {initials(selected.NAME)}
-                </Avatar>
+                />
 
                 <Box sx={{ flex: 1 }}>
                   <Typography
@@ -2129,10 +2317,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                     {selected.PS && (
                       <Chip
                         size="small"
-                        label={
-                          posNameById.get(Number(selected.PS)) ||
-                          String(selected.PS)
-                        }
+                        label={formatPs(selected.PS)}
                         sx={{ backgroundColor: accent, color: "white" }}
                       />
                     )}
@@ -2163,9 +2348,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                             : undefined)) as string | undefined
                       }
                       sx={{ width: 40, height: 40 }}
-                    >
-                      {initials(c.NAME)}
-                    </Avatar>
+                    />
                     <Box>
                       <Typography fontWeight={700}>{c.NAME}</Typography>
                       <Typography variant="body2" color="text.secondary">
@@ -2932,6 +3115,65 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                     InputLabelProps={{ shrink: true }}
                   />
                 </SquareCard>
+
+                <SquareCard title={t("employees.sections.attendance", "Working Days & Hours")}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle2">{t('hr.attendance.header','Attendance')}</Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<CalendarMonthIcon />}
+                  onClick={() => openSchedFor(
+                    Number((form as any).ID_EMP || (form as any).id_emp || 0),
+                    String((form as any).NAME || (form as any).name || ''),
+                    (form as any).T_START || null,
+                    (form as any).T_END || null,
+                  )}
+                >
+                  {t('hr.attendance.editTimes','Edit Employee Times')}
+                </Button>
+              </Box>
+              <FormControl component="fieldset" sx={{ mb: 1 }}>
+                <FormLabel>{t('hr.attendance.mode','Mode')}</FormLabel>
+                <RadioGroup row value={attUseProfile ? 'profile' : 'custom'} onChange={(_,v)=> setAttUseProfile(v==='profile')}>
+                  <FormControlLabel value="profile" control={<Radio size="small"/>} label={t('hr.attendance.useProfile','Use Profile')||'Use Profile'} />
+                  <FormControlLabel value="custom" control={<Radio size="small"/>} label={t('hr.attendance.custom','Custom')||'Custom'} />
+                </RadioGroup>
+              </FormControl>
+
+                  {attUseProfile ? (
+                    <Box sx={{ display:'flex', alignItems:'center', gap:2 }}>
+                      <FormControl size="small" sx={{ minWidth: 220 }}>
+                        <InputLabel>{t('hr.attendance.profile','Profile')}</InputLabel>
+                        <Select
+                          label={t('hr.attendance.profile','Profile')}
+                          value={attProfileName}
+                          onChange={(e)=> setAttProfileName(String(e.target.value))}
+                        >
+                          <MenuItem value="">{t('common.none','None')}</MenuItem>
+                          {attendanceProfiles.map(p => (
+                            <MenuItem key={p.name} value={p.name}>{p.name}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <Button variant="outlined" size="small" onClick={()=> setAttMgrOpen(true)}>{t('hr.attendance.manageProfiles','Manage Profiles')}</Button>
+                    </Box>
+                  ) : (
+                    <>
+                      <FormLabel sx={{ mt: 1 }}>{t('hr.attendance.days','Days')}</FormLabel>
+                      <FormGroup row>
+                        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+                          <FormControlLabel key={d} control={<Checkbox checked={attDays.has(d)} onChange={()=>toggleDay(d)} />} label={d} />
+                        ))}
+                      </FormGroup>
+                      <Box sx={{ display:'flex', gap:2, mt: 1 }}>
+                        <TextField label={t('hr.attendance.start','Start')} type="time" value={attStart} onChange={(e)=> setAttStart(e.target.value)} inputProps={{ step: 60 }} />
+                        <TextField label={t('hr.attendance.end','End')} type="time" value={attEnd} onChange={(e)=> setAttEnd(e.target.value)} inputProps={{ step: 60 }} />
+                      </Box>
+                    </>
+                  )}
+                  <FormHelperText>{t('hr.attendance.help','Profiles let you group many employees under the same schedule; custom overrides profile.')}</FormHelperText>
+                </SquareCard>
               </SquareGrid>
             </Stack>
           )}
@@ -3022,7 +3264,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                         <Select
                           label={t("employees.fields.POSITION", "Position")}
                           value={form.TITLE || ""}
-                          onChange={(e) => setField("TITLE", e.target.value)}
+                          onChange={(e) => handleChangeTitle(String(e.target.value))}
                           sx={{ width: 200 }}
                         >
                           {jobs.map((j) => (
@@ -3349,6 +3591,69 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                       </Box>
                     )}
 
+                    {/* Seller user mapping for Seller Reports */}
+                    <Box sx={{ mt: 2, display:'flex', gap:2, alignItems:'center', flexWrap:'wrap' }}>
+                      <FormControl size="small" sx={{ minWidth: 260 }}>
+                        <InputLabel>{t('hr.compensation.sellerUser','Seller User')}</InputLabel>
+                        <Select
+                          label={t('hr.compensation.sellerUser','Seller User')}
+                          value={sellerUserId ?? ''}
+                          onChange={(e)=> {
+                            const raw = String(e.target.value ?? '');
+                            setSellerUserId(raw === '' ? null : Number(raw));
+                          }}
+                        >
+                          <MenuItem value="">{t('common.none','None')}</MenuItem>
+                          {sellerUsers.map(u => (
+                            <MenuItem key={u.id_user} value={u.id_user}>{u.name_user}</MenuItem>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      <FormHelperText sx={{ ml: 0 }}>{t('hr.compensation.sellerUserHelp','Used to link Sales to this employee for commissions in payslips.')}</FormHelperText>
+                    </Box>
+
+                    {/* Commission Role */}
+                    <Box sx={{ mt: 1, display:'flex', gap:2, alignItems:'center', flexWrap:'wrap' }}>
+                      <FormControl size="small" sx={{ minWidth: 260 }}>
+                        <InputLabel>{t('hr.compensation.role','Commission Role')}</InputLabel>
+                        <Select
+                          label={t('hr.compensation.role','Commission Role')}
+                          value={commissionRole}
+                          onChange={(e)=> setCommissionRole(String(e.target.value))}
+                        >
+                          <MenuItem value="">{t('common.none','None')}</MenuItem>
+                          <MenuItem value="sales_rep">Sales Rep</MenuItem>
+                          <MenuItem value="senior_sales_rep">Senior Sales Rep</MenuItem>
+                          <MenuItem value="sales_lead">Sales Lead</MenuItem>
+                          <MenuItem value="sales_manager">Sales Manager</MenuItem>
+                        </Select>
+                      </FormControl>
+                      <FormHelperText sx={{ ml: 0 }}>{t('hr.compensation.roleHelp','Determines gold per-gram and diamond % commission rules.')}</FormHelperText>
+                    </Box>
+
+                    {(commissionRole === 'sales_lead' || commissionRole === 'sales_manager') && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="body2" sx={{ mb: 0.5 }}>{t('hr.compensation.psScope','PS Scope (branches)')}</Typography>
+                        <Autocomplete
+                          multiple
+                          options={posOptions}
+                          disableCloseOnSelect
+                          getOptionLabel={(o:any)=> o?.name_point || String(o?.Id_point || '')}
+                          value={posOptions.filter(p=> commissionPs.includes(Number(p.Id_point)))}
+                          onChange={(_e, vals:any[])=> setCommissionPs(vals.map(v=> Number(v.Id_point)).filter(n=> Number.isFinite(n)))}
+                          renderInput={(params)=> (
+                            <TextField {...params} size="small" placeholder={t('hr.compensation.selectPs','Select branches/PS')} />
+                          )}
+                          renderTags={(value:any[], getTagProps)=> (
+                            value.map((option:any, index:number)=> (
+                              <Chip {...getTagProps({ index })} key={option.Id_point} label={option.name_point || option.Id_point} size="small" />
+                            ))
+                          )}
+                        />
+                        <FormHelperText>{t('hr.compensation.psScopeHelp','For leads/managers: grams will be summed from these branches for gold commissions.')}</FormHelperText>
+                      </Box>
+                    )}
+
                     <Typography
                       variant="caption"
                       color="text.secondary"
@@ -3413,6 +3718,72 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                         }
                         sx={{ width: 200 }}
                       />
+                    </Box>
+
+                    {/* Commissions */}
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 2 }}>
+                      {t("hr.compensation.commissions", "Commissions")}
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mt: 1 }}>
+                      {/* Gold Commission */}
+                      <FormControl>
+                        <FormLabel>{t("hr.compensation.goldCommission", "Gold Commission")}</FormLabel>
+                        <RadioGroup
+                          row
+                          value={(form as any).GOLD_COMM || "none"}
+                          onChange={(_, val) => {
+                            setForm(prev => ({
+                              ...prev,
+                              GOLD_COMM: val === 'none' ? '' : val,
+                              GOLD_COMM_VALUE: val === 'none' ? null : (prev.GOLD_COMM_VALUE ?? 0),
+                            } as any));
+                          }}
+                        >
+                          <FormControlLabel value="none" control={<Radio size="small" />} label={t('common.none','None')} />
+                          <FormControlLabel value="percent" control={<Radio size="small" />} label={t('hr.compensation.percent','Percent')} />
+                          <FormControlLabel value="fixed" control={<Radio size="small" />} label={t('hr.compensation.fixed','Fixed')} />
+                        </RadioGroup>
+                        {((form as any).GOLD_COMM === 'percent' || (form as any).GOLD_COMM === 'fixed') && (
+                          <TextField
+                            sx={{ mt: 1, width: 220 }}
+                            type="number"
+                            label={(form as any).GOLD_COMM === 'percent' ? t('hr.compensation.goldPercent','Gold %') : t('hr.compensation.goldFixed','Gold Fixed (LYD)')}
+                            value={(form as any).GOLD_COMM_VALUE ?? ''}
+                            onChange={(e) => setField('GOLD_COMM_VALUE', e.target.value === '' ? null : Number(e.target.value))}
+                            inputProps={{ step: (form as any).GOLD_COMM === 'percent' ? 0.1 : 1 }}
+                          />
+                        )}
+                      </FormControl>
+
+                      {/* Diamond Commission */}
+                      <FormControl>
+                        <FormLabel>{t("hr.compensation.diamondCommission", "Diamond Commission")}</FormLabel>
+                        <RadioGroup
+                          row
+                          value={(form as any).DIAMOND_COMM_TYPE || "none"}
+                          onChange={(_, val) => {
+                            setForm(prev => ({
+                              ...prev,
+                              DIAMOND_COMM_TYPE: val === 'none' ? '' : val,
+                              DIAMOND_COMM: val === 'none' ? null : ((prev as any).DIAMOND_COMM ?? 0),
+                            } as any));
+                          }}
+                        >
+                          <FormControlLabel value="none" control={<Radio size="small" />} label={t('common.none','None')} />
+                          <FormControlLabel value="percent" control={<Radio size="small" />} label={t('hr.compensation.percent','Percent')} />
+                          <FormControlLabel value="fixed" control={<Radio size="small" />} label={t('hr.compensation.fixed','Fixed')} />
+                        </RadioGroup>
+                        {(((form as any).DIAMOND_COMM_TYPE === 'percent') || ((form as any).DIAMOND_COMM_TYPE === 'fixed')) && (
+                          <TextField
+                            sx={{ mt: 1, width: 220 }}
+                            type="number"
+                            label={(form as any).DIAMOND_COMM_TYPE === 'percent' ? t('hr.compensation.diamondPercent','Diamond %') : t('hr.compensation.diamondFixed','Diamond Fixed (LYD)')}
+                            value={(form as any).DIAMOND_COMM ?? ''}
+                            onChange={(e) => setField('DIAMOND_COMM', e.target.value === '' ? null : Number(e.target.value))}
+                            inputProps={{ step: (form as any).DIAMOND_COMM_TYPE === 'percent' ? 0.1 : 1 }}
+                          />
+                        )}
+                      </FormControl>
                     </Box>
                   </Paper>
                 </Stack>
@@ -4070,6 +4441,96 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
               {t("common.save", "Save")}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Schedule Edit Dialog */}
+      <ScheduleDialog
+        open={schedOpen}
+        name={schedEmpName}
+        start={schedStart}
+        end={schedEnd}
+        saving={schedSaving}
+        error={schedError}
+        onClose={() => setSchedOpen(false)}
+        onChange={({ start, end }) => { setSchedStart(start); setSchedEnd(end); }}
+        onSave={async () => {
+          try {
+            setSchedSaving(true);
+            setSchedError(null);
+            if (schedEmpId) {
+              await updateEmployeeTimes(schedEmpId, { T_START: schedStart, T_END: schedEnd });
+            }
+            setSchedOpen(false);
+          } catch (e: any) {
+            setSchedError(String(e?.message || 'Failed to save times'));
+          } finally {
+            setSchedSaving(false);
+          }
+        }}
+      />
+
+      {/* Manage Attendance Profiles Dialog */}
+      <Dialog open={attMgrOpen} onClose={()=> setAttMgrOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t('hr.attendance.manageProfiles','Manage Attendance Profiles')}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {/* Existing profiles list */}
+            <Paper variant="outlined" sx={{ p: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>{t('common.existing','Existing')}</Typography>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {attendanceProfiles.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">{t('common.none','None')}</Typography>
+                )}
+                {attendanceProfiles.map(p => (
+                  <Button key={p.name} size="small" variant={attMgrDraft.name===p.name? 'contained':'outlined'} onClick={()=> setAttMgrDraft({ ...p })}>
+                    {p.name}
+                  </Button>
+                ))}
+              </Box>
+            </Paper>
+
+            {/* Editor */}
+            <TextField
+              label={t('common.name','Name')}
+              value={attMgrDraft.name}
+              onChange={(e)=> setAttMgrDraft(s=>({ ...s, name: e.target.value }))}
+              fullWidth
+            />
+            <FormLabel>{t('hr.attendance.days','Days')}</FormLabel>
+            <FormGroup row>
+              {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+                <FormControlLabel
+                  key={d}
+                  control={<Checkbox checked={attMgrDraft.days.includes(d)} onChange={()=> setAttMgrDraft(s=>({ ...s, days: s.days.includes(d) ? s.days.filter(x=>x!==d) : [...s.days, d] }))} />}
+                  label={d}
+                />
+              ))}
+            </FormGroup>
+            <Box sx={{ display:'flex', gap:2 }}>
+              <TextField label={t('hr.attendance.start','Start')} type="time" value={attMgrDraft.start} onChange={(e)=> setAttMgrDraft(s=>({ ...s, start: e.target.value }))} inputProps={{ step: 60 }} />
+              <TextField label={t('hr.attendance.end','End')} type="time" value={attMgrDraft.end} onChange={(e)=> setAttMgrDraft(s=>({ ...s, end: e.target.value }))} inputProps={{ step: 60 }} />
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={()=> setAttMgrDraft({ name: '', days: ['Mon','Tue','Wed','Thu','Fri'], start: '09:00', end: '17:00' })}>{t('common.new','New')}</Button>
+          <Button color="error" onClick={()=> {
+            if (!attMgrDraft.name) return;
+            setAttendanceProfiles(prev => prev.filter(p=> p.name !== attMgrDraft.name));
+            setAttMgrDraft({ name: '', days: ['Mon','Tue','Wed','Thu','Fri'], start: '09:00', end: '17:00' });
+          }}>{t('common.delete','Delete')}</Button>
+          <Button variant="contained" onClick={()=> {
+            if (!attMgrDraft.name) return;
+            setAttendanceProfiles(prev => {
+              const i = prev.findIndex(p=> p.name === attMgrDraft.name);
+              const next = [...prev];
+              if (i>=0) next[i] = { ...attMgrDraft };
+              else next.push({ ...attMgrDraft });
+              return next;
+            });
+            setAttMgrOpen(false);
+          }}>{t('common.save','Save')}</Button>
         </DialogActions>
       </Dialog>
 
