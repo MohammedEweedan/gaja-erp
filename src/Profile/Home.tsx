@@ -29,6 +29,7 @@ import {
   DialogActions,
   TextField,
   Autocomplete,
+  Typography,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -1199,6 +1200,51 @@ export default function Home(props: any) {
     document.documentElement.setAttribute("dir", dir);
   }, []);
 
+  // USD→LYD rates storage helpers
+  const formatNow = React.useCallback(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }, []);
+  const parseTs = React.useCallback((s: string) => {
+    // Expect DD/MM/YYYY HH:MM:SS
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return new Date();
+    const [, dd, mm, yyyy, HH, MM, SS] = m;
+    return new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(HH), Number(MM), Number(SS));
+  }, []);
+  const [rateOpen, setRateOpen] = React.useState(false);
+  const [rateInput, setRateInput] = React.useState<string>("");
+  const [tsInput, setTsInput] = React.useState<string>(() => formatNow());
+  const [recentRates, setRecentRates] = React.useState<Array<{ rate: number; ts: string; tsText?: string }>>([]);
+  const latestRate = React.useMemo(() => (recentRates.length ? recentRates[0] : null), [recentRates]);
+  const loadRates = React.useCallback(() => {
+    try {
+      const raw = localStorage.getItem("usd_lyd_rates_v1");
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        const sorted = [...arr].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+        setRecentRates(sorted);
+      } else setRecentRates([]);
+    } catch {
+      setRecentRates([]);
+    }
+  }, []);
+  React.useEffect(() => {
+    loadRates();
+    const onStorage = (e: StorageEvent) => {
+      if (e && e.key === "usd_lyd_rates_v1") loadRates();
+    };
+    const w: any = (typeof globalThis !== "undefined" && (globalThis as any).window) ? (globalThis as any).window : undefined;
+    if (w && typeof w.addEventListener === "function") {
+      w.addEventListener("storage", onStorage);
+      return () => {
+        try { w.removeEventListener("storage", onStorage); } catch {}
+      };
+    }
+    return () => {};
+  }, [loadRates]);
+
   const navigate = useNavigate();
   const handleLogout = () => {
     localStorage.clear();
@@ -1443,6 +1489,17 @@ export default function Home(props: any) {
 
                     <LanguageSwitcher />
 
+                    {(
+                      <Chip
+                        label={`USD→LYD: ${latestRate?.rate ? Number(latestRate.rate).toFixed(3) : "-"}`}
+                        size="small"
+                        sx={{ fontWeight: 700 }}
+                      />
+                    )}
+                    <Button size="small" variant="outlined" onClick={() => { setRateInput(""); setTsInput(formatNow()); setRateOpen(true); }}>
+                      Add Rate
+                    </Button>
+
                     {/* AI button */}
                     <IconButton
                       onClick={() => setAiOpen(true)}
@@ -1488,6 +1545,61 @@ export default function Home(props: any) {
                 {mode === "dark" ? t("toast.darkMode") : t("toast.lightMode")}
               </Alert>
             </Snackbar>
+
+            {/* USD→LYD Rates Dialog */}
+            <Dialog open={rateOpen} onClose={() => setRateOpen(false)} maxWidth="xs" fullWidth>
+              <DialogTitle>USD→LYD Rate</DialogTitle>
+              <DialogContent>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 1 }}>
+                  <TextField
+                    label="Rate (USD→LYD)"
+                    type="number"
+                    value={rateInput}
+                    onChange={(e) => setRateInput(e.target.value)}
+                    size="small"
+                    inputProps={{ step: "0.0001" }}
+                  />
+                  <TextField
+                    label="Timestamp (DD/MM/YYYY HH:MM:SS)"
+                    value={tsInput}
+                    onChange={(e) => setTsInput(e.target.value)}
+                    size="small"
+                  />
+                  {recentRates.length > 0 && (
+                    <Box sx={{ mt: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>Recent</Typography>
+                      <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
+                        {recentRates.slice(0, 5).map((r, idx) => (
+                          <Chip key={idx} size="small" label={`${(r.tsText || new Date(r.ts).toLocaleString())}: ${Number(r.rate).toFixed(3)}`} />
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setRateOpen(false)}>Close</Button>
+                <Button
+                  onClick={() => {
+                    const rate = Number(rateInput);
+                    if (!rate || Number.isNaN(rate) || rate <= 0) return;
+                    const tsDate = parseTs(tsInput);
+                    const entry = { rate, ts: tsDate.toISOString(), tsText: tsInput };
+                    try {
+                      const raw = localStorage.getItem("usd_lyd_rates_v1");
+                      const arr = raw ? JSON.parse(raw) : [];
+                      const next = Array.isArray(arr) ? [...arr, entry] : [entry];
+                      localStorage.setItem("usd_lyd_rates_v1", JSON.stringify(next));
+                    } catch {}
+                    loadRates();
+                    setRateOpen(false);
+                  }}
+                  variant="contained"
+                >
+                  Save
+                </Button>
+              </DialogActions>
+            </Dialog>
           </AppProvider>
         </ThemeProvider>
       </StyledEngineProvider>

@@ -1,11 +1,33 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import GroupDialog from "./GroupDialog";
 import GroupIcon from "@mui/icons-material/Group";
 import axios from "../../../api";
 import IconButton from "@mui/material/IconButton";
 import { useNavigate } from "react-router-dom";
 import { Box, Button, Typography, TextField, MenuItem } from "@mui/material";
 import CircularProgress from "@mui/material/CircularProgress";
+import Chip from "@mui/material/Chip";
+import ShoppingCartOutlined from "@mui/icons-material/ShoppingCartOutlined";
+import DeleteOutline from "@mui/icons-material/DeleteOutline";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import Collapse from "@mui/material/Collapse";
+import ExpandMore from "@mui/icons-material/ExpandMore";
+import VerifiedUserOutlined from "@mui/icons-material/VerifiedUserOutlined";
+import PaletteOutlined from "@mui/icons-material/PaletteOutlined";
+import ContentCutOutlined from "@mui/icons-material/ContentCutOutlined";
+import Straighten from "@mui/icons-material/Straighten";
+import AssignmentTurnedInOutlined from "@mui/icons-material/AssignmentTurnedInOutlined";
+import QrCode2Outlined from "@mui/icons-material/QrCode2Outlined";
+import WaterDropOutlined from "@mui/icons-material/WaterDropOutlined";
+import WatchOutlined from "@mui/icons-material/WatchOutlined";
+import LinkOutlined from "@mui/icons-material/LinkOutlined";
+import BuildOutlined from "@mui/icons-material/BuildOutlined";
+import PrecisionManufacturingOutlined from "@mui/icons-material/PrecisionManufacturingOutlined";
+import AllOutOutlined from "@mui/icons-material/AllOutOutlined";
+import DiamondOutlined from "@mui/icons-material/DiamondOutlined";
+import Inventory2Outlined from "@mui/icons-material/Inventory2Outlined";
+import WorkspacePremiumOutlined from "@mui/icons-material/WorkspacePremiumOutlined";
+import Add from "@mui/icons-material/Add";
+import Remove from "@mui/icons-material/Remove";
 
 import {
   Dialog,
@@ -17,7 +39,38 @@ import { Search } from "@mui/icons-material";
 import Snackbar from "@mui/material/Snackbar";
 import MuiAlert from "@mui/material/Alert";
 import InvoiceTotalsDialog from "./InvoiceTotalsDialog";
-import PrintInvoiceDialog from "./PrintInvoiceDialog"; // Import the PrintInvoiceDialog component
+
+// Lightweight TradingView single-quote embed for XAUUSD (gold per ounce)
+const SingleQuoteWidget: React.FC = () => {
+  const container = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!container.current) return;
+    // Prevent duplicate script injection
+    if (container.current.childElementCount > 0) return;
+    const s = document.createElement("script");
+    s.src = "https://s3.tradingview.com/external-embedding/embed-widget-single-quote.js";
+    s.async = true;
+    s.innerHTML = JSON.stringify({
+      symbol: "OANDA:XAUUSD",
+      width: 240,
+      isTransparent: true,
+      locale: "en",
+      colorTheme: "light",
+      largeChartUrl: ""
+    });
+    const wrapper = document.createElement("div");
+    wrapper.className = "tradingview-widget-container__widget";
+    const outer = document.createElement("div");
+    outer.className = "tradingview-widget-container";
+    outer.appendChild(wrapper);
+    container.current.appendChild(outer);
+    container.current.appendChild(s);
+    return () => {
+      if (container.current) container.current.innerHTML = "";
+    };
+  }, []);
+  return <Box ref={container} sx={{ minHeight: 36 }} />;
+};
 
 type Invoice = {
   id_fact: number;
@@ -342,7 +395,7 @@ const fetchImageWithAuth = async (url: string, token: string) => {
 };
 
 // Default type, can be changed based on your requirements;
-const DNew_I = () => {
+const GNew_I = () => {
   // State for group dialog
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [groupDialogData, setGroupDialogData] = useState<{
@@ -492,6 +545,82 @@ const DNew_I = () => {
   const [brandFilter, setBrandFilter] = useState<string>("");
   // General_Comment filter state
   const [generalCommentFilter, setGeneralCommentFilter] = useState<string>("");
+  // Currency and category filters
+  const [currencyFilter, setCurrencyFilter] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("");
+  const [goldKaratFilter, setGoldKaratFilter] = useState<"all" | "18" | "21" | "24">("all");
+  const [goldKindFilter, setGoldKindFilter] = useState<"all" | "used" | "crashed">("all");
+  // Expanded details per card
+  const [expandedMap, setExpandedMap] = useState<Record<number, boolean>>({});
+  const isAdminRole = React.useMemo(() => {
+    try {
+      const uRaw = localStorage.getItem("user");
+      if (uRaw) {
+        if (uRaw.toUpperCase().includes("ROLE_ADMIN")) return true;
+        const obj = JSON.parse(uRaw) as any;
+        const roleField = (obj?.role ?? obj?.roles ?? obj?.Prvilege ?? obj?.Roles ?? obj?.Action_user) as any;
+        const toStr = (v: any) => (Array.isArray(v) ? v.join(" ") : String(v || ""));
+        const s = toStr(roleField).toLowerCase();
+        return s.includes("admin");
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, []);
+  const extractKarat = (row: InventoryItem): string => {
+    const m = String(row.Design_art || "").match(/\b(24|21|18)\b/);
+    return m ? m[1] : "";
+  };
+  const isUsedGoldRow = (row: InventoryItem): boolean => {
+    const txt = [row.Design_art, row.General_Comment, (row as any).COMMENT, (row as any).comment_edit]
+      .map((v) => String(v || "").toLowerCase())
+      .join(" ");
+    return /(used|مستعمل)/i.test(txt);
+  };
+  const isCrashedGoldRow = (row: InventoryItem): boolean => {
+    const txt = [row.Design_art, row.General_Comment, (row as any).COMMENT, (row as any).comment_edit]
+      .map((v) => String(v || "").toLowerCase())
+      .join(" ");
+    return /(crash|crashed|scrap|broken|كسر|كسور)/i.test(txt);
+  };
+
+  // Standardized color mapping with variant spellings
+  const colorHex = (name: string): string => {
+    const raw = String(name || "").toUpperCase();
+    const n = raw.replace(/[^A-Z]/g, "");
+    // Gem families with broad variant matching
+    if (/(SAPH|SAPPH|SAHPH|SHAPPH|ZAFIR|ZAPP|ZAPH|ZAPHH|SAPHIR|SAPPHIRE|SAPHIRE|SAPPHIER)/.test(n)) return "#0F52BA"; // Sapphire
+    if (/(ZUM|ZUMR|ZUMM|ZUMO|ZUMOR|ZUMOUR|ZUMAR|ZAMURD)/.test(n)) return "#50C878"; // Emerald / Zumrrod
+    if (/AMETH/.test(n)) return "#9966CC"; // Amethyst
+    if (/(RUBY|RUBI|RUBBY|ROBY)/.test(n)) return "#E0115F"; // Ruby
+    if (/(NAVY)/.test(n)) return "#000080"; // Navy
+    if (/(BLUE|BULE)/.test(n)) return "#0000FF"; // Blue
+    if (/(GREEN|GRENE)/.test(n)) return "#008000"; // Green
+    if (/(WHITE|OFFWHITE)/.test(n)) return "#FFFFFF"; // White
+    if (/(BROWN|MAROON|MARRON|WINE)/.test(n)) return "#964B00"; // Brown family
+    if (/(GOLDEN|GOLD|GLID)/.test(n)) return "#D4AF37"; // Gold family
+    if (/(AMBER|ORANGE|PEACH)/.test(n)) return "#FFBF00"; // Amber/Orange/Peach
+    if (/PURPLE/.test(n)) return "#800080"; // Purple
+    if (/(PINK|ROSE|MORGANITE)/.test(n)) return "#F7CAC9"; // Pink/Morganite
+    if (/(AQUA|AQUAMARINE|AQWA)/.test(n)) return "#7FFFD4"; // Aquamarine
+    if (/(BLACK|BLACKE)/.test(n)) return "#000000"; // Black
+    if (/(SILVER|GRAY|GREY)/.test(n)) return "#C0C0C0"; // Silver/Gray
+    if (/GARNET/.test(n)) return "#8B0000"; // Garnet
+    if (/PEARL/.test(n)) return "#F0EDE5"; // Pearl
+    if (/(CHOCOLATE|COCO)/.test(n)) return "#7B3F00"; // Chocolate/Coco
+    if (/BERYL/.test(n)) return "#E6E6FA"; // Beryl
+    if (/TURQUOISE/.test(n)) return "#40E0D0"; // Turquoise
+    if (/OPAL/.test(n)) return "#A8C3BC"; // Opal
+    if (/ONYX/.test(n)) return "#353839"; // Onyx
+    if (/(CHAMPAGNE|CHAMPING)/.test(n)) return "#F7E7CE"; // Champagne
+    if (/MERCURY/.test(n)) return "#E5E5E5"; // Mercury
+    // Basic fallbacks
+    if (/YELLOW/.test(n)) return "#f5d061";
+    if (/(ROSE|PINK)/.test(n)) return "#ECC5C0";
+    if (/(WHITE|SILVER|OFFWHITE)/.test(n)) return "#C0C0C0";
+    return "#eee";
+  };
   // Compute distinct brands from data
   // Helper to get display brand name
   function getBrandName(row: any): string {
@@ -629,7 +758,7 @@ const DNew_I = () => {
 
   // Pagination state
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(3);
+  const [rowsPerPage, setRowsPerPage] = useState(4);
 
   // Add search state
   const [search, setSearch] = useState("");
@@ -696,6 +825,30 @@ const DNew_I = () => {
     const brandOk =
       brandFilter === "" || brandValue.includes(brandFilter.toLowerCase());
 
+    // Currency filter logic (LYD->gold, USD->diamond/watch)
+    const supplierType = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
+    let currencyOk = true;
+    if (currencyFilter === "LYD") {
+      currencyOk = supplierType.includes("gold");
+    } else if (currencyFilter === "USD") {
+      currencyOk = supplierType.includes("diamond") || supplierType.includes("watch");
+    }
+    // Gold-specific filters
+    let goldKaratOk = true;
+    let goldKindOk = true;
+    if (supplierType.includes("gold")) {
+      if (goldKaratFilter !== "all") {
+        goldKaratOk = extractKarat(row) === goldKaratFilter;
+      }
+      if (goldKindFilter !== "all") {
+        goldKindOk = goldKindFilter === "used" ? isUsedGoldRow(row) : isCrashedGoldRow(row);
+      }
+    }
+
+    // Category filter logic using Design_art text
+    const catValue = (row.Design_art || "").toLowerCase();
+    const categoryOk = categoryFilter === "" || catValue.includes(categoryFilter.toLowerCase());
+
     // General_Comment filter logic
     const generalCommentValue = (row.General_Comment || "").toLowerCase();
     // If 'الكل' is selected, show only items with unite > 1
@@ -723,7 +876,7 @@ const DNew_I = () => {
       );
     }
 
-    if (!searchLower) return typeOk && costOk && brandOk && generalCommentOk;
+    if (!searchLower) return typeOk && costOk && brandOk && generalCommentOk && currencyOk && categoryOk && goldKaratOk && goldKindOk;
     // Add to filter panel UI (JSX):
     // <TextField
     //   select
@@ -761,7 +914,12 @@ const DNew_I = () => {
       allValues.some((v) => v.includes(searchLower)) &&
       typeOk &&
       costOk &&
-      brandOk
+      brandOk &&
+      generalCommentOk &&
+      currencyOk &&
+      categoryOk &&
+      goldKaratOk &&
+      goldKindOk
     );
   });
 
@@ -941,6 +1099,20 @@ const DNew_I = () => {
 
   const [goldPrice, setGoldPrice] = useState<number | 0>(0);
   const [usdToLyd, setUsdToLyd] = useState<number | 0>(0);
+  const [cogsOpen, setCogsOpen] = useState(false);
+  const [cogsRow, setCogsRow] = useState<InventoryItem | null>(null);
+  const [cogs, setCogs] = useState({
+    usdRate: 0,
+    making: 0,
+    shipping: 0,
+    travel: 0,
+    lossPercent: 0,
+    profitPercent: 0,
+    weight: 0,
+  });
+  const perGram24USD = React.useMemo(() => (Number(goldPrice) || 0) / 31.1035, [goldPrice]);
+  const perGram21USD = React.useMemo(() => perGram24USD * (21 / 24), [perGram24USD]);
+  const perGram18USD = React.useMemo(() => perGram24USD * (18 / 24), [perGram24USD]);
 
   useEffect(() => {
     // Fetch gold price from a free API (e.g., metals-api.com or goldapi.io)
@@ -979,6 +1151,35 @@ const DNew_I = () => {
       }
     };
     fetchUsdToLyd();
+  }, []);
+
+  // Override usdToLyd from localStorage (usd_lyd_rates_v1) and keep in sync
+  useEffect(() => {
+    const readLatest = () => {
+      try {
+        const raw = localStorage.getItem("usd_lyd_rates_v1");
+        if (!raw) return;
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.length) {
+          const sorted = [...arr].sort((a: any, b: any) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+          const latest = sorted[sorted.length - 1];
+          const rate = Number(latest?.rate);
+          if (!Number.isNaN(rate) && rate > 0) setUsdToLyd(rate);
+        }
+      } catch {}
+    };
+    readLatest();
+    const onStorage = (e: StorageEvent) => {
+      if (e && e.key === "usd_lyd_rates_v1") readLatest();
+    };
+    const w: any = (typeof globalThis !== "undefined" && (globalThis as any).window) ? (globalThis as any).window : undefined;
+    if (w && typeof w.addEventListener === "function") {
+      w.addEventListener("storage", onStorage);
+      return () => {
+        try { w.removeEventListener("storage", onStorage); } catch {}
+      };
+    }
+    return () => {};
   }, []);
 
   // 1. Fix useEffect infinite loop issues (example pattern):
@@ -1033,6 +1234,22 @@ const DNew_I = () => {
     setEditDialogItem(item);
     setEditDialogRemise(item.total_remise ?? 0);
     setEditDialogOpen(true);
+  };
+
+  const handleCOGS = (row: InventoryItem) => {
+    const kar = extractKarat(row);
+    const w = typeof row.qty === "number" ? Number(row.qty) : 0;
+    setCogsRow(row);
+    setCogs((prev) => ({
+      usdRate: Number(usdToLyd) || 0,
+      making: 0,
+      shipping: 0,
+      travel: 0,
+      lossPercent: 0,
+      profitPercent: Number((row as any)?.Fournisseur?.Price_G_Gold_Sales) || 0,
+      weight: w || 0,
+    }));
+    setCogsOpen(true);
   };
 
   const handleOpenTotalsDialog = () => {
@@ -1298,6 +1515,7 @@ const DNew_I = () => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editDialogItem, setEditDialogItem] = useState<Invoice | null>(null);
   const [editDialogRemise, setEditDialogRemise] = useState<number>(0);
+  const [editDiscountType, setEditDiscountType] = useState<"value" | "percentage">("value");
 
   // const [editDialogIS_Gift, setEditDialogIS_Gift] = useState<boolean>(false);
   // Handler for saving the edited remise
@@ -1305,23 +1523,24 @@ const DNew_I = () => {
     if (!editDialogItem) return;
     try {
       const token = localStorage.getItem("token");
-      // Await the API call before updating local state
-      await axios.put(
-        `${apiIp}/invoices/UpdateTotal/${editDialogItem.id_fact}`,
-        {
-          total_remise: editDialogRemise,
-          prix_vente_remise: editDialogRemise,
-          IS_GIFT: editDialogItem.IS_GIFT, // <-- Add this line
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      // Compute final price from discount input
+      const original = Number(editDialogItem.prix_vente) || 0;
+      const discount = Number(editDialogRemise) || 0;
+      const finalPrice = Math.max(
+        0,
+        editDiscountType === "percentage"
+          ? original - original * (discount / 100)
+          : original - discount
+      );
+      await axios.put(`${apiIp}/invoices/UpdateTotal/${editDialogItem.id_fact}`,
+        { total_remise: finalPrice, prix_vente_remise: finalPrice },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       // Update local state after successful API call
       setDatainv((prev) => {
         const updated = prev.map((inv) =>
           inv.id_art === editDialogItem.id_art
-            ? { ...inv, total_remise: editDialogRemise }
+            ? { ...inv, total_remise: finalPrice, prix_vente_remise: finalPrice }
             : inv
         );
         // Recalculate totals after update
@@ -1375,7 +1594,7 @@ const DNew_I = () => {
       });
       setSnackbar({
         open: true,
-        message: "Discount updated successfully",
+        message: "Discount applied",
         severity: "success",
       });
     } catch (error) {
@@ -1538,7 +1757,7 @@ const DNew_I = () => {
               mb: 2,
             }}
           >
-            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+            <Typography variant="h6" sx={{ fontWeight: 700, color: (theme) => theme.palette.text.primary }}>
               Filter by Type
             </Typography>
           </Box>
@@ -1551,7 +1770,7 @@ const DNew_I = () => {
               <Button
                 variant={typeFilter === "gold" ? "contained" : "outlined"}
                 size="small"
-                color="inherit"
+                
                 onClick={() => {
                   setTypeFilter("gold");
                   fetchData("gold");
@@ -1567,11 +1786,7 @@ const DNew_I = () => {
                   px: 1,
                   py: 0.5,
                 }}
-                startIcon={
-                  <span role="img" aria-label="Gold" style={{ fontSize: 14 }}>
-                    🥇
-                  </span>
-                }
+                startIcon={<WorkspacePremiumOutlined sx={{ fontSize: 16 }} />}
               >
                 Gold
               </Button>
@@ -1581,7 +1796,7 @@ const DNew_I = () => {
             >
               <Button
                 variant={typeFilter === "diamond" ? "contained" : "outlined"}
-                color="inherit"
+                
                 size="small"
                 onClick={() => {
                   setTypeFilter("diamond");
@@ -1598,21 +1813,13 @@ const DNew_I = () => {
                   px: 1,
                   py: 0.5,
                 }}
-                startIcon={
-                  <span
-                    role="img"
-                    aria-label="Diamond"
-                    style={{ fontSize: 14 }}
-                  >
-                    💎
-                  </span>
-                }
+                startIcon={<DiamondOutlined sx={{ fontSize: 16 }} />}
               >
                 Diamond
               </Button>
               <Button
                 variant={typeFilter === "watch" ? "contained" : "outlined"}
-                color="inherit"
+                
                 size="small"
                 onClick={() => {
                   setTypeFilter("watch");
@@ -1629,11 +1836,7 @@ const DNew_I = () => {
                   px: 1,
                   py: 0.5,
                 }}
-                startIcon={
-                  <span role="img" aria-label="Watch" style={{ fontSize: 14 }}>
-                    ⌚
-                  </span>
-                }
+                startIcon={<WatchOutlined sx={{ fontSize: 16 }} />}
               >
                 Watch
               </Button>
@@ -1644,7 +1847,6 @@ const DNew_I = () => {
                 display: "flex",
                 flexDirection: "column",
                 gap: 0.5,
-                bgcolor: theme.palette.mode === "dark" ? "#222" : "#f5f5f5",
                 borderRadius: 1,
                 p: 1,
                 boxShadow:
@@ -1655,7 +1857,12 @@ const DNew_I = () => {
             >
               <Typography
                 variant="body2"
-                sx={{ fontWeight: 600, mb: 0.5, fontSize: 13 }}
+                sx={{
+                  fontWeight: 600,
+                  mb: 0.5,
+                  fontSize: 13,
+                  color: (theme) => theme.palette.text.primary,
+                }}
               >
                 Filter by Cost
               </Typography>
@@ -1720,7 +1927,6 @@ const DNew_I = () => {
                 display: "flex",
                 flexDirection: "column",
                 gap: 0.5,
-                bgcolor: theme.palette.mode === "dark" ? "#222" : "#f5f5f5",
                 borderRadius: 1,
                 p: 1,
                 boxShadow:
@@ -1731,7 +1937,7 @@ const DNew_I = () => {
             >
               <Typography
                 variant="body2"
-                sx={{ fontWeight: 600, mb: 0.5, fontSize: 13 }}
+                sx={{ fontWeight: 600, mb: 0.5, fontSize: 13, color: (theme) => theme.palette.text.primary }}
               >
                 Filter by Brand
               </Typography>
@@ -1778,7 +1984,7 @@ const DNew_I = () => {
             >
               <Typography
                 variant="body2"
-                sx={{ fontWeight: 600, mb: 0.5, fontSize: 13 }}
+                sx={{ fontWeight: 600, mb: 0.5, fontSize: 13, color: (theme) => theme.palette.text.primary }}
               >
                 Filter by Group
               </Typography>
@@ -1815,7 +2021,7 @@ const DNew_I = () => {
             {/* Reset Filter Button */}
             <Button
               variant="contained"
-              color="primary"
+              
               size="small"
               sx={{
                 mt: 2,
@@ -1833,6 +2039,8 @@ const DNew_I = () => {
                 setSearch("");
                 setBrandFilter("");
                 setGeneralCommentFilter("");
+                setCurrencyFilter("");
+                setCategoryFilter("");
               }}
             >
               Reset Filter
@@ -1865,14 +2073,15 @@ const DNew_I = () => {
           <Box
             sx={{
               display: "grid",
-              gridTemplateColumns: "1fr",
+              gridTemplateColumns: { xs: "1fr", md: "repeat(2, minmax(0, 1fr))" },
+              gap: 1.5,
             }}
           >
             {loading ? (
               <Box sx={{ gridColumn: "1/-1", textAlign: "center", py: 6 }}>
                 <Typography
                   variant="h6"
-                  color="text.secondary"
+                  
                   sx={{
                     display: "flex",
                     flexDirection: "column",
@@ -1881,7 +2090,7 @@ const DNew_I = () => {
                   }}
                 >
                   <CircularProgress
-                    color="inherit"
+                    
                     size={36}
                     thickness={4}
                     sx={{ mb: 2 }}
@@ -1891,6 +2100,24 @@ const DNew_I = () => {
               </Box>
             ) : (
               <>
+                <Box sx={{ gridColumn: "1/-1", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 0.75, mb: 1 }}>
+                  {goldPrice > 0 && (
+                    <>
+                      <Chip size="small" label={`${goldPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} sx={{ fontWeight: 800, '& .MuiChip-label': { fontSize: 12 } }} />
+                      <Chip size="small" label={`18K: $${perGram18USD.toFixed(2)}/g`} sx={{ '& .MuiChip-label': { fontSize: 12 } }} />
+                      <Chip size="small" label={`21K: $${perGram21USD.toFixed(2)}/g`} sx={{ '& .MuiChip-label': { fontSize: 12 } }} />
+                      <Chip size="small" label={`24K: $${perGram24USD.toFixed(2)}/g`} sx={{ '& .MuiChip-label': { fontSize: 12 } }} />
+                    </>
+                  )}
+                </Box>
+                <Box sx={{ gridColumn: "1/-1", display: "flex", flexWrap: "wrap", gap: 1, mb: 1 }}>
+                  <Button size="small" variant={goldKaratFilter === "all" && goldKindFilter === "all" ? "contained" : "outlined"} onClick={() => { setGoldKaratFilter("all"); setGoldKindFilter("all"); }}>All Types</Button>
+                  <Button size="small" variant={goldKindFilter === "crashed" ? "contained" : "outlined"} onClick={() => { setGoldKindFilter("crashed"); setGoldKaratFilter("all"); }}>Crashed Gold</Button>
+                  <Button size="small" variant={goldKaratFilter === "18" ? "contained" : "outlined"} onClick={() => { setGoldKaratFilter("18"); setGoldKindFilter("all"); }}>18K</Button>
+                  <Button size="small" variant={goldKaratFilter === "21" ? "contained" : "outlined"} onClick={() => { setGoldKaratFilter("21"); setGoldKindFilter("all"); }}>21K</Button>
+                  <Button size="small" variant={goldKaratFilter === "24" ? "contained" : "outlined"} onClick={() => { setGoldKaratFilter("24"); setGoldKindFilter("all"); }}>24K</Button>
+                  <Button size="small" variant={goldKindFilter === "used" ? "contained" : "outlined"} onClick={() => { setGoldKindFilter("used"); setGoldKaratFilter("all"); }}>Used Gold</Button>
+                </Box>
                 {paginatedData
                   .filter((row) => !hiddenIds.includes(row.id_fact))
                   .map((row) => (
@@ -1899,14 +2126,24 @@ const DNew_I = () => {
                       sx={{
                         borderRadius: 2,
                         pr: 2,
+                        pl: 1.5,
+                        py: 1.5,
                         display: "flex",
                         flexDirection: "row",
                         minHeight: 200,
-                        border: "1px solid #e0e0e0",
+                        border: "1px solid #eaeaea",
+                        bgcolor: (theme) =>
+                          theme.palette.mode === "dark" ? "#1f1f1f" : "#f7f7f7",
+                        boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
                         alignItems: "center",
-                        justifyContent: "flex-start",
-                        gap: 1,
-                        mb: 1,
+                        justifyContent: "space-between",
+                        gap: 1.5,
+                        mb: 1.5,
+                        transition: "box-shadow 0.2s ease, transform 0.1s ease",
+                        "&:hover": {
+                          boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+                          transform: "translateY(-1px)",
+                        },
                       }}
                     >
                       <Box
@@ -1923,12 +2160,7 @@ const DNew_I = () => {
                         }}
                       >
                         {(() => {
-                          // Get brand name for this row
-                          const brandName = getBrandName(row).toLowerCase();
-                          if (brandName.includes("group")) {
-                            // Do not show image for brands containing 'group'
-                            return null;
-                          }
+                          // Show image normally
                           let dp: any = row.DistributionPurchase;
                           let diamond: any = undefined;
                           let watch: any = undefined;
@@ -1954,10 +2186,6 @@ const DNew_I = () => {
                               <Box
                                 component="img"
                                 src={(() => {
-                                  // Hide image if brand name contains 'group'
-                                  const brandName =
-                                    getBrandName(row).toLowerCase();
-                                  if (brandName.includes("group")) return "";
                                   let url = urls[idx];
                                   if (!url) return "";
                                   if (token && !url.includes("token=")) {
@@ -1982,8 +2210,8 @@ const DNew_I = () => {
                                   cursor: "pointer",
                                 }}
                                 onClick={() => {
-                                  setDialogImageList([urls[idx]]);
-                                  setDialogImageIndex(0);
+                                  setDialogImageList(urls);
+                                  setDialogImageIndex(idx);
                                   setImageDialogOpen(true);
                                 }}
                                 onError={(e) => {
@@ -2019,10 +2247,7 @@ const DNew_I = () => {
                                   let url = urls[idx];
                                   if (!url) return "";
                                   if (token && !url.includes("token=")) {
-                                    url +=
-                                      (url.includes("?") ? "&" : "?") +
-                                      "token=" +
-                                      encodeURIComponent(token);
+                                    url += (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
                                   }
                                   return url;
                                 })()}
@@ -2080,459 +2305,685 @@ const DNew_I = () => {
                           textAlign: "left",
                         }}
                       >
-                        <Box
-                          sx={{ display: "flex", alignItems: "center", gap: 1 }}
-                        >
-                          <Typography
-                            component="span"
-                            sx={{
-                              color: "warning.main",
-                              fontWeight: "bold",
-                              fontSize: 16,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: 1,
-                            }}
-                          >
-                            {row.Fournisseur?.TYPE_SUPPLIER}
-                          </Typography>
-                          {typeof row.Unite === "string" &&
-                            row.Unite.startsWith("{") &&
-                            row.Unite.endsWith("}") &&
-                            row.Unite.slice(1, -1)
-                              .split(",")
-                              .map((s) => s.trim())
-                              .filter(Boolean).length > 1 && (
-                              <Button
-                                variant="outlined"
-                                color="primary"
-                                size="small"
-                                startIcon={<GroupIcon />}
-                                sx={{
-                                  borderRadius: 2,
-                                  fontWeight: 700,
-                                  minWidth: 0,
-                                  p: 0.5,
-                                  border: "none",
-                                  boxShadow: "none",
-                                }}
-                                onClick={async () => {
-                                  const groupIds =
-                                    typeof row.Unite === "string" &&
-                                    row.Unite.startsWith("{") &&
-                                    row.Unite.endsWith("}")
-                                      ? row.Unite.slice(1, -1)
-                                          .split(",")
-                                          .map((s) => s.trim())
-                                          .filter(Boolean)
-                                      : [];
-                                  const groupItems = data.filter((item) => {
-                                    if (!item.Unite) return false;
-                                    const itemIds =
-                                      typeof item.Unite === "string" &&
-                                      item.Unite.startsWith("{") &&
-                                      item.Unite.endsWith("}")
-                                        ? item.Unite.slice(1, -1)
-                                            .split(",")
-                                            .map((s) => s.trim())
-                                            .filter(Boolean)
-                                        : [];
-                                    return groupIds.some((id) =>
-                                      itemIds.includes(id)
-                                    );
-                                  });
-                                  // Ensure images are loaded for all group items before opening dialog
-                                  await Promise.all(
-                                    groupItems.map(async (item) => {
-                                      if (
-                                        item.id_fact &&
-                                        !imageUrls[item.id_fact]
-                                      ) {
-                                        await fetchImages(
-                                          item.id_fact,
-                                          "diamond"
-                                        );
-                                      }
-                                    })
-                                  );
-                                  // Also ensure group images for the first item (for right column)
-                                  if (
-                                    groupItems.length > 0 &&
-                                    groupItems[0].id_fact &&
-                                    !imageUrls[groupItems[0].id_fact]
-                                  ) {
-                                    await fetchImages(
-                                      groupItems[0].id_fact,
-                                      "diamond"
-                                    );
-                                  }
-                                  setGroupDialogData({
-                                    groupName:
-                                      row.Fournisseur?.client_name || "",
-                                    generalComment: row.General_Comment || "",
-                                    items: groupItems,
-                                  });
-                                  setGroupDialogOpen(true);
-                                }}
-                              >
-                                {row.General_Comment || "بدون تعليق"}
-                              </Button>
-                            )}
-                        </Box>
-                        {/* Group Dialog */}
-                        <GroupDialog
-                          open={groupDialogOpen}
-                          onClose={() => setGroupDialogOpen(false)}
-                          groupName={groupDialogData.groupName}
-                          items={groupDialogData.items}
-                          imageUrls={imageUrls}
-                        />
-
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            whiteSpace: "pre-line",
-                            fontSize: 13,
-                            color: "inherit",
-                            "& b": { color: "text.secondary", fontWeight: 700 },
-                          }}
-                        >
-                          <b>ID:</b> {row.id_fact} | {row.Design_art} |{" "}
-                          <b>Brand:</b> {row.Fournisseur?.client_name}
-                          {row.Fournisseur?.TYPE_SUPPLIER &&
-                            row.Fournisseur.TYPE_SUPPLIER.toLowerCase().includes(
-                              "gold"
-                            ) && (
-                              <>
-                                | <b>Stone:</b> {row.Color_Rush ?? "-"}|{" "}
-                                <b>Color:</b> {row.Color_Gold ?? "-"}
-                                <div
-                                  style={{
-                                    color: "inherit",
-                                    fontWeight: 900,
-                                    marginTop: 2,
-                                    fontSize: 18,
-                                    textAlign: "left",
-                                    width: "100%",
-                                  }}
-                                >
-                                  {row.qty}
-
-                                  <sup style={{ fontSize: 12 }}>/g</sup>
-                                  {" | "}
-                                  {(
-                                    (goldPrice / 31.1035 +
-                                      (goldPrice / 31.1035) *
-                                        ((row.Fournisseur?.Price_G_Gold_Sales ||
-                                          0) /
-                                          100)) *
-                                    (usdToLyd + 2) *
-                                    row.qty
-                                  ).toLocaleString("en-LY", {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                  <sup style={{ fontSize: 12 }}>LYD</sup>
-                                </div>{" "}
-                              </>
-                            )}
-                          {/* Exchange rate today: {(usdToLyd + 2.05).toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}*/}
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
                           {(() => {
-                            let diamond: any = undefined;
                             let dp: any = row.DistributionPurchase;
-                            if (
-                              Array.isArray(dp) &&
-                              dp.length > 0 &&
-                              typeof dp[0] === "object"
-                            ) {
-                              diamond = dp[0]?.OriginalAchatDiamond;
-                            } else if (dp && typeof dp === "object") {
-                              diamond = dp?.OriginalAchatDiamond;
-                            }
-                            if (!diamond) return null;
-                            return (
-                              <>
-                                {diamond.Design_art && ` | `}
-                                <b>Product Name:</b> {diamond.Design_art ?? "-"}
-                                {diamond.carat && ` | `}
-                                <b>Carat:</b> {diamond.carat ?? "-"}
-                                {diamond.cut && ` | `}
-                                <b>Cut:</b> {diamond.cut ?? "-"}
-                                {diamond.color && ` | `}
-                                <b>Color:</b> {diamond.color ?? "-"}
-                                {diamond.clarity && ` | `}
-                                <b>Clarity:</b> {diamond.clarity ?? "-"}
-                                {diamond.shape && ` | `}
-                                <b>Shape:</b> {diamond.shape ?? "-"}
-                                {diamond.measurements && ` | `}
-                                <b>Measurements:</b>{" "}
-                                {diamond.measurements ?? "-"}
-                                {diamond.depth_percent && ` | `}
-                                <b>Depth %:</b> {diamond.depth_percent ?? "-"}
-                                {diamond.table_percent && ` | `}
-                                <b>Table %:</b> {diamond.table_percent ?? "-"}
-                                {diamond.girdle && ` | `}
-                                <b>Girdle:</b> {diamond.girdle ?? "-"}
-                                {diamond.culet && ` | `}
-                                <b>Culet:</b> {diamond.culet ?? "-"}
-                                {diamond.polish && ` | `}
-                                <b>Polish:</b> {diamond.polish ?? "-"}
-                                {diamond.symmetry && ` | `}
-                                <b>Symmetry:</b> {diamond.symmetry ?? "-"}
-                                {diamond.fluorescence && ` | `}
-                                <b>Fluorescence:</b>{" "}
-                                {diamond.fluorescence ?? "-"}
-                                {diamond.certificate_number && ` | `}
-                                <b>Certificate Number:</b>{" "}
-                                {diamond.certificate_number ?? "-"}
-                                {diamond.certificate_lab && ` | `}
-                                <b>Certificate Lab:</b>{" "}
-                                {diamond.certificate_lab ?? "-"}
-                                {diamond.certificate_url && ` | `}
-                                <b>Certificate URL:</b>{" "}
-                                <a
-                                  href={diamond.certificate_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style={{ color: "inherit" }}
-                                >
-                                  Link
-                                </a>
-                                {diamond.laser_inscription && ` | `}
-                                <b>Laser Inscription:</b>{" "}
-                                {diamond.laser_inscription ?? "-"}
-                                {diamond.origin_country && ` | `}
-                                <b>Origin Country:</b>{" "}
-                                {diamond.origin_country ?? "-"}
-                                {diamond.DocumentNo && ` | `}
-                                <b>Document No:</b> {diamond.DocumentNo ?? "-"}
-                                {diamond.CODE_EXTERNAL && ` | `}
-                                <b>External Code:</b>{" "}
-                                {diamond.CODE_EXTERNAL ?? "-"}
-                                {/* Show diamond sale price: prefer sale_price, else SellingPrice (both may be 0) */}
-                                {(() => {
-                                  let show = false;
-                                  let val: any = null;
-                                  if ("sale_price" in diamond) {
-                                    show = true;
-                                    val = diamond.sale_price;
-                                  } else if ("SellingPrice" in diamond) {
-                                    show = true;
-                                    val = diamond.SellingPrice;
-                                  }
-                                  if (!show) return null;
-                                  return (
-                                    <div
-                                      style={{
-                                        color: "inherit",
-                                        fontWeight: 900,
-                                        marginTop: 2,
-                                        fontSize: 18,
-                                      }}
-                                    >
-                                      {val !== undefined && val !== null
-                                        ? Number(val).toLocaleString("en-US", {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          })
-                                        : "-"}
-                                      <sup
-                                        style={{ fontSize: 12, marginLeft: 2 }}
-                                      >
-                                        USD
-                                      </sup>
-                                    </div>
-                                  );
-                                })()}
-                              </>
-                            );
-                          })()}
-                          {(() => {
                             let watch: any = undefined;
-                            let dp: any = row.DistributionPurchase;
-                            if (
-                              Array.isArray(dp) &&
-                              dp.length > 0 &&
-                              typeof dp[0] === "object"
-                            ) {
+                            if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
                               watch = dp[0]?.OriginalAchatWatch;
                             } else if (dp && typeof dp === "object") {
                               watch = dp?.OriginalAchatWatch;
                             }
-                            if (!watch) return null;
+                            if (watch) {
+                              const brand = watch.common_local_brand || row.Fournisseur?.client_name || "";
+                              const model = watch.model || "";
+                              return (
+                                <>
+                                  <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                                    <Typography sx={{ fontWeight: 800, fontSize: 18, color: (theme) => theme.palette.text.primary }}>
+                                      {brand}
+                                    </Typography>
+                                  </Box>
+                                  {model && (
+                                    <Typography sx={{ color: "text.secondary", fontWeight: 500, fontSize: 13 }}>
+                                      {model}
+                                    </Typography>
+                                  )}
+                                  <Typography variant="caption" sx={{ color: (theme) => theme.palette.text.secondary }}>
+                                    ID: {row.id_fact}
+                                  </Typography>
+                                </>
+                              );
+                            }
+                            const name = (row.Design_art || "").toString();
                             return (
                               <>
-                                {/* Render only non-empty fields for watch info */}
+                                <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                                  <Typography sx={{ fontWeight: 800, fontSize: 18, color: (theme) => theme.palette.text.primary }}>
+                                    {name.replace(/diamond\/gold\s*18\s*no/gi, "").trim()}
+                                  </Typography>
+                                </Box>
+                                <Typography sx={{ color: "text.secondary", fontWeight: 500, fontSize: 13 }}>
+                                  by {row.Fournisseur?.client_name || ""}
+                                </Typography>
                                 {(() => {
-                                  const fields = [
-                                    {
-                                      key: "id_achat",
-                                      label: "system Original ref.",
-                                    },
-                                    { key: "reference_number", label: "Ref." },
-                                    {
-                                      key: "serial_number",
-                                      label: "Serial No.",
-                                    },
-                                    { key: "movement", label: "Movement" },
-                                    { key: "caliber", label: "Caliber" },
-                                    { key: "gender", label: "Gender" },
-                                    { key: "condition", label: "Condition" },
-                                    {
-                                      key: "diamond_total_carat",
-                                      label: "Diamond Carat",
-                                    },
-                                    {
-                                      key: "diamond_quality",
-                                      label: "Diamond Quality",
-                                    },
-                                    {
-                                      key: "diamond_setting",
-                                      label: "Diamond Setting",
-                                    },
-                                    {
-                                      key: "number_of_diamonds",
-                                      label: "Diamonds #",
-                                    },
-                                    {
-                                      key: "custom_or_factory",
-                                      label: "Custom/Factory",
-                                    },
-                                    {
-                                      key: "case_material",
-                                      label: "Case Material",
-                                    },
-                                    { key: "case_size", label: "Case Size" },
-                                    { key: "bezel", label: "Bezel" },
-                                    {
-                                      key: "bracelet_type",
-                                      label: "Bracelet Type",
-                                    },
-                                    {
-                                      key: "bracelet_material",
-                                      label: "Bracelet Material",
-                                    },
-                                    { key: "dial_color", label: "Dial Color" },
-                                    { key: "dial_style", label: "Dial Style" },
-                                    { key: "crystal", label: "Crystal" },
-                                    {
-                                      key: "water_resistance",
-                                      label: "Water Resistance",
-                                    },
-                                    { key: "functions", label: "Functions" },
-                                    {
-                                      key: "power_reserve",
-                                      label: "Power Reserve",
-                                    },
-                                    {
-                                      key: "common_local_brand",
-                                      label: "Nickname",
-                                    },
-                                  ];
-                                  return fields.map((f) => {
-                                    const val = watch[f.key];
-                                    if (
-                                      val === undefined ||
-                                      val === null ||
-                                      val === ""
-                                    )
-                                      return null;
-                                    return (
-                                      <span key={f.key}>
-                                        {" "}
-                                        | <b>{f.label}:</b> {val}
-                                      </span>
-                                    );
-                                  });
-                                })()}
-                                {/* Box/Papers special case */}
-                                {typeof watch.box_papers !== "undefined" &&
-                                watch.box_papers !== null ? (
-                                  <>
-                                    {" "}
-                                    | <b>Box/Papers:</b>{" "}
-                                    {watch.box_papers ? "Yes" : "No"}
-                                  </>
-                                ) : null}
-                                {/* Warranty */}
-                                {watch.warranty ? (
-                                  <>
-                                    {" "}
-                                    | <b>Warranty:</b> {watch.warranty}
-                                  </>
-                                ) : null}
-                                {/* Watch sale price: prefer sale_price, else SellingPrice */}
-                                {(() => {
-                                  let show = false;
-                                  let val: any = null;
-                                  if ("sale_price" in watch) {
-                                    show = true;
-                                    val = watch.sale_price;
-                                  } else if ("SellingPrice" in watch) {
-                                    show = true;
-                                    val = watch.SellingPrice;
-                                  }
-                                  if (!show) return null;
+                                  const t = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
+                                  if (!t.includes("gold")) return null;
+                                  const karatMatch = String(row.Design_art || "").match(/\b(24|22|21|18|14)\b/);
+                                  const karat = karatMatch ? `${karatMatch[1]}K` : "";
+                                  const weight = typeof row.qty === "number" ? `${row.qty} g` : "";
+                                  if (!karat && !weight) return null;
                                   return (
-                                    <div
-                                      style={{
-                                        color: "inherit",
-                                        fontWeight: 900,
-                                        marginTop: 2,
-                                        fontSize: 18,
-                                      }}
-                                    >
-                                      {val !== undefined && val !== null
-                                        ? Number(val).toLocaleString("en-US", {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                          })
-                                        : "-"}
-                                      <sup
-                                        style={{ fontSize: 12, marginLeft: 2 }}
-                                      >
-                                        USD
-                                      </sup>
-                                    </div>
+                                    <Typography variant="caption" sx={{ color: "text.secondary", display: "block" }}>
+                                      {karat && `Karat: ${karat}`}
+                                      {karat && weight ? " • " : ""}
+                                      {weight && `Weight: ${weight}`}
+                                    </Typography>
                                   );
                                 })()}
                               </>
                             );
                           })()}
-                        </Typography>
-                        <Button
-                          variant="contained"
-                          color="warning"
-                          size="small"
-                          sx={{
-                            mt: 2,
-                            fontWeight: 700,
-                            borderRadius: 2,
-                            alignSelf: "flex-end",
-                          }}
-                          onClick={() => handleSave(row)}
-                          disabled={
-                            addToCartLoading[row.id_fact] ||
-                            datainv.some((item) => item.id_art === row.id_fact)
+                          <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+                            {(() => {
+                              const t = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
+                              // Gold: show weight chip
+                              if (t.includes("gold")) {
+                                return (
+                                  <>
+                                    {row.Color_Gold && (() => {
+                                      const raw = String(row.Color_Gold || "").trim();
+                                      const parts = raw.split(/[,\/\-\s]+/).filter(Boolean);
+                                      const filtered = parts.filter((p) => !/^white$/i.test(p));
+                                      const multi = /multi/i.test(raw);
+                                      const hasGoldRaw = /gold/i.test(raw);
+                                      const pick = (filtered[0] || parts[0] || raw);
+                                      const normalized = pick.toLowerCase();
+                                      const display = (multi && hasGoldRaw)
+                                        ? "Gold/Multi"
+                                        : (/white/i.test(raw) && filtered.length === 0 ? "White Gold"
+                                          : normalized.includes("yellow") ? "Yellow Gold"
+                                          : (normalized.includes("rose") || normalized.includes("pink")) ? "Rose Gold"
+                                          : normalized.includes("gold") ? "Gold" : pick);
+                                      let sxStyle: any = {};
+                                      if (multi && hasGoldRaw) {
+                                        sxStyle = { background: "linear-gradient(90deg, #D4AF37 0%, #D4AF37 50%, #f44336 50%, #ff9800 62.5%, #ffeb3b 75%, #4caf50 87.5%, #2196f3 100%)", color: "#111" };
+                                      } else if (multi) {
+                                        sxStyle = { background: "linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #3f51b5, #9c27b0)", color: "#111" };
+                                      } else {
+                                        let bg = "#eee"; let fg = "#111";
+                                        if (normalized.includes("white")) { bg = "#C0C0C0"; fg = "#111"; }
+                                        else if (normalized.includes("yellow")) { bg = "#f5d061"; fg = "#111"; }
+                                        else if (normalized.includes("rose") || normalized.includes("pink")) { bg = "#ECC5C0"; fg = "#111"; }
+                                        else if (normalized.includes("gold")) { bg = "#D4AF37"; fg = "#111"; }
+                                        sxStyle = { bgcolor: bg, color: fg };
+                                      }
+                                      return (
+                                        <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16 }} />} label={`Color: ${display}`} sx={{ ...sxStyle }} />
+                                      );
+                                    })()}
+                                    {typeof row.qty === "number" && row.qty > 0 && (
+                                      <Chip
+                                        size="small"
+                                        variant="outlined"
+                                        icon={<Straighten sx={{ fontSize: 16 }} />}
+                                        label={`Weight: ${row.qty} g${(() => {
+                                          const m = String(row.Design_art || "").match(/\b(24|22|21|18|14)\b/);
+                                          return m ? ` • ${m[1]}K` : "";
+                                        })()}`}
+                                        sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })}
+                                      />
+                                    )}
+                                  </>
+                                );
+                              }
+                              // Diamond: show cut, clarity, color chips
+                              if (t.includes("diamond")) {
+                                let dp: any = row.DistributionPurchase;
+                                let diamond: any;
+                                if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                                  diamond = dp[0]?.OriginalAchatDiamond;
+                                } else if (dp && typeof dp === "object") {
+                                  diamond = dp?.OriginalAchatDiamond;
+                                }
+                                if (!diamond) return null;
+                                return (
+                                  <>
+                                    {diamond.cut && (
+                                      <Chip size="small" variant="outlined" icon={<ContentCutOutlined sx={{ fontSize: 16 }} />} label={`Cut: ${diamond.cut}`} />
+                                    )}
+                                    {diamond.clarity && (
+                                      <Chip size="small" variant="outlined" icon={<AllOutOutlined sx={{ fontSize: 16 }} />} label={`Clarity: ${diamond.clarity}`} />
+                                    )}
+                                    {diamond.color && (() => {
+                                      const raw = String(diamond.color || "").trim();
+                                      const parts = raw.split(/[,/\-\s]+/).filter(Boolean);
+                                      const filtered = parts.filter((p) => !/^white$/i.test(p));
+                                      const multi = /multi/i.test(raw);
+                                      const hasGoldRaw = /gold/i.test(raw);
+                                      const twoColors = !multi && filtered.length === 2;
+                                      const display = multi ? (hasGoldRaw ? "Gold/Multi" : "Multi") : (twoColors ? filtered.join("/") : (filtered[0] || parts[0] || raw));
+                                      const toHex = (name: string) => colorHex(name);
+                                      let sxStyle: any = {};
+                                      if (multi && hasGoldRaw) {
+                                        sxStyle = { background: "linear-gradient(90deg, #D4AF37 0%, #D4AF37 50%, #f44336 50%, #ff9800 62.5%, #ffeb3b 75%, #4caf50 87.5%, #2196f3 100%)", color: "#111" };
+                                      } else if (multi) {
+                                        sxStyle = { background: "linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #3f51b5, #9c27b0)", color: "#111" };
+                                      } else if (twoColors) {
+                                        const c1 = toHex(filtered[0]);
+                                        const c2 = toHex(filtered[1]);
+                                        sxStyle = { background: `linear-gradient(90deg, ${c1} 0%, ${c1} 50%, ${c2} 50%, ${c2} 100%)`, color: "#111" };
+                                      } else {
+                                        const bg = toHex(display);
+                                        const fg = bg === "#212121" ? "#fff" : "#111";
+                                        sxStyle = { bgcolor: bg, color: fg };
+                                      }
+                                      return (
+                                        <>
+                                          <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16 }} />} label={`Color: ${display}`} sx={sxStyle} />
+                                          <Chip size="small" variant="outlined" label={`ID: ${row.id_fact}`} sx={(theme) => ({ borderColor: theme.palette.divider, ml: 0.5 })} />
+                                        </>
+                                      );
+                                    })()}
+                                  </>
+                                );
+                              }
+                              // Watch: show case size chip (brand/model already shown above)
+                              if (t.includes("watch")) {
+                                let dp: any = row.DistributionPurchase;
+                                let watch: any;
+                                if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                                  watch = dp[0]?.OriginalAchatWatch;
+                                } else if (dp && typeof dp === "object") {
+                                  watch = dp?.OriginalAchatWatch;
+                                }
+                                if (!watch) return null;
+                                return (
+                                  <>
+                                    {watch.case_size && (
+                                      <Chip size="small" variant="outlined" icon={<Straighten sx={{ fontSize: 16 }} />} label={`Case: ${watch.case_size}`} />
+                                    )}
+                                    {watch.dial_color && (() => {
+                                      const raw = String(watch.dial_color || "").trim();
+                                      const parts = raw.split(/[,/\-\s]+/).filter(Boolean);
+                                      const filtered = parts.filter((p) => !/^white$/i.test(p));
+                                      const multi = /multi/i.test(raw);
+                                      const hasGoldRaw = /gold/i.test(raw);
+                                      const twoColors = !multi && filtered.length === 2;
+                                      const display = twoColors ? filtered.join("/") : (filtered[0] || parts[0] || raw);
+                                      const toHex = (name: string) => colorHex(name);
+                                      let sxStyle: any = {};
+                                      if (multi && hasGoldRaw) {
+                                        sxStyle = { background: "linear-gradient(90deg, #D4AF37 0%, #D4AF37 50%, #f44336 50%, #ff9800 62.5%, #ffeb3b 75%, #4caf50 87.5%, #2196f3 100%)", color: "#111" };
+                                      } else if (multi) {
+                                        sxStyle = { background: "linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #3f51b5, #9c27b0)", color: "#111" };
+                                      } else if (twoColors) {
+                                        const c1 = toHex(filtered[0]);
+                                        const c2 = toHex(filtered[1]);
+                                        sxStyle = { background: `linear-gradient(90deg, ${c1} 0%, ${c1} 50%, ${c2} 50%, ${c2} 100%)`, color: "#111" };
+                                      } else {
+                                        const bg = toHex(display);
+                                        const fg = bg === "#212121" ? "#fff" : "#111";
+                                        sxStyle = { bgcolor: bg, color: fg };
+                                      }
+                                      return (
+                                        <>
+                                          <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16 }} />} label={`Color: ${display}`} sx={{ ...sxStyle, ml: 0.5 }} />
+                                          <Chip size="small" variant="outlined" label={`ID: ${row.id_fact}`} sx={(theme) => ({ borderColor: theme.palette.divider, ml: 0.5 })} />
+                                        </>
+                                      );
+                                    })()}
+                                  </>
+                                );
+                              }
+                              // Supplier and Group chips
+                              return (
+                                <>
+                                  <Chip
+                                    size="small"
+                                    variant="outlined"
+                                    label={`ID: ${row.id_fact}`}
+                                    sx={(theme) => ({
+                                      bgcolor: "transparent",
+                                      borderColor: theme.palette.divider,
+                                      color: theme.palette.text.secondary,
+                                      "& .MuiChip-label": { fontSize: 12 },
+                                    })}
+                                  />
+                                  {row.Fournisseur?.client_name && (
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      icon={<LinkOutlined sx={{ fontSize: 16 }} />}
+                                      label={`Supplier: ${row.Fournisseur.client_name}`}
+                                      sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })}
+                                    />
+                                  )}
+                                  {row.General_Comment && (
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      icon={<GroupIcon sx={{ fontSize: 16 }} />}
+                                      label={`Group: ${row.General_Comment}`}
+                                      sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })}
+                                    />
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </Box>
+                        </Box>
+                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                          <IconButton
+                            size="small"
+                            onClick={() =>
+                              setExpandedMap((prev) => ({
+                                ...prev,
+                                [row.id_fact]: !prev[row.id_fact],
+                              }))
+                            }
+                            aria-label="toggle-details"
+                          >
+                            <ExpandMore
+                              sx={{
+                                fontSize: 20,
+                                transition: "transform 0.2s",
+                                transform: expandedMap[row.id_fact] ? "rotate(180deg)" : "rotate(0deg)",
+                              }}
+                            />
+                          </IconButton>
+                          <Typography
+                            variant="body2"
+                            sx={{ cursor: "pointer", userSelect: "none", color: (theme) => theme.palette.text.secondary }}
+                            onClick={() =>
+                              setExpandedMap((prev) => ({
+                                ...prev,
+                                [row.id_fact]: !prev[row.id_fact],
+                              }))
+                            }
+                          >
+                            Details
+                          </Typography>
+                        </Box>
+                        <Collapse in={!!expandedMap[row.id_fact]} timeout="auto" unmountOnExit>
+                          <Box
+                            sx={(theme) => ({
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: 0.75,
+                              rowGap: 0.75,
+                              alignItems: "center",
+                              fontSize: 13,
+                              color: theme.palette.text.secondary,
+                              mt: 0.5,
+                            })}
+                          >
+                            <Chip size="small" variant="outlined" label={`ID: ${row.id_fact}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary, "& .MuiChip-label": { fontSize: 12 } })} />
+                            {row.Fournisseur?.client_name && (
+                              <Chip size="small" variant="outlined" icon={<LinkOutlined sx={{ fontSize: 16 }} />} label={`Supplier: ${row.Fournisseur.client_name}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                            )}
+                            {row.General_Comment && (
+                              <Chip size="small" variant="outlined" icon={<GroupIcon sx={{ fontSize: 16 }} />} label={`Group: ${row.General_Comment}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                            )}
+
+                            {/* Gold details */}
+                            {row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes("gold") && (
+                              <>
+                                {row.Color_Rush && (() => {
+                                  const bg = colorHex(String(row.Color_Rush));
+                                  const lower = bg.toLowerCase();
+                                  const fg = (lower === '#000000' || lower === '#212121' || lower === '#353839') ? '#fff' : '#111';
+                                  return (
+                                    <Chip size="small" variant="filled" icon={<DiamondOutlined sx={{ fontSize: 16 }} />} label={`Stone: ${row.Color_Rush}`} sx={{ bgcolor: bg, color: fg }} />
+                                  );
+                                })()}
+                                {row.Color_Gold && (() => {
+                                  const raw = String(row.Color_Gold || "").trim();
+                                  const parts = raw.split(/[,\/\-\s]+/).filter(Boolean);
+                                  const filtered = parts.filter((p) => !/^white$/i.test(p));
+                                  const multi = /multi/i.test(raw);
+                                  const hasGoldRaw = /gold/i.test(raw);
+                                  const pick = (filtered[0] || parts[0] || raw);
+                                  const normalized = pick.toLowerCase();
+                                  const display = multi && hasGoldRaw
+                                    ? "Gold/Multi"
+                                    : (/white/i.test(raw) && !filtered.length ? "White Gold"
+                                      : normalized.includes("yellow") ? "Yellow Gold"
+                                      : (normalized.includes("rose") || normalized.includes("pink")) ? "Rose Gold"
+                                      : normalized.includes("gold") ? "Gold" : (multi ? "Multi" : pick));
+                                  if (multi && hasGoldRaw) {
+                                    return (
+                                      <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16, color: "white" }} />} label={`Color: ${display}`} sx={{ background: "linear-gradient(90deg, #D4AF37 0%, #D4AF37 50%, #f44336 50%, #ff9800 62.5%, #ffeb3b 75%, #4caf50 87.5%, #2196f3 100%)", color: "#111" }} />
+                                    );
+                                  } else if (multi) {
+                                    return (
+                                      <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16 }} />} label={`Color: ${display}`} sx={{ background: "linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #3f51b5, #9c27b0)", color: "#111" }} />
+                                    );
+                                  }
+                                  let bg = "#eee"; let fg = "#111";
+                                  if (normalized.includes("white")) { bg = "#C0C0C0"; fg = "#111"; }
+                                  else if (normalized.includes("yellow")) { bg = "#f5d061"; fg = "#111"; }
+                                  else if (normalized.includes("rose") || normalized.includes("pink")) { bg = "#ECC5C0"; fg = "#111"; }
+                                  else if (normalized.includes("gold")) { bg = "#D4AF37"; fg = "#111"; }
+                                  return (
+                                    <Chip size="small" variant="filled" icon={<PaletteOutlined sx={{ fontSize: 16 }} />} label={`Color: ${display}`} sx={{ bgcolor: bg, color: fg }} />
+                                  );
+                                })()}
+                              {typeof row.qty === "number" && row.qty > 0 && (
+                                <Chip size="small" variant="outlined" icon={<Straighten sx={{ fontSize: 16 }} />} label={`Weight: ${row.qty} g`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                              )}
+                              {/* Weight and total summary */}
+                              <Typography sx={{ fontWeight: 700, mt: 0.5, color: (theme) => theme.palette.text.primary }}>
+                                  {`${(row.qty ?? 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}/g`} {" | "}
+                                  {(() => {
+                                    const total = (
+                                      (goldPrice / 31.1035 + (goldPrice / 31.1035) * (((row as any).Fournisseur?.Price_G_Gold_Sales) || 0) / 100)) *
+                                      (usdToLyd + 2) *
+                                      (row.qty || 0);
+                                    return `${total.toLocaleString("en-LY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} LYD`;
+                                  })()}
+                                </Typography>
+                              </>
+                            )}
+
+                            {/* Diamond details */}
+                            {(() => {
+                              let diamond: any = undefined;
+                              let dp: any = row.DistributionPurchase;
+                              if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                                diamond = dp[0]?.OriginalAchatDiamond;
+                              } else if (dp && typeof dp === "object") {
+                                diamond = dp?.OriginalAchatDiamond;
+                              }
+                              if (!diamond) return null;
+                              const dFields = [
+                                { key: "Design_art", label: "Product Name", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "carat", label: "Carat", icon: <DiamondOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "cut", label: "Cut", icon: <ContentCutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "color", label: "Color", icon: <PaletteOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "clarity", label: "Clarity", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "shape", label: "Shape", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "measurements", label: "Measurements", icon: <Straighten sx={{ fontSize: 16 }} /> },
+                                { key: "depth_percent", label: "Depth %", icon: <Straighten sx={{ fontSize: 16 }} /> },
+                                { key: "table_percent", label: "Table %", icon: <Straighten sx={{ fontSize: 16 }} /> },
+                                { key: "girdle", label: "Girdle", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "culet", label: "Culet", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "polish", label: "Polish", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "symmetry", label: "Symmetry", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "fluorescence", label: "Fluorescence", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "certificate_number", label: "Cert #", icon: <QrCode2Outlined sx={{ fontSize: 16 }} /> },
+                                { key: "certificate_lab", label: "Lab", icon: <AssignmentTurnedInOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "laser_inscription", label: "Laser Inscription", icon: <QrCode2Outlined sx={{ fontSize: 16 }} /> },
+                                { key: "origin_country", label: "Origin Country", icon: <AllOutOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "document_no", label: "Document No", icon: <AssignmentTurnedInOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "external_code", label: "External Code", icon: <AssignmentTurnedInOutlined sx={{ fontSize: 16 }} /> },
+                              ];
+                              return (
+                                <>
+                                  {/* Brand chip */}
+                                  {(() => {
+                                    const brand = (getBrandName ? getBrandName(row) : (row.Fournisseur?.client_name || ""));
+                                    return brand ? (
+                                      <Chip size="small" variant="outlined" label={`Brand: ${brand}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                    ) : null;
+                                  })()}
+                                  {dFields.map((f) => {
+                                    const val = diamond[f.key as keyof typeof diamond] as any;
+                                    if (val === undefined || val === null || val === "") return null;
+                                    const isColor = f.key === "color";
+                                    let bg = "transparent" as string;
+                                    let fg = undefined as string | undefined;
+                                    let customStyle: any = undefined;
+                                    if (isColor) {
+                                      const raw = String(val).trim();
+                                      const parts = raw.split(/[,\/\-\s]+/).filter(Boolean);
+                                      const filtered = parts.filter((p) => !/^white$/i.test(p));
+                                      const multi = /multi/i.test(raw);
+                                      const hasGoldRaw = /gold/i.test(raw);
+                                      const twoColors = !multi && filtered.length === 2;
+                                      const toHex = (name: string) => {
+                                        const n = name.toLowerCase();
+                                        if (/(zum|zumr|zumor|zumur|zamar|zamr|zumrr|zumurr)/.test(n)) return "#50C878"; // emerald
+                                        if (n.includes("sapph") || n.includes("saphir")) return "#0F52BA"; // sapphire
+                                        if (n.includes("gold")) return "#b7a27d";
+                                        if (n.includes("amethyst")) return "#9966cc";
+                                        if (n.includes("opal")) return "#cfd8dc";
+                                        if (n.includes("turq") || n.includes("turqu")) return "#40E0D0";
+                                        if (n.includes("yellow")) return "#f5d061";
+                                        if (n.includes("rose") || n.includes("pink")) return "#ECC5C0";
+                                        if (n.includes("white") || n.includes("silver")) return "#C0C0C0";
+                                        if (n.includes("black")) return "#212121";
+                                        if (n.includes("blue")) return "#90caf9";
+                                        if (n.includes("green")) return "#a5d6a7";
+                                        if (n.includes("red")) return "#ef9a9a";
+                                        if (n.includes("brown") || n.includes("champagne")) return "#d7ccc8";
+                                        if (n.includes("orange")) return "#ffcc80";
+                                        if (n.includes("purple")) return "#ce93d8";
+                                        return "#eee";
+                                      };
+                                      if (multi && hasGoldRaw) {
+                                        customStyle = { background: "linear-gradient(90deg, #D4AF37 0%, #D4AF37 50%, #f44336 50%, #ff9800 62.5%, #ffeb3b 75%, #4caf50 87.5%, #2196f3 100%)", color: "#111" };
+                                      } else if (multi) {
+                                        customStyle = { background: "linear-gradient(90deg, #f44336, #ff9800, #ffeb3b, #4caf50, #2196f3, #3f51b5, #9c27b0)", color: "#111" };
+                                      } else if (twoColors) {
+                                        const c1 = toHex(filtered[0]);
+                                        const c2 = toHex(filtered[1]);
+                                        customStyle = { background: `linear-gradient(90deg, ${c1} 0%, ${c1} 50%, ${c2} 50%, ${c2} 100%)`, color: "#111" };
+                                      } else {
+                                        bg = toHex(filtered[0] || parts[0] || raw);
+                                        fg = bg === "#212121" ? "#fff" : "#111";
+                                      }
+                                    }
+                                    return (
+                                      <Chip
+                                        key={`d-${String(f.key)}`}
+                                        size="small"
+                                        variant={isColor ? "filled" : "outlined"}
+                                        icon={f.icon as any}
+                                        label={`${f.label}: ${val}`}
+                                        sx={(theme) => ({ borderColor: theme.palette.divider, ...(customStyle ? customStyle : { bgcolor: bg, color: isColor ? fg : theme.palette.text.secondary }) })}
+                                      />
+                                    );
+                                  })}
+                                  {diamond.certificate_url && (
+                                    <Chip
+                                      size="small"
+                                      variant="outlined"
+                                      icon={<LinkOutlined sx={{ fontSize: 16 }} />}
+                                      label={
+                                        <a href={String(diamond.certificate_url)} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>
+                                          Certificate URL
+                                        </a>
+                                      }
+                                      sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })}
+                                    />
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            {/* Watch details */}
+                            {(() => {
+                              let watch: any = undefined;
+                              let dp: any = row.DistributionPurchase;
+                              if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                                watch = dp[0]?.OriginalAchatWatch;
+                              } else if (dp && typeof dp === "object") {
+                                watch = dp?.OriginalAchatWatch;
+                              }
+                              if (!watch) return null;
+                              const wFields = [
+                                { key: "reference_number", label: "Ref.", icon: <QrCode2Outlined sx={{ fontSize: 16 }} /> },
+                                { key: "serial_number", label: "Serial", icon: <QrCode2Outlined sx={{ fontSize: 16 }} /> },
+                                { key: "movement", label: "Movement", icon: <BuildOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "caliber", label: "Caliber", icon: <PrecisionManufacturingOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "case_material", label: "Case", icon: <Inventory2Outlined sx={{ fontSize: 16 }} /> },
+                                { key: "case_size", label: "Case Size", icon: <Straighten sx={{ fontSize: 16 }} /> },
+                                { key: "bracelet_type", label: "Bracelet", icon: <WatchOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "dial_color", label: "Dial", icon: <PaletteOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "water_resistance", label: "WR", icon: <WaterDropOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "warranty", label: "Warranty", icon: <VerifiedUserOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "gender", label: "Gender", icon: <VerifiedUserOutlined sx={{ fontSize: 16 }} /> },
+                                { key: "condition", label: "Condition", icon: <VerifiedUserOutlined sx={{ fontSize: 16 }} /> },
+                              ];
+                              return (
+                                <>
+                                  {/* Brand / Model */}
+                                  {(watch.common_local_brand || watch.model) && (
+                                    <>
+                                      {watch.common_local_brand && (
+                                        <Chip size="small" variant="outlined" label={`Brand: ${watch.common_local_brand}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                      )}
+                                      {watch.model && (
+                                        <Chip size="small" variant="outlined" label={`Model: ${watch.model}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                      )}
+                                    </>
+                                  )}
+                                  {wFields.map((f) => {
+                                    const val = watch[f.key as keyof typeof watch] as any;
+                                    if (val === undefined || val === null || val === "") return null;
+                                    return (
+                                      <Chip key={`w-${String(f.key)}`} size="small" variant="outlined" icon={f.icon as any} label={`${f.label}: ${val}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                    );
+                                  })}
+                                  {/* Optional system/original ref fields */}
+                                  {watch.system_original_ref && (
+                                    <Chip size="small" variant="outlined" label={`System Original Ref.: ${watch.system_original_ref}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                  )}
+                                  {watch.original_ref && (
+                                    <Chip size="small" variant="outlined" label={`Original Ref.: ${watch.original_ref}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                  )}
+                                  {watch.original_reference && (
+                                    <Chip size="small" variant="outlined" label={`Original Ref.: ${watch.original_reference}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                  )}
+                                  {typeof watch.box_papers !== "undefined" && watch.box_papers !== null && (
+                                    <Chip size="small" variant="outlined" icon={<AssignmentTurnedInOutlined sx={{ fontSize: 16 }} />} label={`Box/Papers: ${watch.box_papers ? "Yes" : "No"}`} sx={(theme) => ({ borderColor: theme.palette.divider, color: theme.palette.text.secondary })} />
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </Box>
+                        </Collapse>
+                        {/* Prominent price above Add to cart */}
+                        {/* End of details: thumbnails gallery */}
+                        {(() => {
+                          // Try to resolve images for diamond or watch
+                          let dp: any = row.DistributionPurchase;
+                          let diamond: any = undefined;
+                          let watch: any = undefined;
+                          if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                            diamond = dp[0]?.OriginalAchatDiamond;
+                            watch = dp[0]?.OriginalAchatWatch;
+                          } else if (dp && typeof dp === "object") {
+                            diamond = dp?.OriginalAchatDiamond;
+                            watch = dp?.OriginalAchatWatch;
                           }
-                          startIcon={
-                            addToCartLoading[row.id_fact] ? (
-                              <CircularProgress size={18} color="inherit" />
-                            ) : null
+                          const obj = diamond || watch;
+                          if (!obj) return null;
+                          const imageKeyStr = String(obj.id_achat || "");
+                          const urls = imageUrls[imageKeyStr] || [];
+                          if (!urls.length) return null;
+                          const token = localStorage.getItem("token");
+                          return (
+                            <Box sx={{ display: "flex", gap: 0.5, mt: 1, flexWrap: "wrap" }}>
+                              {urls.slice(0, 8).map((u, idx) => {
+                                let src = u || "";
+                                if (src && token && !src.includes("token=")) {
+                                  src += (src.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+                                }
+                                return (
+                                  <Box
+                                    key={`${imageKeyStr}-${idx}`}
+                                    component="img"
+                                    src={src}
+                                    alt={`Thumb ${idx + 1}`}
+                                    loading="lazy"
+                                    sx={(theme) => ({
+                                      width: 56,
+                                      height: 56,
+                                      objectFit: "cover",
+                                      borderRadius: 1,
+                                      border: `1px solid ${theme.palette.divider}`,
+                                      cursor: "pointer",
+                                      background: "inherit",
+                                    })}
+                                    onClick={() => {
+                                      setDialogImageList(urls);
+                                      setDialogImageIndex(idx);
+                                      setImageDialogOpen(true);
+                                    }}
+                                    onError={(e) => {
+                                      e.currentTarget.onerror = null;
+                                      e.currentTarget.src = "/default-image.png";
+                                    }}
+                                  />
+                                );
+                              })}
+                            </Box>
+                          );
+                        })()}
+                        {(() => {
+                          const t = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
+                          let price = 0;
+                          let currency = "USD";
+                          if (t.includes("diamond") || t.includes("watch")) {
+                            let dp: any = row.DistributionPurchase;
+                            let obj: any = undefined;
+                            if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                              obj = t.includes("diamond") ? dp[0]?.OriginalAchatDiamond : dp[0]?.OriginalAchatWatch;
+                            } else if (dp && typeof dp === "object") {
+                              obj = t.includes("diamond") ? dp?.OriginalAchatDiamond : dp?.OriginalAchatWatch;
+                            }
+                            if (obj) {
+                              if (typeof obj.sale_price === "number") price = obj.sale_price;
+                              else if (typeof obj.SellingPrice === "number") price = obj.SellingPrice;
+                            }
+                          } else if (t.includes("gold")) {
+                            currency = "LYD";
+                            price =
+                              (goldPrice / 31.1035 +
+                                (goldPrice / 31.1035) * (((row as any).Fournisseur?.Price_G_Gold_Sales) || 0) / 100) *
+                              (usdToLyd + 2) *
+                              (row.qty || 0);
                           }
-                        >
-                          {addToCartLoading[row.id_fact]
-                            ? "Adding..."
-                            : datainv.some(
-                                  (item) => item.id_art === row.id_fact
-                                )
-                              ? "In Cart"
-                              : "Add to cart"}
-                        </Button>
+                          return (
+                            <Typography
+                              variant="body2"
+                              sx={{ color: "#68a5bf", fontWeight: 900, fontSize: 18, alignSelf: "flex-end" }}
+                            >
+                              {price > 0
+                                ? `${price.toLocaleString(currency === "LYD" ? "en-LY" : "en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`
+                                : "-"}
+                            </Typography>
+                          );
+                        })()}
+                        <Box sx={{ mt: 2, display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                          {isAdminRole ? (
+                            <Button
+                              variant="outlined"
+                              color="info"
+                              size="small"
+                              onClick={() => handleCOGS(row)}
+                              sx={{ bgcolor: "transparent", borderColor: (theme) => theme.palette.divider }}
+                            >
+                              COGS
+                            </Button>
+                          ) : <Box />}
+                          <Button
+                            variant="contained"
+                            color="warning"
+                            size="small"
+                            sx={{
+                              fontWeight: 700,
+                              borderRadius: 2,
+                              bgcolor: "#ffa41c",
+                              color: (theme) => (theme.palette.mode === "dark" ? "#fff" : "#111"),
+                              "&:hover": { bgcolor: "#f08804" },
+                            }}
+                            onClick={() => handleSave(row)}
+                            disabled={
+                              addToCartLoading[row.id_fact] ||
+                              datainv.some((item) => item.id_art === row.id_fact)
+                            }
+                            startIcon={
+                              addToCartLoading[row.id_fact] ? (
+                                <CircularProgress size={18} />
+                              ) : null
+                            }
+                          >
+                            {addToCartLoading[row.id_fact]
+                              ? "Adding..."
+                              : datainv.some(
+                                    (item) => item.id_art === row.id_fact
+                                  )
+                                ? "In Cart"
+                                : "Add to cart"}
+                          </Button>
+                        </Box>
                       </Box>
                     </Box>
                   ))}
-                {/* Footer: Rows per page selector */}
+              {/* Footer: Rows per page selector */}
                 <Box
                   sx={(theme) => ({
                     display: "flex",
@@ -2545,11 +2996,7 @@ const DNew_I = () => {
                     flexWrap: "wrap",
                     bgcolor: theme.palette.mode === "dark" ? "#222" : "#fafafa",
                     borderRadius: 2,
-                    boxShadow:
-                      theme.palette.mode === "dark"
-                        ? "0 1px 8px rgba(0,0,0,0.25)"
-                        : "0 1px 8px rgba(0,0,0,0.07)",
-                    p: { xs: 1, sm: 2 },
+                    color: theme.palette.mode === "dark" ? "#fff" : "#111",
                   })}
                 >
                   <Typography
@@ -2599,9 +3046,9 @@ const DNew_I = () => {
                           transition: "border 0.2s",
                         }}
                       >
-                        <option value={6}>3</option>
-                        <option value={10}>10</option>
-                        <option value={20}>20</option>
+                        <option value={4}>4</option>
+                        <option value={8}>8</option>
+                        <option value={12}>12</option>
                       </select>
                     </Box>
                     <Box
@@ -2733,11 +3180,11 @@ const DNew_I = () => {
             )}
           </Box>
         </Box>
-        <Box sx={{ width: "15%", minWidth: 200 }}>
+        <Box sx={{ width: "20%", minWidth: 240, position: "sticky", top: 8, alignSelf: "flex-start" }}>
           {/* Right Sidebar - Cart */}
           <Box sx={{ display: "flex", alignItems: "center", mb: 0.5 }}>
-            <Typography variant="h6" sx={{ fontWeight: 700, flex: 1 }}>
-              Cart
+            <Typography variant="h6" sx={{ fontWeight: 700, flex: 1, color: (theme) => theme.palette.text.primary }}>
+              Your Cart
             </Typography>
             <Box
               sx={{
@@ -2746,10 +3193,8 @@ const DNew_I = () => {
                 alignItems: "center",
               }}
             >
-              <Box sx={{ color: "warning.main", fontSize: 28, mr: 0.5 }}>
-                <span role="img" aria-label="cart">
-                  🛒
-                </span>
+              <Box sx={{ color: "warning.main", mr: 0.5 }}>
+                <ShoppingCartOutlined sx={{ fontSize: 28 }} />
               </Box>
               <Box
                 sx={{
@@ -2757,7 +3202,6 @@ const DNew_I = () => {
                   top: -6,
                   right: -6,
                   bgcolor: "error.main",
-                  color: "white",
                   borderRadius: "50%",
                   width: 22,
                   height: 22,
@@ -2789,7 +3233,7 @@ const DNew_I = () => {
           </Button>
           {/* Cart Items List */}
           {datainv.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
+            <Typography variant="body2" >
               No items in cart
             </Typography>
           ) : (
@@ -2806,17 +3250,13 @@ const DNew_I = () => {
                     sx={{
                       mb: 2,
                       p: 1,
-                      border: "1px solid #e0e0e0",
+                      border: "1px solid #eaeaea",
                       borderRadius: 2,
                       display: "flex",
                       alignItems: "center",
                       position: "relative",
-                      ...(item.IS_GIFT && {
-                        bgcolor: "rgba(255, 68, 0, 0.38)",
-                        color: "warning.main",
-                        border: "2px solid",
-                        borderColor: "warning.main",
-                      }),
+                      bgcolor: "background.paper",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
                     }}
                   >
                     {/* Show image if available */}
@@ -2876,54 +3316,109 @@ const DNew_I = () => {
                       })()}
                     </Box>
                     <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2">ID: {item.id_art}</Typography>
-                      {typeSupplier.toLowerCase().includes("gold") && (
-                        <Typography
-                          variant="body2"
-                          sx={{ color: "text.secondary", fontWeight: 500 }}
-                        >
-                          Weight: {item.qty} g
-                        </Typography>
-                      )}
-                      <Box
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          mb: 0.5,
-                        }}
-                      >
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color: "warning.main",
-                            fontWeight: 700,
-                            fontSize: 13,
-                          }}
-                        >
-                          {typeSupplier}
-                        </Typography>
-                        <Typography variant="body2">
-                          {item.IS_GIFT ? (
-                            <span
-                              style={{ color: "orangered", fontWeight: "bold" }}
-                            >
-                              &#127873; Is Gift
-                            </span>
-                          ) : (
-                            "No"
-                          )}
-                        </Typography>
+                      {(() => {
+                        const type = (typeSupplier || "").toLowerCase();
+                        const dp = (achat as any)?.DistributionPurchase;
+                        let watch: any = undefined;
+                        if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                          watch = dp[0]?.OriginalAchatWatch;
+                        } else if (dp && typeof dp === "object") {
+                          watch = dp?.OriginalAchatWatch;
+                        }
+                        if (type.includes("watch") && watch) {
+                          const brand = watch.common_local_brand || achat?.Fournisseur?.client_name || "";
+                          const model = watch.model || "";
+                          return (
+                            <>
+                              <Typography variant="body2" sx={{ fontWeight: 800, color: (theme) => theme.palette.text.primary }}>
+                                {brand}
+                              </Typography>
+                              {model && (
+                                <Typography variant="body2" sx={{ color: "text.secondary", fontWeight: 500 }}>
+                                  {model}
+                                </Typography>
+                              )}
+                              <Typography variant="body2" sx={{ color: (theme) => theme.palette.text.secondary }}>ID: {item.id_art}</Typography>
+                            </>
+                          );
+                        }
+                        const n = (achat?.Design_art || (item as any).Design_art || "").toString();
+                        return (
+                          <>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: (theme) => theme.palette.text.primary }}>
+                              {n.replace(/diamond\/gold\s*18\s*no/gi, "").trim()}
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: (theme) => theme.palette.text.secondary }}>ID: {item.id_art}</Typography>
+                          </>
+                        );
+                      })()}
+                      {(() => {
+                        const dp = (achat as any)?.DistributionPurchase;
+                        let watch: any, diamond: any;
+                        if (Array.isArray(dp) && dp.length > 0) {
+                          watch = dp[0]?.OriginalAchatWatch;
+                          diamond = dp[0]?.OriginalAchatDiamond;
+                        } else if (dp && typeof dp === "object") {
+                          watch = dp?.OriginalAchatWatch;
+                          diamond = dp?.OriginalAchatDiamond;
+                        }
+                        const brand = (watch && (watch.common_local_brand || "")) || achat?.Fournisseur?.client_name || "";
+                        return !watch && brand ? (
+                          <Typography variant="body2" sx={{ color: "text.secondary" }}>by {brand}</Typography>
+                        ) : null;
+                      })()}
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
+                        {(() => {
+                          const dp = (achat as any)?.DistributionPurchase;
+                          let watch: any = undefined;
+                          if (Array.isArray(dp) && dp.length > 0) {
+                            watch = dp[0]?.OriginalAchatWatch;
+                          } else if (dp && typeof dp === "object") {
+                            watch = dp?.OriginalAchatWatch;
+                          }
+                          if (!watch) return null;
+                          return (
+                            <>
+                              {watch.case_size && (
+                                <Chip size="small" variant="outlined" icon={<Straighten sx={{ fontSize: 16 }} />} label={`Case: ${watch.case_size}`} />
+                              )}
+                              {watch.gender && (
+                                <Chip size="small" variant="outlined" label={`Gender: ${watch.gender}`} />
+                              )}
+                            </>
+                          );
+                        })()}
+                        {(() => {
+                          const dp = (achat as any)?.DistributionPurchase;
+                          let diamond: any = undefined;
+                          if (Array.isArray(dp) && dp.length > 0) {
+                            diamond = dp[0]?.OriginalAchatDiamond;
+                          } else if (dp && typeof dp === "object") {
+                            diamond = dp?.OriginalAchatDiamond;
+                          }
+                          if (!diamond) return null;
+                          return (
+                            <>
+                              {diamond.clarity && (
+                                <Chip size="small" variant="outlined" icon={<AllOutOutlined sx={{ fontSize: 16 }} />} label={`Clarity: ${diamond.clarity}`} />
+                              )}
+                              {diamond.cut && (
+                                <Chip size="small" variant="outlined" icon={<ContentCutOutlined sx={{ fontSize: 16 }} />} label={`Cut: ${diamond.cut}`} />
+                              )}
+                            </>
+                          );
+                        })()}
                       </Box>
+                      {typeSupplier.toLowerCase().includes("gold") && (
+                        <Chip label={`Weight: ${item.qty} g`} variant="outlined" sx={{ mt: 0.5 }} />
+                      )}
 
                       <Typography
                         variant="body2"
                         sx={{
                           fontWeight: "bold",
-                          color: typeSupplier.toLowerCase().includes("gold")
-                            ? "goldenrod"
-                            : "deepskyblue",
-                          fontSize: 16,
+                          color: "#68a5bf",
+                          fontSize: 17,
                           letterSpacing: 0.5,
                         }}
                       >
@@ -2933,41 +3428,38 @@ const DNew_I = () => {
                             : `${item.total_remise.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`
                           : "-"}
                       </Typography>
+                      {typeSupplier.toLowerCase().includes("gold") && null}
                     </Box>
                     {/* Delete icon */}
                     <Box
                       sx={{
                         display: "flex",
                         flexDirection: "row",
-                        gap: 1,
+                        gap: 0.5,
                         position: "absolute",
                         top: 4,
                         right: 4,
                       }}
                     >
-                      <Button
+                      <IconButton
                         onClick={() => {
                           setDeleteTargetId(item.id_fact);
                           setDeleteConfirmOpen(true);
                         }}
                         size="small"
-                        sx={{ minWidth: 0, p: 0.5 }}
                         color="error"
+                        aria-label="remove"
                       >
-                        <span role="img" aria-label="delete">
-                          🗑️
-                        </span>
-                      </Button>
-                      <Button
+                        <DeleteOutline fontSize="small" />
+                      </IconButton>
+                      <IconButton
                         size="small"
-                        sx={{ minWidth: 0, p: 0.5 }}
-                        color="error"
+                        
                         onClick={() => handleEditCartItem2(item)}
+                        aria-label="edit"
                       >
-                        <span role="img" aria-label="edit">
-                          ✏️
-                        </span>
-                      </Button>
+                        <EditOutlined fontSize="small" />
+                      </IconButton>
                     </Box>
                   </Box>
                 );
@@ -2990,9 +3482,10 @@ const DNew_I = () => {
                     mb: 0,
                     display: "flex",
                     alignItems: "center",
+                    color: (theme) => theme.palette.text.primary,
                   }}
                 >
-                  Total Amounts
+                  Total
                 </Typography>
               </Box>
               <Box sx={{ mb: 1, p: 1, borderTop: "1px solid #eee" }}>
@@ -3018,19 +3511,7 @@ const DNew_I = () => {
                         })}{" "}
                         LYD
                       </Typography>
-                      <Button
-                        variant="text"
-                        color="primary"
-                        size="small"
-                        startIcon={
-                          <span role="img" aria-label="edit">
-                            ✏️
-                          </span>
-                        }
-                        sx={{ minWidth: 32, p: 0.5, ml: 1, borderRadius: 1 }}
-                        onClick={handleOpenTotalsDialog}
-                        disabled={datainv.length === 0}
-                      ></Button>
+                      
                     </Box>
                   ) : null;
                 })()}
@@ -3057,19 +3538,7 @@ const DNew_I = () => {
                         })}{" "}
                         USD
                       </Typography>
-                      <Button
-                        variant="text"
-                        color="primary"
-                        size="small"
-                        startIcon={
-                          <span role="img" aria-label="edit">
-                            ✏️
-                          </span>
-                        }
-                        sx={{ minWidth: 32, p: 0.5, ml: 1, borderRadius: 1 }}
-                        onClick={handleOpenTotalsDialog}
-                        disabled={datainv.length === 0}
-                      ></Button>
+                     
                     </Box>
                   ) : null;
                 })()}
@@ -3100,27 +3569,21 @@ const DNew_I = () => {
                 })()}
               </Box>
               <Button
-                variant="outlined"
-                color="primary"
+                variant="contained"
                 size="small"
-                sx={{ mt: 1, fontWeight: 700, borderRadius: 2, width: "100%" }}
+                sx={{
+                  mt: 1,
+                  fontWeight: 700,
+                  borderRadius: 2,
+                  width: "100%",
+                  bgcolor: "#ffa41c",
+                  color: (theme) => (theme.palette.mode === "dark" ? "#fff" : "#111"),
+                  "&:hover": { bgcolor: "#f08804" },
+                }}
                 onClick={handleOpenTotalsDialog}
                 disabled={datainv.length === 0}
               >
-                Complete Invoice Details
-              </Button>
-              <Button
-                variant="outlined"
-                color="success"
-                size="small"
-                sx={{ mt: 1, fontWeight: 700, borderRadius: 2, width: "100%" }}
-                onClick={() => {
-                  // Find the latest invoice (assuming it's the last one in datainv)
-                  handleAddNew();
-                }}
-                disabled={datainv.length === 0}
-              >
-                Print Invoice
+                Checkout
               </Button>
               <InvoiceTotalsDialog
                 Type_Supplier={
@@ -3137,6 +3600,20 @@ const DNew_I = () => {
                 editInvoice={editInvoice}
                 setEditInvoice={setEditInvoice}
                 errors={{ client: "" }} // You may want to handle errors statefully
+                onCustomerCreated={async (c) => {
+                  await fetchCustomers();
+                  setEditInvoice((prev) => {
+                    const found = customers.find(
+                      (x) =>
+                        x.tel_client === c.tel_client || x.client_name === c.client_name
+                    );
+                    return {
+                      ...prev,
+                      client: found?.id_client ?? prev.client,
+                      Client: found || prev.Client,
+                    };
+                  });
+                }}
               />
               <Snackbar
                 open={snackbar.open}
@@ -3157,41 +3634,59 @@ const DNew_I = () => {
                   {snackbar.message}
                 </MuiAlert>
               </Snackbar>
-              <PrintInvoiceDialog
-                open={printDialog.open}
-                invoice={printDialog.invoice}
-                data={{
-                  invoice: printDialog.invoice || initialInvoiceState,
-                  items: datainv,
-                  customer: customers.find(
-                    (c) => c.id_client === editInvoice.client
-                  ),
-                  totalAmountLYD: totalsDialog.amount_lyd,
-                  totalAmountUSD: totalsDialog.amount_currency,
-                  totalAmountEur: totalsDialog.amount_EUR,
-                  totalWeight: 0, // Add your calculation if needed
-                  itemCount: datainv.length,
-                  amount_currency_LYD: totalsDialog.amount_currency_LYD,
-                  amount_EUR_LYD: totalsDialog.amount_EUR_LYD,
-                  Original_Invoice:
-                    datainv[0]?.ACHATs?.[0]?.Original_Invoice || "",
-                  picint: datainv[0]?.picint || 0,
-                  remise: totalsDialog.remise, // <-- Pass remise
-                  remise_per: totalsDialog.remise_per, // <-- Pass remise_per
-                }}
-                printRef={printRef}
-                onClose={() =>
-                  setPrintDialog((prev) => ({ ...prev, open: false }))
-                }
-                onInvoiceClosed={() => {
-                  fetchData(typeFilter); // Refresh data after closing invoice
-                }}
-                onCartRefresh={() => {
-                  fetchDataINV(); // Refresh the cart after closing invoice
-                }}
-                showCloseInvoiceActions={false}
-                showCloseInvoice={false}
-              />
+      {/* COGS dialog */}
+      <Dialog open={cogsOpen} onClose={() => setCogsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Charges & Rates</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            {/* Price references */}
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>Gold Price (oz): {goldPrice ? goldPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "-"}</Typography>
+            <Typography variant="body2">
+              per gram: ${perGram24USD.toFixed(4)} (24K), ${perGram21USD.toFixed(4)} (21K), ${perGram18USD.toFixed(4)} (18K)
+            </Typography>
+
+            {/* Inputs */}
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1 }}>
+              <TextField label="USD→LYD Rate" type="number" size="small" value={cogs.usdRate} onChange={(e) => setCogs((p) => ({ ...p, usdRate: Number(e.target.value) }))} inputProps={{ step: '0.0001' }} />
+              <TextField label="Weight (g)" type="number" size="small" value={cogs.weight} onChange={(e) => setCogs((p) => ({ ...p, weight: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+              <TextField label="Making (per item)" type="number" size="small" value={cogs.making} onChange={(e) => setCogs((p) => ({ ...p, making: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+              <TextField label="Shipping (per item)" type="number" size="small" value={cogs.shipping} onChange={(e) => setCogs((p) => ({ ...p, shipping: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+              <TextField label="Travel (per item)" type="number" size="small" value={cogs.travel} onChange={(e) => setCogs((p) => ({ ...p, travel: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+              <TextField label="Loss %" type="number" size="small" value={cogs.lossPercent} onChange={(e) => setCogs((p) => ({ ...p, lossPercent: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+              <TextField label="Profit Margin %" type="number" size="small" value={cogs.profitPercent} onChange={(e) => setCogs((p) => ({ ...p, profitPercent: Number(e.target.value) }))} inputProps={{ step: '0.01' }} />
+            </Box>
+
+            {/* Breakdown */}
+            {(() => {
+              const kar = cogsRow ? extractKarat(cogsRow) : '';
+              const perGram = kar === '18' ? perGram18USD : kar === '21' ? perGram21USD : perGram24USD;
+              const baseUSD = perGram * (Number(cogs.weight) || 0);
+              const lossUSD = baseUSD * ((Number(cogs.lossPercent) || 0) / 100);
+              const subTotalBeforeMargin = baseUSD + lossUSD + (Number(cogs.making) || 0) + (Number(cogs.shipping) || 0) + (Number(cogs.travel) || 0);
+              const profitUSD = subTotalBeforeMargin * ((Number(cogs.profitPercent) || 0) / 100);
+              const totalUSD = subTotalBeforeMargin + profitUSD;
+              const totalLYD = totalUSD * (Number(cogs.usdRate) || 0);
+              return (
+                <Box sx={{ mt: 1, fontSize: 14 }}>
+                  <Typography variant="body2">USD Rate: {Number(cogs.usdRate || 0).toFixed(4)}</Typography>
+                  <Typography variant="body2">Making (per item): {Number(cogs.making || 0).toFixed(2)}</Typography>
+                  <Typography variant="body2">Shipping (per item): {Number(cogs.shipping || 0).toFixed(2)}</Typography>
+                  <Typography variant="body2">Travel (per item): {Number(cogs.travel || 0).toFixed(2)}</Typography>
+                  <Typography variant="body2">Loss %: {Number(cogs.lossPercent || 0).toFixed(2)}%</Typography>
+                  <Typography variant="body2">Profit Margin %: {Number(cogs.profitPercent || 0).toFixed(2)}%</Typography>
+                  <Typography variant="body2">Weight (g): {Number(cogs.weight || 0).toFixed(3)}</Typography>
+                  <Typography variant="body2">Per-gram (USD): {perGram.toFixed(4)}</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 700 }}>Total: {totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD • {totalLYD.toLocaleString('en-LY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} LYD</Typography>
+                </Box>
+              );
+            })()}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCogsOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+              {/* Print invoice removed per request */}
             </>
           )}
         </Box>
@@ -3203,8 +3698,8 @@ const DNew_I = () => {
       >
         <Box
           sx={{
-            background: "#fff",
-            color: "#222",
+            bgcolor: (theme) => theme.palette.background.paper,
+            color: (theme) => theme.palette.text.primary,
             boxShadow: 6,
             minWidth: 340,
             textAlign: "center",
@@ -3212,7 +3707,7 @@ const DNew_I = () => {
             p: 2,
           }}
         >
-          <Typography sx={{ mb: 1, fontWeight: "bold", color: "#f44336" }}>
+          <Typography sx={{ mb: 1, fontWeight: "bold", color: (theme) => theme.palette.text.primary }}>
             Confirm Deletion
           </Typography>
           <Typography sx={{ mb: 2 }}>
@@ -3239,13 +3734,13 @@ const DNew_I = () => {
               }}
             >
               {deleteLoading ? (
-                <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
+                <CircularProgress size={20}  sx={{ mr: 1 }} />
               ) : null}
               Yes, Delete
             </Button>
             <Button
               variant="outlined"
-              color="inherit"
+              
               onClick={() => setDeleteConfirmOpen(false)}
             >
               Cancel
@@ -3260,8 +3755,8 @@ const DNew_I = () => {
       >
         <Box
           sx={{
-            background: "#fff",
-            color: "#222",
+            bgcolor: (theme) => theme.palette.background.paper,
+            color: (theme) => theme.palette.text.primary,
             boxShadow: 6,
             minWidth: 340,
             textAlign: "center",
@@ -3269,7 +3764,7 @@ const DNew_I = () => {
             p: 2,
           }}
         >
-          <Typography sx={{ mb: 1, fontWeight: "bold", color: "#f44336" }}>
+          <Typography sx={{ mb: 1, fontWeight: "bold", color: (theme) => theme.palette.text.primary }}>
             Confirm Empty Cart
           </Typography>
           <Typography sx={{ mb: 2 }}>
@@ -3304,13 +3799,13 @@ const DNew_I = () => {
               }}
             >
               {emptyCartLoading ? (
-                <CircularProgress size={20} color="inherit" sx={{ mr: 1 }} />
+                <CircularProgress size={20}  sx={{ mr: 1 }} />
               ) : null}
               Yes, Empty
             </Button>
             <Button
               variant="outlined"
-              color="inherit"
+              
               onClick={() => setEmptyCartConfirmOpen(false)}
             >
               Cancel
@@ -3319,10 +3814,31 @@ const DNew_I = () => {
         </Box>
       </Snackbar>
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)}>
-        <DialogTitle>Edit Discount</DialogTitle>
+        <DialogTitle>Apply Discount</DialogTitle>
         <DialogContent>
+          <Box sx={{ display: "flex", gap: 2, alignItems: "center", mb: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>Type</Typography>
+            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="radio"
+                name="discountType"
+                checked={editDiscountType === "value"}
+                onChange={() => setEditDiscountType("value")}
+              />
+              Value
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="radio"
+                name="discountType"
+                checked={editDiscountType === "percentage"}
+                onChange={() => setEditDiscountType("percentage")}
+              />
+              %
+            </label>
+          </Box>
           <TextField
-            label="Discount Amount"
+            label={editDiscountType === "percentage" ? "Discount %" : "Discount Value"}
             type="number"
             value={editDialogRemise}
             onChange={(e) => setEditDialogRemise(Number(e.target.value))}
@@ -3330,24 +3846,20 @@ const DNew_I = () => {
             margin="normal"
             size="small"
           />
-          <Box sx={{ display: "flex", alignItems: "center", mt: 2 }}>
-            <input
-              type="checkbox"
-              checked={editDialogItem?.IS_GIFT}
-              onChange={(e) =>
-                setEditDialogItem((item) =>
-                  item ? { ...item, IS_GIFT: e.target.checked } : item
-                )
-              }
-              id="is-gift-checkbox"
-            />
-            <label htmlFor="is-gift-checkbox" style={{ marginLeft: 8 }}>
-              Is Gift
-            </label>
-          </Box>
+          {editDialogItem && (
+            <Typography variant="body2" sx={{ mt: 1, color: "text.secondary" }}>
+              Original: {Number(editDialogItem.prix_vente || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {"  "}| Final: {(() => {
+                const original = Number(editDialogItem.prix_vente) || 0;
+                const discount = Number(editDialogRemise) || 0;
+                const finalPrice = Math.max(0, editDiscountType === "percentage" ? original - original * (discount / 100) : original - discount);
+                return finalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              })()}
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)} color="inherit">
+          <Button onClick={() => setEditDialogOpen(false)} >
             Cancel
           </Button>
           <Button
@@ -3356,7 +3868,7 @@ const DNew_I = () => {
               await fetchDataINV(); // Refresh cart list after save
               setEditDialogOpen(false);
             }}
-            color="primary"
+            
             variant="contained"
           >
             Save
@@ -3367,4 +3879,4 @@ const DNew_I = () => {
   );
 };
 
-export default DNew_I;
+export default GNew_I;

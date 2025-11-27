@@ -14,9 +14,15 @@ import {
   FormControl,
   FormLabel,
   Alert,
+  IconButton,
 } from "@mui/material";
+import AddIcon from "@mui/icons-material/Add";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import React from "react";
+import CloseIcon from "@mui/icons-material/Close";
+import ArrowBackIosNewIcon from "@mui/icons-material/ArrowBackIosNew";
+import ArrowForwardIosIcon from "@mui/icons-material/ArrowForwardIos";
+import axios from "../../../api";
 
 interface Client {
   id_client: number;
@@ -55,6 +61,7 @@ interface InvoiceTotalsDialogProps {
   editInvoice: any;
   setEditInvoice: (fn: (prev: any) => any) => void;
   errors: { client: string };
+  onCustomerCreated?: (client: Client) => void;
 }
 
 // Helper to parse local formatted string to number
@@ -79,6 +86,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   editInvoice,
   setEditInvoice,
   errors,
+  onCustomerCreated,
 }) => {
   // Add state for discount type (value or percentage)
   const [discountType, setDiscountType] = React.useState<
@@ -86,67 +94,85 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   >("value");
   const [alertOpen, setAlertOpen] = React.useState(false);
   const [alertMsg, setAlertMsg] = React.useState("");
+  const [addCustomerOpen, setAddCustomerOpen] = React.useState(false);
+  const [newCustomerName, setNewCustomerName] = React.useState("");
+  const [newCustomerPhone, setNewCustomerPhone] = React.useState("");
+  const [creatingCustomer, setCreatingCustomer] = React.useState(false);
+  // Editable exchange rates (USD/EUR -> LYD)
+  const [usdRate, setUsdRate] = React.useState<number>(0);
+  const [eurRate, setEurRate] = React.useState<number>(0);
+  const [stepIndex, setStepIndex] = React.useState<number>(0);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
+
+  React.useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    // eslint-disable-next-line
+  }, [stepIndex]);
 
   // Validation handler for update
   const validateTotals = () => {
     const totalLyd = Number(totals.total_remise_final_lyd) || 0;
     const paidLyd = Number(totals.amount_lyd) || 0;
-    const paidUsd = Number(totals.amount_currency) || 0;
     const paidUsdLyd = Number(totals.amount_currency_LYD) || 0;
-    const paidEur = Number(totals.amount_EUR) || 0;
     const paidEurLyd = Number(totals.amount_EUR_LYD) || 0;
     const sumPaid = paidLyd + paidUsdLyd + paidEurLyd;
     const diff = totalLyd - sumPaid;
     const alertList: string[] = [];
-    if (Math.abs(diff) > 0.01) {
-      alertList.push(
-        `Total Amount (LYD) must equal Amount Paid (LYD) + Equivalent Amount Paid (USD to LYD) + Equivalent Amount Paid (EUR to LYD). Difference: ${diff.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-      );
-    }
-    if (paidUsdLyd > 0 && paidUsd === 0) {
-      alertList.push(
-        "If Equivalent Amount Paid (USD to LYD) > 0, Amount Paid (USD) must be greater than 0."
-      );
-    }
-    if (paidEurLyd > 0 && paidEur === 0) {
-      alertList.push(
-        "If Equivalent Amount Paid (EUR to LYD) > 0, Amount Paid (EUR) must be greater than 0."
-      );
-    }
-    if (Type_Supplier.toLowerCase().includes("gold")) {
-      if (
-        Math.abs(
-          Number(totals.total_remise_final_lyd) -
-            Number(totals.total_remise_final)
-        ) > 0.01
-      ) {
-        alertList.push(
-          `For gold type, Total Amount (LYD) must equal Total Amount (USD). Difference: ${(Number(totals.total_remise_final_lyd) - Number(totals.total_remise_final)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        );
-      }
-    }
-    if (Number(totals.total_remise_final_lyd) === 0) {
+    const errors: Record<string, string> = {};
+    if (Number(totalLyd) === 0) {
       alertList.push("Total Amount (LYD) is required and cannot be zero.");
+      errors.total_remise_final_lyd = "Required";
+    }
+    if (Math.abs(diff) > 0.01) {
+      const diffMsg = `Difference: ${diff.toLocaleString("en-LY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      alertList.push(`Total (LYD) must equal Amount Paid (LYD) + USD/EUR equivalents (to LYD). ${diffMsg}`);
+      // Mark payment fields to guide user
+      errors.amount_lyd = diffMsg;
+      errors.amount_currency = diffMsg;
+      errors.amount_currency_LYD = diffMsg;
+      errors.amount_EUR = diffMsg;
+      errors.amount_EUR_LYD = diffMsg;
     }
     if (alertList.length > 0) {
-      setAlertMsg(alertList.map((msg, idx) => `• ${msg}`).join("\n"));
+      setAlertMsg(alertList.map((msg) => `• ${msg}`).join("\n"));
       setAlertOpen(true);
+      setFieldErrors(errors);
       return false;
     }
     setAlertOpen(false);
     setAlertMsg("");
+    setFieldErrors({});
     return true;
   };
 
   // Validate on any relevant change
   React.useEffect(() => {
     validateTotals();
+    // Initialize default exchange rates if possible
+    if ((Number(totals.amount_currency) || 0) > 0 && (Number(totals.amount_currency_LYD) || 0) > 0) {
+      const r = Number(totals.amount_currency_LYD) / Number(totals.amount_currency || 1);
+      if (isFinite(r)) setUsdRate(Number(r.toFixed(3)));
+    } else if ((Number(totals.total_remise_final) || 0) > 0 && (Number(totals.total_remise_final_lyd) || 0) > 0) {
+      const r = Number(totals.total_remise_final_lyd) / Number(totals.total_remise_final || 1);
+      if (isFinite(r)) setUsdRate(Number(r.toFixed(3)));
+    }
+    if ((Number(totals.amount_EUR) || 0) > 0 && (Number(totals.amount_EUR_LYD) || 0) > 0) {
+      const r = Number(totals.amount_EUR_LYD) / Number(totals.amount_EUR || 1);
+      if (isFinite(r)) setEurRate(Number(r.toFixed(3)));
+    } else if ((Number(totals.total_remise_final) || 0) > 0 && (Number(totals.total_remise_final_lyd) || 0) > 0) {
+      const r = Number(totals.total_remise_final_lyd) / Number(totals.total_remise_final || 1);
+      if (isFinite(r)) setEurRate(Number(r.toFixed(3)));
+    }
     // eslint-disable-next-line
   }, [
     totals.total_remise_final_lyd,
     totals.amount_lyd,
     totals.amount_currency_LYD,
     totals.amount_EUR_LYD,
+    totals.amount_currency,
+    totals.amount_EUR,
+    totals.total_remise_final,
   ]);
 
   const handleUpdate = () => {
@@ -160,542 +186,474 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       onClose={onClose}
       maxWidth="md"
       fullWidth
-      PaperProps={{ sx: { minWidth: 800 } }}
+      PaperProps={{ sx: { minWidth: 820, height: "64vh", display: "flex", flexDirection: "column" } }}
     >
-      <DialogTitle>
-        Complete Invoice Details
-        {SelectedInvoiceNum !== undefined && (
-          <span
-            style={{
-              fontWeight: 400,
-              fontSize: 16,
-              marginLeft: 12,
-              color: "var(--mui-palette-text-secondary)",
-            }}
-          >
-            (Invoice #{SelectedInvoiceNum})
-          </span>
-        )}
-      </DialogTitle>
-      <DialogContent>
-        {/* Alert or Verified Icon on top of dialog */}
-        {alertOpen ? (
-          <Alert
-            severity="error"
-            sx={{ mb: 2, whiteSpace: "pre-line" }}
-            onClose={() => setAlertOpen(false)}
-          >
-            {alertMsg}
-          </Alert>
-        ) : (
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              mb: 2,
-              color: "success.main",
-              fontWeight: 500,
-            }}
-          >
-            <CheckCircleIcon sx={{ mr: 1, color: "success.main" }} />
-            All totals and payments are verified.
-          </Box>
-        )}
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 2 }}>
-          {/* Row 1: Invoice Type, Customer, Source Marketing */}
-          <Box sx={{ display: "flex", gap: 2 }}>
-            <TextField
-              select
-              label="Invoice Type"
-              value={(() => {
-                if (editInvoice.is_chira === 1) return "is_chira";
-                if (editInvoice.IS_WHOLE_SALE === 1) return "IS_WHOLE_SALE";
-                return "invoice";
-              })()}
-              onChange={(e) => {
-                const val = e.target.value;
-                setEditInvoice((prev: any) => ({
-                  ...prev,
-                  is_chira: val === "is_chira" ? 1 : 0,
-                  IS_WHOLE_SALE: val === "IS_WHOLE_SALE" ? 1 : 0,
-                }));
-              }}
-              fullWidth
-              size="small"
-              sx={{ minWidth: 180, maxWidth: 220 }}
-              SelectProps={{ native: true }}
-            >
-              <option value="invoice">Invoice</option>
-              <option value="is_chira">Is Chira</option>
-              <option value="IS_WHOLE_SALE">Is Whole Sale</option>
-            </TextField>
-            <Autocomplete
-              id="customer-select"
-              sx={{ width: 350, flexGrow: 2 }}
-              options={customers}
-              autoHighlight
-              getOptionLabel={(option: Client) =>
-                `${option.client_name} (${option.tel_client || "No Phone"})`
-              }
-              value={
-                editInvoice.Client ||
-                customers.find(
-                  (s: Client) => s.id_client === editInvoice.client
-                ) ||
-                null
-              }
-              onChange={(event: any, newValue: Client | null) => {
-                setEditInvoice((prev: any) => ({
-                  ...prev,
-                  client: newValue?.id_client ?? 0,
-                  Client: newValue || undefined,
-                }));
-              }}
-              renderOption={(props: any, option: Client) => (
-                <Box component="li" {...props} key={option.id_client}>
-                  <strong>{option.client_name}</strong> —{" "}
-                  <span style={{ color: "var(--mui-palette-text-secondary)" }}>
-                    {option.tel_client || "No Phone"}
-                  </span>
-                </Box>
-              )}
-              renderInput={(params: any) => (
-                <TextField
-                  {...params}
-                  label="Customer"
-                  error={!!errors.client}
-                  helperText={errors.client}
-                  required
-                  size="small"
-                />
-              )}
-            />
-            <Autocomplete
-              id="MS-select"
-              sx={{ width: 220, flexShrink: 1 }}
-              options={Sm}
-              autoHighlight
-              getOptionLabel={(option: Sm) => `${option.SourceMarketing}`}
-              value={
-                Sm.find(
-                  (s: Sm) => s.SourceMarketing === editInvoice.SourceMark
-                ) || null
-              }
-              onChange={(event: any, newValue: Sm | null) => {
-                setEditInvoice((prev: any) => ({
-                  ...prev,
-                  SourceMark: newValue?.SourceMarketing ?? "",
-                  Sm: newValue || undefined,
-                }));
-              }}
-              renderOption={(props: any, option: Sm) => (
-                <Box component="li" {...props} key={option.SourceMarketing}>
-                  <strong>{option.SourceMarketing}</strong>
-                </Box>
-              )}
-              renderInput={(params: any) => (
-                <TextField
-                  {...params}
-                  label="Source Marketing"
-                  error={!!errors.client}
-                  helperText={errors.client}
-                  required
-                  size="small"
-                />
-              )}
-            />
-          </Box>
-          {/* Info Row: Invoice type and currency note */}
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              mb: 1,
-              color: "text.secondary",
-              fontWeight: 500,
-              fontSize: 15,
-            }}
-          >
-            <span>
-              Type: {Type_Supplier} &nbsp;|&nbsp; Currency:{" "}
-              {Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"}
-            </span>
-            {/* Ex. rate calculation and display */}
-            {(() => {
-              const sumLYD =
-                Number(totals.amount_lyd) +
-                Number(totals.amount_currency_LYD) +
-                Number(totals.amount_EUR_LYD);
-              const totalUSD = Number(totals.total_remise_final);
-              const exRate = sumLYD / totalUSD;
-              return (
-                <Box
-                  sx={{
-                    ml: 2,
-                    fontWeight: "bold",
-                    color: "inherit",
-                    minWidth: 120,
-                  }}
-                >
-                  Ex. rate ={" "}
-                  {exRate.toLocaleString("en-LY", {
-                    minimumFractionDigits: 3,
-                    maximumFractionDigits: 3,
-                  })}
-                </Box>
-              );
-            })()}
-          </Box>
-
-          {/* Row 2: Total Amount (LYD) and Final Total After Discount (USD) in same row */}
-          <Box
-            sx={{
-              display: "flex",
-              gap: 2,
-              flexWrap: "wrap",
-              alignItems: "flex-end",
-              mb: 2,
-            }}
-          >
-            {/* Final Total After Discount (USD) */}
-            <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
-              <TextField
-                label="Total Amount (USD)"
-                type="text"
-                fullWidth
-                size="small"
-                value={Number(totals.total_remise_final)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">USD</InputAdornment>
-                  ),
-                  readOnly: true,
+      <DialogTitle sx={{ px: 2, py: 1.5 }}>
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {stepIndex > 0 && (
+              <IconButton onClick={() => setStepIndex(stepIndex - 1)} size="small">
+                <ArrowBackIosNewIcon fontSize="small" />
+              </IconButton>
+            )}
+            <span>Checkout</span>
+            {SelectedInvoiceNum !== undefined && (
+              <span
+                style={{
+                  fontWeight: 400,
+                  fontSize: 16,
+                  marginLeft: 12,
+                  color: "var(--mui-palette-text-secondary)",
                 }}
-                disabled
-              />
-            </Box>
-          </Box>
-          {/* Row 3: Discount Type & Value/Percentage in same row */}
-          <Box
-            sx={{
-              display: "flex",
-              gap: 2,
-              flexWrap: "wrap",
-              alignItems: "flex-end",
-              mb: 2,
-            }}
-          >
-            {/* Discount Type Selector */}
-            <FormControl
-              component="fieldset"
-              sx={{ flex: "1 1 180px", minWidth: 180 }}
-            >
-              <FormLabel component="legend" sx={{ fontSize: 14, mb: 0.5 }}>
-                Discount Type
-              </FormLabel>
-              <RadioGroup
-                row
-                value={discountType}
-                onChange={(e) =>
-                  setDiscountType(e.target.value as "value" | "percentage")
-                }
-                sx={{ gap: 1 }}
               >
-                <FormControlLabel
-                  value="value"
-                  control={<Radio size="small" />}
-                  label="By Value"
-                />
-                <FormControlLabel
-                  value="percentage"
-                  control={<Radio size="small" />}
-                  label="By %"
-                />
-              </RadioGroup>
-            </FormControl>
-
-            {/* Discount Value/Percentage */}
-            <Box sx={{ flex: "1 1 180px", minWidth: 180 }}>
-              {discountType === "value" ? (
-                <TextField
-                  label="Discount Value"
-                  type="number"
-                  fullWidth
-                  size="small"
-                  value={totals.remise}
-                  onChange={(e) => {
-                    const value = parseNumber(e.target.value);
-                    onChange("remise", value);
-                    if (value > 0) onChange("remise_per", 0); // Reset percentage if value entered
-                  }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        {Type_Supplier.toLowerCase().includes("gold")
-                          ? "LYD"
-                          : "USD"}
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-              ) : (
-                <TextField
-                  label="Discount Percentage"
-                  type="number"
-                  fullWidth
-                  size="small"
-                  value={totals.remise_per}
-                  onChange={(e) => {
-                    const value = parseNumber(e.target.value);
-                    onChange("remise_per", value);
-                    if (value > 0) onChange("remise", 0); // Reset value if percentage entered
-                  }}
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">%</InputAdornment>
-                    ),
-                  }}
-                />
-              )}
-            </Box>
+                (Invoice #{SelectedInvoiceNum})
+              </span>
+            )}
           </Box>
-          {/* Row 4: Final Total After Discount in its own row */}
-          <Box
-            sx={{
-              display: "flex",
-              gap: 2,
-              flexWrap: "wrap",
-              alignItems: "flex-end",
-              mb: 2,
-            }}
-          >
-            <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
-              <TextField
-                label={`Final Total After Discount (${Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"})`}
-                type="text"
-                fullWidth
-                size="small"
-                value={(() => {
-                  const total = Number(totals.total_remise_final) || 0;
-                  if (discountType === "value") {
-                    return (
-                      total - (Number(totals.remise) || 0)
-                    ).toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    });
-                  } else {
-                    return (
-                      total -
-                      total * ((Number(totals.remise_per) || 0) / 100)
-                    ).toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    });
-                  }
-                })()}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      {Type_Supplier.toLowerCase().includes("gold")
-                        ? "LYD"
-                        : "USD"}
-                    </InputAdornment>
-                  ),
-                  readOnly: true,
-                }}
-                disabled
-              />
-            </Box>
-
-            {/* Total Amount (LYD) */}
-            <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
-              <TextField
-                label="Total Amount (LYD)"
-                type="text"
-                fullWidth
-                size="small"
-                onChange={(e) => {
-                  onChange(
-                    "total_remise_final_lyd",
-                    parseNumber(e.target.value)
-                  );
-                  validateTotals();
-                }}
-                value={totals.total_remise_final_lyd}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">LYD</InputAdornment>
-                  ),
-                  inputProps: { inputMode: "decimal", pattern: "[0-9.,]*" },
-                }}
-                disabled={Type_Supplier.toLowerCase().includes("gold")}
-              />
-            </Box>
-          </Box>
-          <Box sx={{ display: "flex", alignItems: "center", my: 1 }}>
-            <Box sx={{ borderBottom: "1px solid #e0e0e0", flex: 1 }} />
-            <Box sx={{ mx: 2, color: "text.secondary", fontWeight: 500 }}>
-              Payment Methods
-            </Box>
-            <Box sx={{ borderBottom: "1px solid #e0e0e0", flex: 1 }} />
-          </Box>
-          {/* Row 3: Amount Paid (LYD) */}
-          <Box sx={{ display: "flex", justifyContent: "flex-start" }}>
-            <TextField
-              label="Amount Paid (LYD)"
-              type="text"
-              sx={{ width: "40%" }}
-              size="small"
-              value={totals.amount_lyd}
-              onChange={(e) => {
-                onChange("amount_lyd", parseNumber(e.target.value));
-                validateTotals();
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">LYD</InputAdornment>
-                ),
-              }}
-            />
-          </Box>
-          {/* Row 4: Amount Paid (USD) & Equivalent Amount Paid (USD to LYD) */}
-          <Box sx={{ display: "flex", gap: 2 }}>
-            <TextField
-              label="Amount Paid (USD)"
-              type="text"
-              fullWidth
-              size="small"
-              value={totals.amount_currency}
-              onChange={(e) => {
-                onChange("amount_currency", parseNumber(e.target.value));
-                validateTotals();
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">USD</InputAdornment>
-                ),
-              }}
-            />
-            <TextField
-              label="Equivalent Amount Paid (USD to LYD)"
-              type="text"
-              fullWidth
-              size="small"
-              value={totals.amount_currency_LYD}
-              onChange={(e) => {
-                onChange("amount_currency_LYD", parseNumber(e.target.value));
-                validateTotals();
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">LYD</InputAdornment>
-                ),
-              }}
-            />
-            {/* Ex. rate for USD to LYD */}
-            {(() => {
-              const usdToLyd = Number(totals.amount_currency_LYD);
-              const usd = Number(totals.amount_currency);
-              const exRate = usdToLyd / usd;
-              return (
-                <Box
-                  sx={{
-                    ml: 2,
-                    fontWeight: "bold",
-                    color: "text.secondary",
-                    minWidth: 120,
-                  }}
-                >
-                  Ex. rate ={" "}
-                  {exRate.toLocaleString("en-LY", {
-                    minimumFractionDigits: 3,
-                    maximumFractionDigits: 3,
-                  })}
-                </Box>
-              );
-            })()}
-          </Box>
-          {/* Row 5: Amount Paid (EUR) & Equivalent Amount Paid (EUR to LYD) */}
-          <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
-            <TextField
-              label="Amount Paid (EUR)"
-              type="text"
-              fullWidth
-              size="small"
-              value={totals.amount_EUR}
-              onChange={(e) => {
-                onChange("amount_EUR", parseNumber(e.target.value));
-                validateTotals();
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">EUR</InputAdornment>
-                ),
-              }}
-            />
-            <TextField
-              label="Equivalent Amount Paid (EUR to LYD)"
-              type="text"
-              fullWidth
-              size="small"
-              value={totals.amount_EUR_LYD}
-              onChange={(e) => {
-                onChange("amount_EUR_LYD", parseNumber(e.target.value));
-                validateTotals();
-              }}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">LYD</InputAdornment>
-                ),
-              }}
-            />
-            {/* Ex. rate for EUR to LYD */}
-            {(() => {
-              const eurToLyd = Number(totals.amount_EUR_LYD);
-              const eur = Number(totals.amount_EUR);
-              const exRate = eurToLyd / eur;
-              return (
-                <Box
-                  sx={{
-                    ml: 2,
-                    fontWeight: "bold",
-                    color: "text.secondary",
-                    minWidth: 120,
-                  }}
-                >
-                  Ex. rate ={" "}
-                  {exRate.toLocaleString("en-LY", {
-                    minimumFractionDigits: 3,
-                    maximumFractionDigits: 3,
-                  })}
-                </Box>
-              );
-            })()}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            {stepIndex < 2 && (
+              <IconButton onClick={() => setStepIndex(stepIndex + 1)} size="small" aria-label="next-step">
+                <ArrowForwardIosIcon fontSize="small" />
+              </IconButton>
+            )}
+            <IconButton onClick={onClose} aria-label="close-dialog">
+              <CloseIcon />
+            </IconButton>
           </Box>
         </Box>
+      </DialogTitle>
+      <DialogContent sx={{ flex: 1, display: "flex", gap: 0.5, overflow: "hidden", pt: 0.25 }}>
+        <Box ref={contentRef} sx={{ flex: 1, overflowY: "auto", pr: 1, scrollBehavior: "smooth" }}>
+          {!alertOpen && (
+            <Box sx={{ display: "flex", alignItems: "center", mb: 1, color: "success.main", fontWeight: 500 }}>
+              <CheckCircleIcon sx={{ mr: 1, color: "success.main" }} />
+              All totals and payments are verified.
+            </Box>
+          )}
+          {stepIndex === 0 && (
+            <>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
+                {/* Invoice Type (full width) */}
+                <TextField
+                  select
+                  fullWidth
+                  label="Invoice Type"
+                  value={(() => {
+                    if (editInvoice.is_chira === 1) return "is_chira";
+                    if (editInvoice.IS_WHOLE_SALE === 1) return "IS_WHOLE_SALE";
+                    return "invoice";
+                  })()}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setEditInvoice((prev: any) => ({
+                      ...prev,
+                      is_chira: val === "is_chira" ? 1 : 0,
+                      IS_WHOLE_SALE: val === "IS_WHOLE_SALE" ? 1 : 0,
+                    }));
+                  }}
+                  size="small"
+                  SelectProps={{ native: true }}
+                >
+                  <option value="invoice">Invoice</option>
+                  <option value="is_chira">Chira</option>
+                  <option value="IS_WHOLE_SALE">Whole Sale</option>
+                </TextField>
+                {/* Customer (full width) + create button */}
+                <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                  <Autocomplete
+                    id="customer-select"
+                    sx={{ flex: 1 }}
+                    options={customers}
+                    autoHighlight
+                    getOptionLabel={(option: Client) => `${option.client_name} (${option.tel_client || "No Phone"})`}
+                    value={
+                      editInvoice.Client ||
+                      customers.find((s: Client) => s.id_client === editInvoice.client) ||
+                      null
+                    }
+                    onChange={(event: any, newValue: Client | null) => {
+                      setEditInvoice((prev: any) => ({
+                        ...prev,
+                        client: newValue?.id_client ?? 0,
+                        Client: newValue || undefined,
+                      }));
+                    }}
+                    renderOption={(props: any, option: Client) => (
+                      <Box component="li" {...props} key={option.id_client}>
+                        <strong>{option.client_name}</strong> — {" "}
+                        <span style={{ color: "var(--mui-palette-text-secondary)" }}>{option.tel_client || "No Phone"}</span>
+                      </Box>
+                    )}
+                    renderInput={(params: any) => (
+                      <TextField {...params} label="Customer" error={!!errors.client} helperText={errors.client} required size="small" fullWidth />
+                    )}
+                  />
+                  <IconButton onClick={() => setAddCustomerOpen(true)}>
+                    <AddIcon />
+                  </IconButton>
+                </Box>
+
+                {/* Source Marketing (full width) */}
+                <Autocomplete
+                  id="MS-select"
+                  sx={{ width: "100%" }}
+                  options={Sm}
+                  autoHighlight
+                  getOptionLabel={(option: Sm) => `${option.SourceMarketing}`}
+                  value={Sm.find((s: Sm) => s.SourceMarketing === editInvoice.SourceMark) || null}
+                  onChange={(event: any, newValue: Sm | null) => {
+                    setEditInvoice((prev: any) => ({
+                      ...prev,
+                      SourceMark: newValue?.SourceMarketing ?? "",
+                      Sm: newValue || undefined,
+                    }));
+                  }}
+                  renderOption={(props: any, option: Sm) => (
+                    <Box component="li" {...props} key={option.SourceMarketing}>
+                      <strong>{option.SourceMarketing}</strong>
+                    </Box>
+                  )}
+                  renderInput={(params: any) => (
+                    <TextField {...params} label="Source Marketing" error={!!errors.client} helperText={errors.client} required size="small" fullWidth />
+                  )}
+                />
+              </Box>
+              <Box sx={{ display: "flex", alignItems: "center", mt: 2, mb: 1, color: "text.secondary", fontWeight: 500, fontSize: 15 }}>
+                <span>
+                  Type: {Type_Supplier} &nbsp;|&nbsp; Currency: {Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"}
+                </span>
+              </Box>
+            </>
+          )}
+          {stepIndex === 1 && (
+            <>
+              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "flex-end", mb: 2 }}>
+                <FormControl component="fieldset" sx={{ flex: "1 1 180px", minWidth: 180 }}>
+                  <FormLabel component="legend" sx={{ fontSize: 14, mb: 0.5 }}>Discount Type</FormLabel>
+                  <RadioGroup row value={discountType} onChange={(e) => setDiscountType(e.target.value as "value" | "percentage")} sx={{ gap: 1 }}>
+                    <FormControlLabel value="value" control={<Radio size="small" />} label="By Value" />
+                    <FormControlLabel value="percentage" control={<Radio size="small" />} label="By %" />
+                  </RadioGroup>
+                </FormControl>
+                <Box sx={{ flex: "1 1 180px", minWidth: 180 }}>
+                  {discountType === "value" ? (
+                    <TextField
+                      label="Discount Value"
+                      type="number"
+                      fullWidth
+                      size="small"
+                      value={totals.remise}
+                      onChange={(e) => {
+                        const value = parseNumber(e.target.value);
+                        onChange("remise", value);
+                        if (value > 0) onChange("remise_per", 0);
+                      }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">{Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"}</InputAdornment>
+                        ),
+                      }}
+                    />
+                  ) : (
+                    <TextField
+                      label="Discount Percentage"
+                      type="number"
+                      fullWidth
+                      size="small"
+                      value={totals.remise_per}
+                      onChange={(e) => {
+                        const value = parseNumber(e.target.value);
+                        onChange("remise_per", value);
+                        if (value > 0) onChange("remise", 0);
+                      }}
+                      InputProps={{ endAdornment: (<InputAdornment position="end">%</InputAdornment>) }}
+                    />
+                  )}
+                </Box>
+              </Box>
+              <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", alignItems: "flex-end", mb: 2 }}>
+                <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
+                  <TextField
+                    label={`Final Total After Discount (${Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"})`}
+                    type="text"
+                    fullWidth
+                    size="small"
+                    value={(() => {
+                      const total = Type_Supplier.toLowerCase().includes("gold") ? Number(totals.total_remise_final_lyd) || 0 : Number(totals.total_remise_final) || 0;
+                      if (discountType === "value") {
+                        return (total - (Number(totals.remise) || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      } else {
+                        return (total - total * ((Number(totals.remise_per) || 0) / 100)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                      }
+                    })()}
+                    InputProps={{ startAdornment: (<InputAdornment position="start">{Type_Supplier.toLowerCase().includes("gold") ? "LYD" : "USD"}</InputAdornment>), readOnly: true }}
+                    disabled
+                  />
+                </Box>
+                <Box sx={{ flex: "1 1 260px", minWidth: 220 }}>
+                  <TextField
+                    label="Total Amount (LYD)"
+                    type="text"
+                    fullWidth
+                    size="small"
+                    onChange={(e) => {
+                      onChange("total_remise_final_lyd", parseNumber(e.target.value));
+                      validateTotals();
+                    }}
+                    value={totals.total_remise_final_lyd}
+                    InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>), inputProps: { inputMode: "decimal", pattern: "[0-9.,]*" } }}
+                    disabled={Type_Supplier.toLowerCase().includes("gold")}
+                    error={Boolean(fieldErrors.total_remise_final_lyd)}
+                    helperText={fieldErrors.total_remise_final_lyd}
+                  />
+                </Box>
+              </Box>
+            </>
+          )}
+          {stepIndex === 2 && (
+            <>
+              <Box sx={{ display: "flex", alignItems: "center", my: 1 }}>
+                <Box sx={{ borderBottom: "1px solid #e0e0e0", flex: 1 }} />
+                <Box sx={{ mx: 2, color: "text.secondary", fontWeight: 500 }}>Payment Methods</Box>
+                <Box sx={{ borderBottom: "1px solid #e0e0e0", flex: 1 }} />
+              </Box>
+              <Box sx={{ display: "flex", justifyContent: "flex-start", mt: 1.5 }}>
+                <TextField
+                  label="Amount Paid (LYD)"
+                  type="text"
+                  sx={{ width: 240 }}
+                  size="small"
+                  value={totals.amount_lyd}
+                  onChange={(e) => {
+                    onChange("amount_lyd", parseNumber(e.target.value));
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>) }}
+                  error={Boolean(fieldErrors.amount_lyd)}
+                  helperText={fieldErrors.amount_lyd}
+                />
+              </Box>
+              <Box sx={{ display: "flex", gap: 2, mt: 1.5 }}>
+                <TextField
+                  label="Amount Paid (USD)"
+                  type="text"
+                  sx={{ width: 240 }}
+                  size="small"
+                  value={totals.amount_currency}
+                  onChange={(e) => {
+                    const v = parseNumber(e.target.value);
+                    onChange("amount_currency", v);
+                    const ex = Number(usdRate) || 0;
+                    onChange("amount_currency_LYD", Number((v * ex).toFixed(3)));
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">USD</InputAdornment>) }}
+                  error={Boolean(fieldErrors.amount_currency)}
+                  helperText={fieldErrors.amount_currency}
+                />
+                <TextField
+                  label="Equivalent Amount Paid (USD to LYD)"
+                  type="text"
+                  sx={{ width: 240 }}
+                  size="small"
+                  value={totals.amount_currency_LYD}
+                  onChange={(e) => {
+                    const v = parseNumber(e.target.value);
+                    onChange("amount_currency_LYD", v);
+                    const ex = Number(usdRate) || 0;
+                    if (ex > 0) {
+                      onChange("amount_currency", Number((v / ex).toFixed(3)));
+                    }
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>) }}
+                  error={Boolean(fieldErrors.amount_currency_LYD)}
+                  helperText={fieldErrors.amount_currency_LYD}
+                />
+                <TextField
+                  label="USD→LYD rate"
+                  type="number"
+                  sx={{ width: 160 }}
+                  size="small"
+                  value={usdRate}
+                  onChange={(e) => {
+                    const r = parseNumber(e.target.value);
+                    setUsdRate(r);
+                    const v = Number(totals.amount_currency) || 0;
+                    onChange("amount_currency_LYD", Number((v * r).toFixed(3)));
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>) }}
+                />
+              </Box>
+              <Box sx={{ display: "flex", gap: 2, alignItems: "center", mt: 1.5 }}>
+                <TextField
+                  label="Amount Paid (EUR)"
+                  type="text"
+                  sx={{ width: 240 }}
+                  size="small"
+                  value={totals.amount_EUR}
+                  onChange={(e) => {
+                    const v = parseNumber(e.target.value);
+                    onChange("amount_EUR", v);
+                    const ex = Number(eurRate) || 0;
+                    onChange("amount_EUR_LYD", Number((v * ex).toFixed(3)));
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">EUR</InputAdornment>) }}
+                  error={Boolean(fieldErrors.amount_EUR)}
+                  helperText={fieldErrors.amount_EUR}
+                />
+                <TextField
+                  label="Equivalent Amount Paid (EUR to LYD)"
+                  type="text"
+                  sx={{ width: 240 }}
+                  size="small"
+                  value={totals.amount_EUR_LYD}
+                  onChange={(e) => {
+                    const v = parseNumber(e.target.value);
+                    onChange("amount_EUR_LYD", v);
+                    const ex = Number(eurRate) || 0;
+                    if (ex > 0) {
+                      onChange("amount_EUR", Number((v / ex).toFixed(3)));
+                    }
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>) }}
+                  error={Boolean(fieldErrors.amount_EUR_LYD)}
+                  helperText={fieldErrors.amount_EUR_LYD}
+                />
+                <TextField
+                  label="EUR→LYD rate"
+                  type="number"
+                  sx={{ width: 160 }}
+                  size="small"
+                  value={eurRate}
+                  onChange={(e) => {
+                    const r = parseNumber(e.target.value);
+                    setEurRate(r);
+                    const v = Number(totals.amount_EUR) || 0;
+                    onChange("amount_EUR_LYD", Number((v * r).toFixed(3)));
+                    validateTotals();
+                  }}
+                  InputProps={{ startAdornment: (<InputAdornment position="start">LYD</InputAdornment>) }}
+                />
+              </Box>
+            </>
+          )}
+          <Box sx={{ position: "sticky", bottom: 0, pt: 0.75, mt: 1, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, bgcolor: "background.paper", borderTop: "1px solid", borderColor: "divider" }}>
+            <Box>
+              {stepIndex > 0 && (
+                <Button variant="text" startIcon={<ArrowBackIosNewIcon />} onClick={() => setStepIndex(stepIndex - 1)}>
+                  Back
+                </Button>
+              )}
+            </Box>
+            <Box>
+              {stepIndex < 2 ? (
+                <Button variant="contained" endIcon={<ArrowForwardIosIcon />} onClick={() => setStepIndex(stepIndex + 1)}>
+                  Next
+                </Button>
+              ) : (
+                <Button onClick={handleUpdate} variant="contained" color="primary" startIcon={<CheckCircleIcon />} disabled={isSaving || alertOpen}>
+                  Confirm Checkout
+                </Button>
+              )}
+            </Box>
+          </Box>
+        </Box>
+        <Box sx={{ width: 260, flexShrink: 0, alignSelf: "stretch", borderLeft: "1px solid", borderColor: "divider", p: 1, bgcolor: "background.paper", position: "sticky", top: 0, maxHeight: "calc(64vh - 56px)", overflowY: "auto" }}>
+          {(() => {
+            const isGold = Type_Supplier.toLowerCase().includes("gold");
+            const baseTotal = isGold ? Number(totals.total_remise_final_lyd) || 0 : Number(totals.total_remise_final) || 0;
+            const discountValBase = discountType === "value" ? (Number(totals.remise) || 0) : baseTotal * ((Number(totals.remise_per) || 0) / 100);
+            const finalBase = Math.max(baseTotal - discountValBase, 0);
+            const totalLYD = Number(totals.total_remise_final_lyd) || 0;
+            const discountValLYD = discountType === "value" ? ((Number(totals.remise) || 0) * (isGold ? 1 : (Number(usdRate) || 0))) : totalLYD * ((Number(totals.remise_per) || 0) / 100);
+            const finalLYD = Math.max(totalLYD - discountValLYD, 0);
+            const paidLYD = (Number(totals.amount_lyd) || 0) + (Number(totals.amount_currency_LYD) || 0) + (Number(totals.amount_EUR_LYD) || 0);
+            const remainingLYD = finalLYD - paidLYD;
+            const fmt = (v: number, cur: "USD" | "LYD") => (cur === "USD" ? v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : v.toLocaleString("en-LY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+            return (
+              <>
+                <Box sx={{ fontWeight: 700, mb: 1, color: "#b7a27d" }}>Price breakdown</Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                  <span>{isGold ? "Subtotal (LYD)" : "Subtotal (USD)"}</span>
+                  <span>{fmt(baseTotal, isGold ? "LYD" : "USD")}</span>
+                </Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                  <span>Discount{discountType === "percentage" ? ` (${Number(totals.remise_per) || 0}%)` : ""}</span>
+                  <span style={{ color: "#d32f2f", fontWeight: 700 }}>− {fmt(isGold ? discountValLYD : discountValBase, isGold ? "LYD" : "USD")}</span>
+                </Box>
+                {!isGold && (
+                  <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                    <span>Final (USD)</span>
+                    <span style={{ color: "#68a5bf", fontWeight: 700 }}>{fmt(finalBase, "USD")}</span>
+                  </Box>
+                )}
+                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                  <span>Final (LYD)</span>
+                  <span style={{ color: "#68a5bf", fontWeight: 700 }}>{fmt(finalLYD, "LYD")}</span>
+                </Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+                  <span>Paid (LYD equiv.)</span>
+                  <span>{fmt(paidLYD, "LYD")}</span>
+                </Box>
+                <Box sx={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+                  <span>Remaining (LYD)</span>
+                  <span>{fmt(remainingLYD, "LYD")}</span>
+                </Box>
+              </>
+            );
+          })()}
+        </Box>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          onClick={handleUpdate}
-          variant="contained"
-          color="primary"
-          disabled={isSaving}
-        >
-          Update
-        </Button>
-        {onPrint && (
+      <Dialog open={addCustomerOpen} onClose={() => setAddCustomerOpen(false)}>
+        <DialogTitle>Add Customer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+            <TextField
+              label="Name"
+              value={newCustomerName}
+              onChange={(e) => setNewCustomerName(e.target.value)}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Phone"
+              value={newCustomerPhone}
+              onChange={(e) => setNewCustomerPhone(e.target.value)}
+              size="small"
+              fullWidth
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddCustomerOpen(false)} disabled={creatingCustomer}>Cancel</Button>
           <Button
-            onClick={onPrint}
-            variant="outlined"
-            color="secondary"
-            disabled={isSaving}
+            onClick={async () => {
+              if (!newCustomerName || !newCustomerPhone) return;
+              try {
+                setCreatingCustomer(true);
+                const token = localStorage.getItem("token");
+                await axios.post(`/customers/Add`, { client_name: newCustomerName, tel_client: newCustomerPhone }, { headers: { Authorization: `Bearer ${token}` } });
+                setAddCustomerOpen(false);
+                setNewCustomerName("");
+                setNewCustomerPhone("");
+                if (typeof onCustomerCreated === "function") {
+                  onCustomerCreated({ id_client: 0, client_name: newCustomerName, tel_client: newCustomerPhone });
+                }
+              } finally {
+                setCreatingCustomer(false);
+              }
+            }}
+            variant="contained"
+            disabled={creatingCustomer}
           >
-            Print Invoice
+            Save
           </Button>
-        )}
-      </DialogActions>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 };
