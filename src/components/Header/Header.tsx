@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 // src/components/Header/Header.tsx
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -14,14 +14,13 @@ import {
   styled,
   Chip,
 } from "@mui/material";
-import {
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
-} from "@mui/icons-material";
 import LanguageSwitcher from "../LanguageSwitcher";
 import { useThemeContext } from "../../theme/ThemeProvider";
 import Logo from "../../ui-component/Logo";
 import { useAuth } from "../../contexts/AuthContext";
+
+// ⬇️ add this import
+import Switch from "../Switch"; // <-- adjust path
 
 const StyledAppBar = styled(AppBar)(({ theme }) => ({
   backgroundColor: theme.palette.background.paper,
@@ -226,7 +225,6 @@ const Header: React.FC = () => {
 
           <Box sx={{ flexGrow: 1 }} />
 
-          {/* DEV: visible banner to confirm this Header is active */}
           {process.env.NODE_ENV === "development" && (
             <Box
               sx={{
@@ -248,7 +246,7 @@ const Header: React.FC = () => {
 
           {/* Right side actions */}
           <Stack direction="row" spacing={1} alignItems="center">
-            {/* User Role (from localStorage.user.Prvilege) */}
+            {/* User Role */}
             {roleLabel && (
               <Chip
                 label={roleLabel}
@@ -257,29 +255,9 @@ const Header: React.FC = () => {
                 sx={{ fontWeight: 800, letterSpacing: 0.3 }}
               />
             )}
-            {/* Theme Toggle */}
-            <Tooltip
-              title={
-                mode === "dark"
-                  ? t("header.lightMode") || "Light mode"
-                  : t("header.darkMode") || "Dark mode"
-              }
-            >
-              <IconButton
-                onClick={toggleColorMode}
-                color="inherit"
-                sx={{
-                  color: "text.primary",
-                  "&:hover": { backgroundColor: "action.hover" },
-                }}
-              >
-                {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
-              </IconButton>
-            </Tooltip>
 
             {/* Language */}
             <LanguageSwitcher />
-            {/* Change POS moved to Home toolbar */}
           </Stack>
         </Toolbar>
       </Container>

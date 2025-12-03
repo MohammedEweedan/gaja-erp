@@ -1,9 +1,10 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 // src/components/LeaveManagement/LeaveBalanceScreen.tsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { GlobalStyles } from "@mui/material";
+import { getAuthHeader } from "../../utils/auth";
+import { isActiveEmployee } from "../../api/employees";
 import {
   Box,
   Typography,
@@ -232,10 +233,12 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
         const token = localStorage.getItem("token");
         const hdrs = token ? { Authorization: `Bearer ${token}` } : undefined;
 
-        const res = await fetch(`${base}/employees`, { headers: hdrs });
-        const list = await res.json();
+        const res = await fetch(`${base}/employees?state=true`, { headers: hdrs });
+        const payload = await res.json();
+        const arrRaw = Array.isArray(payload) ? payload : (Array.isArray(payload?.data) ? payload.data : []);
+        const activeOnly = arrRaw.filter(isActiveEmployee);
         const byId: Record<string, any> = {};
-        (Array.isArray(list) ? list : []).forEach((e: any) => {
+        activeOnly.forEach((e: any) => {
           byId[String(e.ID_EMP)] = e;
         });
 
@@ -352,75 +355,20 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
     return c;
   };
 
-  const handleExportPDF = async (opts?: { from?: string; to?: string }) => {
+    const handleExportPDF = async (p0?: { from: string; to: string; }) => {
     try {
       const { jsPDF } = await loadJsPDF();
       const doc = new jsPDF("p", "pt", "a4");
 
-      // ---------- Period resolution ----------
-      let periodFrom: Date;
-      let periodTo: Date;
-      if (opts?.from && opts?.to) {
-        periodFrom = new Date(opts.from);
-        periodTo = endOfDay(new Date(opts.to));
-      } else {
-        const { from, to } = resolveExportRange();
-        periodFrom = new Date(from);
-        periodTo = endOfDay(new Date(to));
-      }
-      const withinPeriod = (st: Date, en: Date) => {
-        const a = st < periodFrom ? periodFrom : st;
-        const b = en > periodTo ? periodTo : en;
-        return b >= a ? { a, b } : null;
-      };
-
-      // ---------- Strict working-days counter (fixes +1 bug) ----------
-      const ymd = (d: Date) => {
-        const x = new Date(d);
-        x.setHours(0, 0, 0, 0);
-        return x;
-      };
-      const countWorkingDaysStrict = (a: Date, b: Date) => {
-        // Clamp to midnight; bail if inverted
-        const s = ymd(a),
-          e = ymd(b);
-        if (e < s) return 0;
-        let c = 0;
-        const d = new Date(s);
-        while (d <= e) {
-          if (d.getDay() !== 5 && !holidaySetState.has(yyyy_mm_dd(d))) c++;
-          d.setDate(d.getDate() + 1);
-        }
-        return c;
-      };
-
-      // ---------- Slice data to period ----------
-      const rowsAll = (balance?.leaveHistory || [])
-        .map(mapRow)
-        .filter((r) => r.startDate && r.endDate);
-
-      const periodRows = rowsAll
-        .map((r) => {
-          const st = new Date(r.startDate!);
-          const en = new Date(r.endDate!);
-          const clip = withinPeriod(st, en);
-          return clip ? { ...r, _a: clip.a, _b: clip.b } : null;
-        })
-        .filter(Boolean) as Array<
-        ReturnType<typeof mapRow> & { _a: Date; _b: Date }
-      >;
-
-      // ---------- Layout helpers / styling ----------
+      // ---------- BASIC PDF HELPERS ----------
       const pageWidth = doc.internal.pageSize.getWidth();
       const pageHeight = doc.internal.pageSize.getHeight();
-
-      const M = 56; // bigger outer margin
-      const sectionGap = 28; // more space between sections
-      const rowGap = 10; // extra space between table rows
-      const cardPad = 14; // card padding
-      const cardRadius = 10; // rounded corners
+      const M = 56;
       const maxY = pageHeight - 64;
-      let y = 48; // start lower for breathing room
+      const sectionGap = 28;
+      const cardPad = 14;
+      const cardRadius = 10;
+      let y = 48;
 
       const newPageIfNeeded = (delta = 0) => {
         if (y + delta > maxY) {
@@ -428,6 +376,7 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           y = 48;
         }
       };
+
       const drawCard = (
         height: number,
         options?: {
@@ -436,8 +385,8 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           lw?: number;
         }
       ) => {
-        const x = M - 4,
-          w = pageWidth - 2 * (M - 4);
+        const x = M - 4;
+        const w = pageWidth - 2 * (M - 4);
         const lw = options?.lw ?? 0.9;
         doc.setLineWidth(lw);
         if (options?.stroke) doc.setDrawColor(...options.stroke);
@@ -449,13 +398,16 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
         }
         return { x, y, w, h: height, padX: x + cardPad, padY: y + cardPad };
       };
+
       const arrayBufferToBase64 = (ab: ArrayBuffer) => {
         let binary = "";
         const bytes = new Uint8Array(ab);
-        for (let i = 0; i < bytes.byteLength; i++)
+        for (let i = 0; i < bytes.byteLength; i++) {
           binary += String.fromCharCode(bytes[i]);
+        }
         return window.btoa(binary);
       };
+
       const ensureArabicFont = async () => {
         try {
           const resp = await fetch(
@@ -470,60 +422,187 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
             "NotoNaskhArabic",
             "normal"
           );
-        } catch {}
+        } catch {
+          // ignore failures, fallback to helvetica
+        }
       };
 
-      // Simple progress bar (with better spacing)
-      const drawProgress = (
-        x: number,
-        yTop: number,
-        w: number,
-        h: number,
-        pct: number,
-        labelLeft: string,
-        labelRight?: string
-      ) => {
-        const pctClamped = Math.max(0, Math.min(1, pct));
-        doc.setDrawColor(220);
-        doc.setLineWidth(0.6);
-        doc.roundedRect(x, yTop, w, h, 6, 6);
-        // fill
-        doc.setFillColor(45, 100, 180);
-        doc.roundedRect(x, yTop, Math.max(0, w * pctClamped), h, 6, 6, "F");
-        // labels
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(30);
-        doc.text(labelLeft, x, yTop - 6);
-        if (labelRight)
-          doc.text(labelRight, x + w, yTop - 6, { align: "right" });
-        // percentage centered
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(255);
-        doc.text(
-          `${Math.round(pctClamped * 100)}%`,
-          x + w / 2,
-          yTop + h / 2 + 3,
-          { align: "center" }
+      const hasArabic = (s: string) => /[\u0600-\u06FF]/.test(s);
+
+      const countWorkingDaysStrict = (a: Date, b: Date) => {
+        const s = new Date(a);
+        s.setHours(0, 0, 0, 0);
+        const e = new Date(b);
+        e.setHours(0, 0, 0, 0);
+        if (e < s) return 0;
+        let c = 0;
+        const d = new Date(s);
+        while (d <= e) {
+          if (d.getDay() !== 5 && !holidaySetState.has(yyyy_mm_dd(d))) c++;
+          d.setDate(d.getDate() + 1);
+        }
+        return c;
+      };
+
+      // Very small & clean pie using canvas → PNG
+      const createPieChartImage = async (
+        title: string,
+        data: Array<{ label: string; value: number }>
+      ): Promise<string | null> => {
+        let filtered = data.filter((d) => d.value > 0);
+        if (!filtered.length) return null;
+
+        // Limit slices to keep it readable: top 5 + "Other"
+        filtered.sort((a, b) => b.value - a.value);
+        if (filtered.length > 6) {
+          const top = filtered.slice(0, 5);
+          const rest = filtered.slice(5);
+          const restSum = rest.reduce((s, r) => s + r.value, 0);
+          top.push({ label: "Other", value: restSum });
+          filtered = top;
+        }
+
+        const total = filtered.reduce((s, r) => s + r.value, 0);
+        if (!total) return null;
+
+        const size = 260;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size + 40;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#000000";
+        ctx.font = "bold 13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(title, canvas.width / 2, 6);
+
+        const cx = size / 2;
+        const cy = size / 2 + 16;
+        const r = size * 0.36;
+
+        const colors = [
+          "#1f77b4",
+          "#ff7f0e",
+          "#2ca02c",
+          "#d62728",
+          "#9467bd",
+          "#8c564b",
+        ];
+
+        let startAngle = -Math.PI / 2;
+        filtered.forEach((slice, idx) => {
+          const angle = (slice.value / total) * Math.PI * 2;
+          const endAngle = startAngle + angle;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, r, startAngle, endAngle);
+          ctx.closePath();
+          ctx.fillStyle = colors[idx % colors.length];
+          ctx.fill();
+          startAngle = endAngle;
+        });
+
+        // Minimal legend under the pie
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        let legendY = size + 12;
+        const legendX = 10;
+        filtered.forEach((slice, idx) => {
+          const pct = (slice.value / total) * 100;
+          ctx.fillStyle = colors[idx % colors.length];
+          ctx.fillRect(legendX, legendY - 5, 10, 10);
+          ctx.fillStyle = "#000000";
+          const label = `${slice.label} (${slice.value.toFixed(1)} / ${pct.toFixed(0)}%)`;
+          ctx.fillText(label, legendX + 16, legendY);
+          legendY += 14;
+        });
+
+        return canvas.toDataURL("image/png");
+      };
+
+      await ensureArabicFont();
+
+      // ---------- DATASET: APPROVED LEAVES IN WORKING YEAR ----------
+      // Use the SAME logic as the rest of the screen: getWorkingYearWindow + historyNorm
+      const win = getWorkingYearWindow();
+      const today = new Date();
+
+      // if no working year window, just use full history
+      const windowStart = win?.start ?? new Date(1970, 0, 1);
+      const windowEnd =
+        win?.end ??
+        new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+
+      type RowNorm = ReturnType<typeof mapRow>;
+
+      type ApprovedRow = RowNorm & {
+        effDays: number;
+        clipStart: Date;
+        clipEnd: Date;
+        label: string;
+      };
+
+      const allHist: RowNorm[] = historyNorm;
+
+      const approvedRowsForWindow: ApprovedRow[] = allHist
+        .filter((h) => {
+          if (!h.startDate || !h.endDate) return false;
+          if (!isApprovedLike(h.status || "")) return false;
+          const st = new Date(h.startDate);
+          const en = new Date(h.endDate);
+          return !(en < windowStart || st > windowEnd);
+        })
+        .map((h) => {
+          const st = new Date(h.startDate!);
+          const en = new Date(h.endDate!);
+          const a = st < windowStart ? windowStart : st;
+          const b = en > windowEnd ? windowEnd : en;
+          const eff = countWorkingDaysStrict(a, b);
+          const meta = getTypeMeta(h);
+          const label = meta.code
+            ? meta.name
+              ? `${meta.code} — ${meta.name}`
+              : meta.code
+            : meta.name || h.type || "-";
+          return { ...h, effDays: eff, clipStart: a, clipEnd: b, label };
+        })
+        .filter((r) => r.effDays > 0)
+        .sort(
+          (a, b) => a.clipStart.getTime() - b.clipStart.getTime()
         );
-        doc.setTextColor(0);
-      };
 
-      // ---------- Header / title ----------
+      const approvedTotalFromRows = approvedRowsForWindow.reduce(
+        (s, r) => s + r.effDays,
+        0
+      );
+
+      // ---------- HEADER ----------
       const fmtHdr = (d: Date) =>
         d.toLocaleDateString("en-GB", {
           day: "numeric",
           month: "short",
           year: "numeric",
         });
-      const periodStr = `Period: ${fmtHdr(periodFrom)} TO ${fmtHdr(periodTo)}`;
+      const periodStr = win
+        ? `Working year: ${fmtHdr(win.start)} TO ${fmtHdr(
+            new Date(win.end.getTime() - 86400000)
+          )}`
+        : `Up to: ${fmtHdr(today)}`;
       const printedAt = format(new Date(), "yyyy-MM-dd HH:mm:ss");
 
       try {
         const logo = await loadImageAsDataURL("../../Gaja_out_black.png");
         if (logo) doc.addImage(logo, "PNG", M, y, 40, 32);
-      } catch {}
+      } catch {
+        // ignore
+      }
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
       doc.text("Leave Balance Report", pageWidth - M, y + 14, {
@@ -533,23 +612,25 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
       doc.setFontSize(10);
       doc.text(periodStr, pageWidth - M, y + 30, { align: "right" });
       y += 46;
-
       doc.setDrawColor(220);
       doc.setLineWidth(0.4);
       doc.line(M, y, pageWidth - M, y);
       y += sectionGap;
 
-      // ---------- Employee info card ----------
+      // ---------- EMPLOYEE INFO (ARABIC-AWARE) ----------
       newPageIfNeeded(110);
       const empCard = drawCard(96, {
         stroke: [210, 210, 210],
         fill: [248, 248, 248],
       });
+
       const name = String(
         employeeInfo?.NAME ||
           employeeInfo?.FULL_NAME ||
           employeeInfo?.NOM_PRENOM ||
-          `${employeeInfo?.FIRST_NAME ?? ""} ${employeeInfo?.LAST_NAME ?? ""}` ||
+          `${employeeInfo?.FIRST_NAME ?? ""} ${
+            employeeInfo?.LAST_NAME ?? ""
+          }` ||
           ""
       ).trim();
       const id = String(employeeInfo?.ID_EMP ?? employeeId ?? "").trim();
@@ -569,364 +650,184 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
         ).trim()
       );
 
+      const col2 = empCard.padX + (empCard.w - 2 * cardPad) / 2 + 10;
+
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.text("Employee Information", empCard.padX, empCard.padY + 2);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      const col2 = empCard.padX + (empCard.w - 2 * cardPad) / 2 + 10;
+
       let yy = empCard.padY + 24;
-      doc.text("Name:", empCard.padX, yy);
-      doc.setFont("helvetica", "normal");
-      doc.text(name || "—", empCard.padX + 72, yy);
-      doc.setFont("helvetica", "bold");
-      doc.text("Employee ID:", col2, yy);
-      doc.setFont("helvetica", "normal");
-      doc.text(id || "—", col2 + 92, yy);
+
+      const drawLabelPair = (
+        label: string,
+        value: string,
+        xLabel: number,
+        xValue: number
+      ) => {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.text(label, xLabel, yy);
+        const arabic = hasArabic(value);
+        doc.setFont(arabic ? "NotoNaskhArabic" : "helvetica", "normal");
+        doc.text(value || "—", xValue, yy);
+        doc.setFont("helvetica", "bold");
+      };
+
+      drawLabelPair("Name:", name, empCard.padX, empCard.padX + 72);
+      drawLabelPair("Employee ID:", id, col2, col2 + 92);
       yy += 18;
-      doc.setFont("helvetica", "bold");
-      doc.text("Job Title:", empCard.padX, yy);
-      doc.setFont("helvetica", "normal");
-      doc.text(job || "—", empCard.padX + 72, yy);
-      doc.setFont("helvetica", "bold");
-      doc.text("PS:", col2, yy);
-      doc.setFont("helvetica", "normal");
-      doc.text(ps || "—", col2 + 92, yy);
+      drawLabelPair("Job Title:", job, empCard.padX, empCard.padX + 72);
+      drawLabelPair("PS:", ps, col2, col2 + 92);
+
       y += empCard.h + sectionGap;
 
-      // ---------- Balance Summary card ----------
+      // ---------- SUMMARY & WORKING DAYS PRESENT ----------
       newPageIfNeeded(110);
-      const balCard = drawCard(96, {
+      const balCard = drawCard(110, {
         stroke: [200, 200, 200],
         fill: [245, 246, 250],
       });
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text("Balance Summary (as of today)", balCard.padX, balCard.padY + 2);
 
       const entitlementVal = computedEntitlement ?? balance?.entitlement ?? 30;
-      const approvedInPeriod = (() => {
-        let sum = 0;
-        for (const h of periodRows)
-          if (isApprovedLike(h.status || ""))
-            sum += countWorkingDaysStrict(h._a, h._b);
-        return Number(sum.toFixed(2));
-      })();
+
+      let totalWorkingSinceContract = 0;
+      let totalLeaveWorking = 0;
+      if (contractStartDate) {
+        const s = new Date(contractStartDate);
+        s.setHours(0, 0, 0, 0);
+        const e = new Date(today);
+        e.setHours(0, 0, 0, 0);
+
+        const d = new Date(s);
+        while (d <= e) {
+          if (d.getDay() !== 5 && !holidaySetState.has(yyyy_mm_dd(d))) {
+            totalWorkingSinceContract++;
+          }
+          d.setDate(d.getDate() + 1);
+        }
+
+        allHist.forEach((h) => {
+          if (!isApprovedLike(h.status || "")) return;
+          if (!h.startDate || !h.endDate) return;
+          const st = new Date(h.startDate);
+          const en = new Date(h.endDate);
+          const from = st < s ? s : st;
+          const to = en > e ? e : en;
+          if (to < from) return;
+          totalLeaveWorking += countWorkingDaysStrict(from, to);
+        });
+      }
+      const workingDaysPresent = Math.max(
+        0,
+        totalWorkingSinceContract - totalLeaveWorking
+      );
 
       doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      const colW = (balCard.w - 2 * cardPad) / 3;
-      const c1 = balCard.padX,
-        c2 = balCard.padX + colW + 8,
-        c3 = balCard.padX + 2 * colW + 16;
-      let by = balCard.padY + 26;
-      doc.text("Annual Entitlement", c1, by);
-      doc.text("Approved (in period)", c2, by);
-      doc.text("Remaining Balance", c3, by);
-      by += 20;
+      doc.setFontSize(12);
+      doc.text(
+        "Balance Summary (Working Year)",
+        balCard.padX,
+        balCard.padY + 2
+      );
 
+      const colW = (balCard.w - 2 * cardPad) / 2;
+      const c1 = balCard.padX;
+      const c2 = balCard.padX + colW + 12;
+      let by = balCard.padY + 26;
+
+      doc.setFontSize(10);
+      doc.text("Annual Entitlement", c1, by);
+      doc.text("Approved (working year)", c2, by);
+      by += 18;
       doc.setFont("helvetica", "normal");
       doc.text(`${entitlementVal.toFixed(0)} days`, c1, by);
-      doc.text(`${approvedInPeriod.toFixed(2)} days`, c2, by);
+      doc.text(`${approvedTotalFromRows.toFixed(2)} days`, c2, by);
+      by += 18;
+
       doc.setFont("helvetica", "bold");
-      doc.text(`${remainingDaysRounded.toFixed(2)} days`, c3, by);
+      doc.text("Remaining Balance (YTD)", c1, by);
+      doc.text("Working Days Present", c2, by);
+      by += 18;
+      doc.setFont("helvetica", "normal");
+      doc.text(`${remainingDaysRounded.toFixed(2)} days`, c1, by);
+      if (contractStartDate) {
+        doc.text(
+          `${workingDaysPresent.toFixed(0)} days since ${fmtHdr(
+            contractStartDate
+          )}`,
+          c2,
+          by
+        );
+      } else {
+        doc.text("—", c2, by);
+      }
+
       y += balCard.h + sectionGap;
 
-      // ---------- Leave Utilization (visuals + frequency + per-type mix) ----------
-      newPageIfNeeded(210);
-      const utilCard = drawCard(190, {
+      // ---------- PIE CHARTS (TIED TO THE SAME APPROVED ROWS) ----------
+      const perTypeAgg = new Map<string, number>();
+      approvedRowsForWindow.forEach((r) => {
+        const key = r.label || "-";
+        perTypeAgg.set(key, (perTypeAgg.get(key) || 0) + r.effDays);
+      });
+      const perTypeData = Array.from(perTypeAgg.entries()).map(
+        ([label, value]) => ({ label, value })
+      );
+
+      const usedVsRemainingData = [
+        { label: "Used (working year)", value: approvedTotalFromRows },
+        {
+          label: "Remaining",
+          value: Math.max(0, entitlementVal - approvedTotalFromRows),
+        },
+      ];
+
+      newPageIfNeeded(300);
+      const pieCard = drawCard(300, {
         stroke: [200, 200, 200],
         fill: [252, 252, 252],
       });
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
-      doc.text("Leave Utilization", utilCard.padX, utilCard.padY + 2);
-
-      // Metrics
-      // ---------- Leave Utilization (visuals + frequency + per-type mix) ----------
-(() => {
-  // --- Metrics & data prep (unchanged core math) ---
-  const approvedYTD = approvedDaysYTD;
-  const entitlementVal = computedEntitlement ?? balance?.entitlement ?? 30;
-
-  // Accrued so far (same basis as remainingDaysRounded)
-  const now = new Date();
-  let accruedSoFar = 0;
-  if (contractStartDate) {
-    const annivThisYear = new Date(
-      now.getFullYear(),
-      contractStartDate.getMonth(),
-      contractStartDate.getDate()
-    );
-    const workingYearStart =
-      annivThisYear <= now
-        ? annivThisYear
-        : new Date(
-            now.getFullYear() - 1,
-            contractStartDate.getMonth(),
-            contractStartDate.getDate()
-          );
-    const monthsDiff =
-      (now.getFullYear() - workingYearStart.getFullYear()) * 12 +
-      (now.getMonth() - workingYearStart.getMonth());
-    const includeThisMonth = now.getDate() >= workingYearStart.getDate();
-    const monthsElapsed = Math.min(
-      12,
-      Math.max(0, monthsDiff + (includeThisMonth ? 1 : 0))
-    );
-    const ratePerMonth = entitlementVal >= 45 ? 3.75 : 2.5;
-    accruedSoFar = monthsElapsed * ratePerMonth;
-  }
-  const utilVsEnt = entitlementVal > 0 ? approvedYTD / entitlementVal : 0;
-  const utilVsAccrued =
-    accruedSoFar > 0 ? Math.min(1, approvedYTD / accruedSoFar) : 0;
-
-  // Frequency (approved events in current working year)
-  const workingYearWindow = getWorkingYearWindow();
-  const approvedInWY = (historyNorm || [])
-    .filter((h) => h.startDate && h.endDate && isApprovedLike(h.status || ""))
-    .filter((h) => {
-      if (!workingYearWindow) return false;
-      const st = new Date(h.startDate!);
-      const en = new Date(h.endDate!);
-      return !(en < workingYearWindow.start || st > workingYearWindow.end);
-    })
-    .sort(
-      (a, b) =>
-        new Date(a.startDate!).getTime() - new Date(b.startDate!).getTime()
-    );
-
-  const eventsCount = approvedInWY.length;
-  let avgGapDays = 0;
-  if (eventsCount > 1) {
-    let totalGap = 0;
-    for (let i = 1; i < eventsCount; i++) {
-      const prevEnd = new Date(approvedInWY[i - 1].endDate!);
-      const curStart = new Date(approvedInWY[i].startDate!);
-      totalGap += Math.max(
-        0,
-        Math.round(
-          (new Date(curStart.setHours(0, 0, 0, 0)).getTime() -
-            new Date(prevEnd.setHours(0, 0, 0, 0)).getTime()) /
-            86400000
-        )
-      );
-    }
-    avgGapDays = totalGap / (eventsCount - 1);
-  }
-  const monthsCovered = workingYearWindow
-    ? Math.max(
-        1,
-        (workingYearWindow.end.getFullYear() -
-          workingYearWindow.start.getFullYear()) *
-          12 +
-          (workingYearWindow.end.getMonth() -
-            workingYearWindow.start.getMonth()) +
-          1
-      )
-    : 12;
-  const eventsPerMonth = eventsCount / monthsCovered;
-
-  // Per-type share (approved days in the SELECTED PERIOD)
-  const perTypeDays = new Map<string, { label: string; days: number }>();
-  for (const r of periodRows) {
-    if (!isApprovedLike(r.status || "")) continue;
-    const eff = countWorkingDaysStrict(r._a, r._b);
-    const idKey =
-      r.idCan != null
-        ? String(r.idCan)
-        : r.typeCode != null
-          ? String(r.typeCode)
-          : undefined;
-    const meta = idKey ? leaveTypeMap[idKey] : undefined;
-    const code = (
-      meta?.code || String(r.typeCode || r.type || "")
-    ).toUpperCase();
-    const name = meta?.name || r.typeName || "";
-    const label = code
-      ? name
-        ? `${code} — ${name}`
-        : code
-      : name || r.type || "-";
-    const key = label || "-";
-    perTypeDays.set(key, {
-      label: key,
-      days: (perTypeDays.get(key)?.days || 0) + eff,
-    });
-  }
-  const perTypeSorted = Array.from(perTypeDays.values()).sort(
-    (a, b) => b.days - a.days
-  );
-  const totalApprovedDaysPeriod =
-    perTypeSorted.reduce((s, r) => s + r.days, 0) || 1; // avoid /0
-
-  // --- Compute dynamic card height so content never overflows ---
-  const barsBlockH =
-    36 /*title gap & labels*/ + 2 * (14 /*bar*/ + 26) /*inter-bar space*/;
-  const freqBlockH = 18 /*title*/ + 3 * 16 /*three rows*/ + 8;
-  const maxMixRows = Math.min(perTypeSorted.length, 8);
-  const mixBlockH =
-    (perTypeSorted.length ? 18 /*title*/ : 0) +
-    maxMixRows * (10 /*bar*/ + 10) /*gap*/;
-  const utilCardH =
-    24 /*title*/ +
-    barsBlockH +
-    16 /*gap*/ +
-    freqBlockH +
-    12 /*gap*/ +
-    mixBlockH +
-    16;
-
-  newPageIfNeeded(utilCardH);
-  const utilCard = drawCard(utilCardH, {
-    stroke: [200, 200, 200],
-    fill: [252, 252, 252],
-  });
-
-  // --- Title ---
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text("Leave Utilization", utilCard.padX, utilCard.padY + 2);
-
-  // --- Bars (center/top of card) ---
-  const barX = utilCard.padX;
-  let barY = utilCard.padY + 30;
-  const barW = Math.min(460, utilCard.w - 2 * cardPad);
-  const barH = 14;
-
-  drawProgress(
-    barX,
-    barY,
-    barW,
-    barH,
-    utilVsEnt,
-    "vs Annual Entitlement",
-    `${approvedYTD.toFixed(2)} / ${entitlementVal.toFixed(0)} days`
-  );
-  barY += barH + 26;
-  drawProgress(
-    barX,
-    barY,
-    barW,
-    barH,
-    utilVsAccrued,
-    "vs Accrued To Date",
-    `${approvedYTD.toFixed(2)} / ${accruedSoFar.toFixed(2)} days`
-  );
-
-  // --- Frequency (STACKED UNDER the bars) ---
-  let blockY = barY + barH + 16;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("Frequency (working year)", utilCard.padX, blockY);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  blockY += 16;
-  doc.text(`Approved events: ${eventsCount}`, utilCard.padX, blockY);
-  blockY += 16;
-  doc.text(
-    `Events per month: ${eventsPerMonth.toFixed(2)}`,
-    utilCard.padX,
-    blockY
-  );
-  blockY += 16;
-  doc.text(
-    `Avg gap between leaves: ${avgGapDays.toFixed(0)} days`,
-    utilCard.padX,
-    blockY
-  );
-  blockY += 12;
-
-  // --- Per-type share (STACKED UNDER frequency) ---
-  if (perTypeSorted.length) {
-    blockY += 6;
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Per-type share (period)", utilCard.padX, blockY);
-    blockY += 12;
-
-    const miniW = Math.min(480, utilCard.w - 2 * cardPad);
-    const labelW = 200; // left label area
-    const barW2 = Math.max(120, miniW - labelW - 46); // bar width
-    const miniBarH = 10;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    // draw up to maxMixRows rows so it fits the precomputed card height
-    const rowsToDraw = Math.min(perTypeSorted.length, 8);
-    for (let i = 0; i < rowsToDraw; i++) {
-      const r = perTypeSorted[i];
-      const pct = Math.max(0, Math.min(1, r.days / totalApprovedDaysPeriod));
-
-      // left label (trim/wrap)
-      const labelText = r.label || "-";
-      const labelLines = doc.splitTextToSize(labelText, labelW);
-      // ensure at least one line height space
-      const rowH = Math.max(
-        miniBarH,
-        (labelLines.length ? labelLines.length : 1) * 10
+      doc.text(
+        "Leave Distribution & Balance (Working Year)",
+        pieCard.padX,
+        pieCard.padY + 2
       );
 
-      // label
-      doc.text(labelLines, utilCard.padX, blockY + 8);
+      const pieYTop = pieCard.padY + 20;
+      const imgWidth = 250;
+      const imgHeight = 250;
+      const imgX1 = pieCard.padX;
+      const imgX2 = pieCard.padX + imgWidth + 30;
 
-      // bar
-      const bx = utilCard.padX + labelW + 8;
-      doc.setDrawColor(225);
-      doc.roundedRect(bx, blockY, barW2, miniBarH, 4, 4);
-      doc.setFillColor(100, 140, 200);
-      doc.roundedRect(
-        bx,
-        blockY,
-        Math.max(0, barW2 * pct),
-        miniBarH,
-        4,
-        4,
-        "F"
+      const usedRemChart = await createPieChartImage(
+        "Entitlement: used vs remaining",
+        usedVsRemainingData
       );
 
-      // percent + absolute to the right
-      const pctText = `${(pct * 100).toFixed(0)}%`;
-      const absText = `${r.days.toFixed(2)} d`;
-      doc.text(pctText, bx + barW2 + 6, blockY + 8);
-      doc.text(absText, bx + barW2 + 48, blockY + 8);
+      doc.addImage(
+          usedRemChart,
+          "PNG",
+          imgX1,
+          pieYTop,
+          imgWidth,
+          imgHeight
+        );
 
-      // next row (extra spacing)
-      blockY += Math.max(rowH, miniBarH) + 10;
-    }
-  }
-
-  // footnote
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(8);
-  doc.setTextColor(100);
-  doc.text(
-    "Counts exclude Fridays and configured holidays.",
-    utilCard.padX,
-    utilCard.y + utilCard.h - 10
-  );
-  doc.setTextColor(0);
-
-  // advance page cursor after the card
-  y += utilCard.h + sectionGap;
-})();
-
-
-      // footnote
       doc.setFont("helvetica", "italic");
       doc.setFontSize(8);
       doc.setTextColor(100);
       doc.text(
         "Counts exclude Fridays and configured holidays.",
-        utilCard.padX,
-        utilCard.y + utilCard.h - 10
+        pieCard.padX,
+        pieCard.y + pieCard.h - 10
       );
       doc.setTextColor(0);
 
-      y += utilCard.h + sectionGap;
+      y += pieCard.h + sectionGap;
 
-      // ---------- Approved Leave History (UI-style; more row spacing; “Approved”) ----------
+      // ---------- APPROVED LEAVES TABLE (SAME DATA AS ABOVE) ----------
       {
         const fmtDate = (d: Date) =>
           d.toLocaleDateString("en-GB", {
@@ -935,39 +836,8 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
             year: "numeric",
           });
 
-        type HistRow = ReturnType<typeof mapRow> & {
-          _a: Date;
-          _b: Date;
-          eff: number;
-          label: string;
-        };
-        const approvedRows: HistRow[] = periodRows
-          .filter((r) => isApprovedLike(r.status || ""))
-          .map((r) => {
-            const idKey =
-              r.idCan != null
-                ? String(r.idCan)
-                : r.typeCode != null
-                  ? String(r.typeCode)
-                  : undefined;
-            const meta = idKey ? leaveTypeMap[idKey] : undefined;
-            const code = (
-              meta?.code || String(r.typeCode || r.type || "")
-            ).toUpperCase();
-            const name = meta?.name || r.typeName || "";
-            const label = code
-              ? name
-                ? `${code} — ${name}`
-                : code
-              : name || r.type || "-";
-            const eff = countWorkingDaysStrict(r._a, r._b);
-            return { ...r, eff, label };
-          })
-          .sort((a, b) => b._a.getTime() - a._a.getTime());
-
-        if (approvedRows.length) {
+        if (approvedRowsForWindow.length) {
           newPageIfNeeded(180);
-          // Section header bar
           const headH = 34;
           doc.setFillColor(240, 242, 246);
           doc.setDrawColor(220);
@@ -982,7 +852,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           );
           doc.setFont("helvetica", "bold");
           doc.setFontSize(12);
-          doc.text("Leave History (Approved in Period)", M + 10, y + 22);
+          doc.text(
+            "Approved Leave Details (Working Year)",
+            M + 10,
+            y + 22
+          );
           y += headH + 12;
 
           // Table header
@@ -991,12 +865,10 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           doc.setTextColor(70);
           const colTypeX = M;
           const colPeriodX = colTypeX + 240;
-          const colDaysX = pageWidth - M - 140;
-          const colStatusX = pageWidth - M;
+          const colDaysX = pageWidth - M - 80;
           doc.text("Type", colTypeX, y);
           doc.text("Period", colPeriodX, y);
           doc.text("Days", colDaysX, y, { align: "right" });
-          doc.text("Status", colStatusX, y, { align: "right" });
           doc.setTextColor(0);
           y += 8;
           doc.setDrawColor(225);
@@ -1004,23 +876,23 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           doc.line(M, y, pageWidth - M, y);
           y += 12;
 
-          await ensureArabicFont();
-          const hasArabic = (s: string) => /[\u0600-\u06FF]/.test(s);
           const typeWrapW = colPeriodX - colTypeX - 20;
           const periodWrapW = colDaysX - colPeriodX - 22;
 
-          for (const r of approvedRows) {
-            const periodText = `${fmtDate(r._a)} — ${fmtDate(r._b)}`;
+          for (const r of approvedRowsForWindow) {
+            const periodText = `${fmtDate(r.clipStart)} — ${fmtDate(
+              r.clipEnd
+            )}`;
             const typeWrap = doc.splitTextToSize(r.label || "-", typeWrapW);
             const periodWrap = doc.splitTextToSize(periodText, periodWrapW);
             const rowH = Math.max(
               14,
               Math.max(typeWrap.length, periodWrap.length) * 10 + 4
-            ); // taller rows
-            newPageIfNeeded(rowH + rowGap + 6);
+            );
+            newPageIfNeeded(rowH + 10);
 
-            const useArabic = hasArabic(r.label || "");
-            doc.setFont(useArabic ? "NotoNaskhArabic" : "helvetica", "normal");
+            const arabicType = hasArabic(r.label || "");
+            doc.setFont(arabicType ? "NotoNaskhArabic" : "helvetica", "normal");
             doc.setFontSize(9);
             doc.text(typeWrap, colTypeX, y);
 
@@ -1028,25 +900,26 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
             doc.text(periodWrap, colPeriodX, y);
 
             doc.setFont("courier", "normal");
-            doc.text((r.eff ?? 0).toFixed(2), colDaysX, y, { align: "right" });
+            doc.text(r.effDays.toFixed(2), colDaysX, y, {
+              align: "right",
+            });
 
-            doc.setFont("helvetica", "bold");
-            doc.text("Approved", colStatusX, y, { align: "right" }); // Capitalized
-
-            y += rowH + rowGap; // extra row spacing
+            y += rowH + 6;
             doc.setDrawColor(240);
             doc.setLineWidth(0.3);
             doc.line(M, y, pageWidth - M, y);
-            y += 6;
+            y += 4;
           }
 
-          // Period sum
-          const sumEff = approvedRows.reduce((s, r) => s + (r.eff || 0), 0);
+          const sumEff = approvedRowsForWindow.reduce(
+            (s, r) => s + r.effDays,
+            0
+          );
           newPageIfNeeded(22);
           doc.setFont("helvetica", "bold");
           doc.setFontSize(10);
           doc.text(
-            `Approved total in period: ${sumEff.toFixed(2)} days`,
+            `Approved total in working year: ${sumEff.toFixed(2)} days`,
             M,
             y + 2
           );
@@ -1055,45 +928,22 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           newPageIfNeeded(60);
           doc.setFont("helvetica", "italic");
           doc.setFontSize(10);
-          doc.text("No approved leave found in the selected period.", M, y);
+          doc.text("No approved leave found in the working year.", M, y);
           y += 16;
         }
       }
 
-      // ---------- Footer (no bottom-right balance) ----------
-      const pageCount = (doc as any).internal.getNumberOfPages();
-      for (let i = 1; i <= pageCount; i++) {
-        (doc as any).setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(120);
-        doc.text(
-          `${t("leave.balance.generatedBy", "Generated by")}: ${name || id || "User"}  |  ${printedAt}`,
-          M,
-          pageHeight - 30
-        );
-        doc.text(
-          `${t("leave.balance.page", "Page")} ${i}/${pageCount}`,
-          pageWidth - M,
-          pageHeight - 30,
-          { align: "right" }
-        );
-        doc.setTextColor(0);
-      }
-
-      // ---------- Save ----------
+      // ---------- FOOTER ----------
       const safeName =
         (name
           ? name.replace(/[^a-z0-9_\u0600-\u06FF]+/gi, "_")
           : id || "employee") +
         `_leave_report_${printedAt.replace(/[: ]/g, "_")}.pdf`;
       doc.save(safeName);
-      showToast(
-        t("leave.balance.pdfExported", "PDF exported successfully"),
-        "success"
-      );
+      showToast("PDF exported successfully", "success");
     } catch (e) {
       console.error("PDF export failed:", e);
-      showToast(t("leave.balance.pdfError", "Failed to export PDF"), "error");
+      showToast("Failed to export PDF", "error");
     }
   };
 
@@ -2114,12 +1964,72 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
                 "#121212",
                 gold
               )}
-              {statCard(
-                t("leave.balance.sickLeaveYtd", "Sick leave (YTD)"),
-                sickDaysYTD.toFixed(2),
-                "#263238",
-                "#ffffff"
-              )}
+              {/* Compact breakdown (approved-only, non-zero) */}
+              <Card
+                sx={{
+                  borderRadius: 2,
+                  boxShadow: 3,
+                  border: `1px solid ${gold}33`,
+                  minWidth: 300,
+                  flex: "1 1 360px",
+                }}
+              >
+                <CardContent sx={{ p: 2 }}>
+                  <Typography variant="overline" sx={{ opacity: 0.9 }}>
+                    {t("leave.balance.breakdown", "Breakdown")}
+                  </Typography>
+                  <TableContainer component={Paper} elevation={0}>
+                    <Table size="small" aria-label="approved-by-type-mini">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 700 }}>
+                            {t("leave.balance.type", "Type")}
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>
+                            {t("leave.balance.approved", "Approved")}
+                          </TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {(typeSummary
+                          .filter((r) => (r.approvedDaysYTD || 0) > 0)
+                          .sort((a, b) => b.approvedDaysYTD - a.approvedDaysYTD)
+                        ).map((r) => (
+                          <TableRow key={r.label} hover>
+                            <TableCell>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {r.code || "-"}
+                              </Typography>
+                              {r.name && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {r.name}
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              <Chip
+                                label={r.approvedDaysYTD.toFixed(2)}
+                                size="small"
+                                color="success"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {typeSummary.filter((r) => (r.approvedDaysYTD || 0) > 0).length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={2} align="center">
+                              <Typography variant="caption" color="text.secondary">
+                                {t("leave.balance.noUsage", "No leave usage recorded in the working year.")}
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </CardContent>
+              </Card>
             </Box>
 
             {/* Active leave countdown (if any) */}

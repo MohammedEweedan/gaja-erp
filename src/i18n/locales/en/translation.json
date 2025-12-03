@@ -24,6 +24,12 @@
     "currencyBalance": "Currency Balance",
     "lydBalance": "LYD Balance"
   },
+  "notFound": {
+    "title": "Oops! Page Not Found",
+    "description": "The page you are looking for might have been removed, had its name changed, or is temporarily unavailable.",
+    "goBack": "Go Back",
+    "goHome": "Go to Home"
+  },
   "header": {
     "profile": "Profile",
     "currentTheme": "Current Theme",
@@ -46,7 +52,9 @@
   "tooltip": {
     "lightMode": "Light Mode",
     "darkMode": "Dark Mode",
-    "logout": "Log out"
+    "logout": "Log out",
+    "hideDock": "Hide dock",
+    "showDock": "Show dock"
   },
   "aria": {
     "toggleTheme": "Toggle theme",
@@ -283,6 +291,10 @@
     "isClosed": "Closed?",
     "yes": "Yes",
     "no": "No",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "approve": "Approve",
+    "reject": "Reject",
     "warningIncoming": "New arrival has come and will be received soon. Please check the distribution list.",
     "status": "Status",
     "received": "Received",
@@ -306,6 +318,7 @@
       "receive": "Receive"
     }
   },
+  "actions": "Actions",
   "settings": {
         "worksPeriod": {
         "title": "Works Period",
@@ -480,6 +493,20 @@
         "desc": "Set up the contracts types for all employees."
       },
       "leave": {
+    "vacations": {
+      "title": "Vacations",
+      "subtitle": "Company calendar and leave tools",
+      "employee": "Employee",
+      "allEmployees": "All employees",
+      "selected": "Showing data for",
+      "tools": "Leave Tools"
+    },
+    "pending": {
+      "title": "Review Leave Requests",
+      "tooltipOne": "Pending for this employee",
+      "tooltipAll": "Pending for all employees",
+      "open": "Open pending requests"
+    },
         "title": "Leave",
         "desc": "Set up the leave for all employees."
       },
@@ -529,6 +556,7 @@
       "noEvents": "No events in this range"
     },
     "request": {
+      "title": "Leave Request",
       "leaveType": "Leave Type",
       "startDate": "Start Date",
       "endDate": "End Date",
@@ -545,6 +573,7 @@
       }
     },
     "balance": {
+      "title": "Leave Balance",
       "totalLeaves": "Total Leaves",
       "usedLeaves": "Used Leaves",
       "remainingLeaves": "Remaining Leaves",
@@ -552,16 +581,11 @@
       "accruedDays": "Accrued days",
       "leaveHistory": "Leave History",
       "type": "Type",
-      "period": "Period",
-      "days": "Days",
       "status": "Status",
       "fetchError": "Error fetching leave balance",
       "employeeDetails": "Employee Details",
-      "name": "Name",
       "employeeId": "Employee ID",
-      "jobTitle": "Job Title",
       "department": "Department",
-      "ps": "PS",
       "costCenter": "Cost Center",
       "monthlyLedger": "Monthly Leave Ledger",
       "exportExcel": "Export to Excel",
@@ -576,7 +600,21 @@
       "rule45": "Using 45 days/year (age>=50 or exp>=20).",
       "rule30": "Using 30 days/year (age<50 and exp<20).",
       "turns50": "Turns 50 on",
-      "exp20": "20 years experience on"
+      "exp20": "20 years experience on",
+      "period": "Period",
+      "to": "TO",
+      "reportTitle": "Leave Report",
+      "employeeInfo": "Employee Information",
+      "name": "Name:",
+      "empId": "Employee ID:",
+      "jobTitle": "Job Title:",
+      "ps": "PS:",
+      "approvedSection": "Approved Leave (Period)",
+      "approvedTotal": "Approved total in period",
+      "days": "days"
+    },
+    "codes": {
+      "title": "Code Management"
     },
     "holidays": {
       "title": "Public Holidays",
@@ -590,6 +628,7 @@
       "doublePay": "Double Pay"
     },
     "types": {
+      "title": "Leave Types",
       "annual": "Annual Leave",
       "sick": "Sick Leave",
       "personal": "Personal Leave",

@@ -42,6 +42,7 @@ import { getAuthHeader } from "../../utils/auth";
 import { getCalendarLog, updateLeaveStatus } from "../../services/leaveService";
 import RuleIcon from "@mui/icons-material/Rule"; // distinct icon for review
 import CloseIcon from "@mui/icons-material/Close";
+import SettingsIcon from "@mui/icons-material/Settings";
 import { format } from "date-fns";
 import LeaveCodesManagement from "../../components/LeaveManagement/LeaveCodesManagement";
 
@@ -102,6 +103,8 @@ const VacationsPage: React.FC = () => {
     null
   );
   const [loadingPending, setLoadingPending] = useState(false);
+  // Codes management dialog
+  const [codesOpen, setCodesOpen] = useState(false);
 
   const handleChange = (e: SelectChangeEvent<string>) =>
     setSelected(e.target.value);
@@ -269,34 +272,41 @@ const VacationsPage: React.FC = () => {
             </Stack>
           }
           action={
-            <Tooltip
-              title={
-                employeeId
-                  ? t("leave.pending.tooltipOne", "Pending for this employee")
-                  : t("leave.pending.tooltipAll", "Pending for all employees")
-              }
-            >
-              <span>
-                <Badge
-                  color="error"
-                  overlap="circular"
-                  badgeContent={pendingCount}
-                  invisible={pendingCount === 0}
-                  sx={{ "& .MuiBadge-badge": { fontWeight: 700 } }}
-                >
-                  <IconButton
-                    size="small"
-                    onClick={openPendingDialog}
-                    aria-label={t(
-                      "leave.pending.open",
-                      "Open pending requests"
-                    )}
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Tooltip
+                title={
+                  employeeId
+                    ? t("leave.pending.tooltipOne", "Pending for this employee")
+                    : t("leave.pending.tooltipAll", "Pending for all employees")
+                }
+              >
+                <span>
+                  <Badge
+                    color="error"
+                    overlap="circular"
+                    badgeContent={pendingCount}
+                    invisible={pendingCount === 0}
+                    sx={{ "& .MuiBadge-badge": { fontWeight: 700 } }}
                   >
-                    <RuleIcon />
-                  </IconButton>
-                </Badge>
-              </span>
-            </Tooltip>
+                    <IconButton
+                      size="small"
+                      onClick={openPendingDialog}
+                      aria-label={t(
+                        "leave.pending.open",
+                        "Open pending requests"
+                      )}
+                    >
+                      <RuleIcon />
+                    </IconButton>
+                  </Badge>
+                </span>
+              </Tooltip>
+              <Tooltip title={t("codes.title", "Codes Management") as string}>
+                <IconButton size="small" onClick={() => setCodesOpen(true)} aria-label="open-codes-settings">
+                  <SettingsIcon />
+                </IconButton>
+              </Tooltip>
+            </Stack>
           }
           sx={{ pb: 0.5 }}
         />
@@ -552,6 +562,17 @@ const VacationsPage: React.FC = () => {
           <Button onClick={fetchPending} variant="outlined">
             {t("common.refresh", "Refresh")}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Codes Management dialog */}
+      <Dialog open={codesOpen} onClose={() => setCodesOpen(false)} fullWidth maxWidth="lg">
+        <DialogTitle sx={{ pb: 0 }}>{t("codes.title", "Codes Management")}</DialogTitle>
+        <DialogContent dividers sx={{ pt: 1.5 }}>
+          <LeaveCodesManagement />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCodesOpen(false)}>{t("common.close", "Close")}</Button>
         </DialogActions>
       </Dialog>
     </Box>

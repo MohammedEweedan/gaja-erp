@@ -52,7 +52,7 @@ export type PayrollRunResponse = {
   employees: Payslip[];
 };
 
-const API_BASE = "http://localhost:9000".replace(/\/+$/, "");
+const API_BASE = "http://192.168.3.60:9000".replace(/\/+$/, "");
 
 function absolute(url: string): string {
   if (API_BASE && /^https?:\/\//i.test(API_BASE)) {

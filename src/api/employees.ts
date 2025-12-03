@@ -14,7 +14,16 @@ const API_BASE = (process.env.REACT_APP_API_IP || "").replace(/\/+$/, "");
 /** Build an absolute URL from API_BASE + path */
 function absolute(url: string): string {
   const path = url.startsWith("/") ? url : `/${url}`;
+  // Prefer explicit API base when provided
   if (API_BASE && /^https?:\/\//i.test(API_BASE)) return `${API_BASE}${path}`;
+  // Fallback: infer backend at :9000 on the current host
+  try {
+    if (typeof window !== "undefined" && window.location) {
+      const base = `${window.location.protocol}//${window.location.hostname}:9000`;
+      return `${base}${path}`;
+    }
+  } catch {}
+  // Last resort: relative path (may fail without a dev proxy)
   return path;
 }
 
@@ -82,6 +91,45 @@ export async function listEmployees(): Promise<Employee[]> {
   const url = absolute("/employees");
   const payload = await http<any>(url, { headers: authHeaders() });
   return unwrapList<Employee>(payload);
+}
+
+/** Heuristic: decide if an employee is active */
+export function isActiveEmployee(e: any): boolean {
+  try {
+    // Explicit boolean fields first
+    const stateLike = (e?.STATE ?? e?.state ?? e?.ACTIVE ?? e?.active ?? e?.Status ?? e?.STATUS);
+    if (typeof stateLike === 'boolean') return stateLike;
+    if (typeof stateLike === 'number') {
+      if (stateLike === 0) return false;
+      if (stateLike === 1) return true;
+    }
+    if (stateLike != null) {
+      const s = String(stateLike).trim().toLowerCase();
+      if (s === 'inactive' || s === 'false' || s === 'no' || s === '0') return false;
+      if (s === 'active' || s === 'true' || s === 'yes' || s === '1') return true;
+    }
+
+    // Contract end date check (T_END / CONTRACT_END)
+    const endRaw = e?.T_END ?? e?.CONTRACT_END ?? e?.contract_end ?? e?.contractEnd;
+    if (endRaw) {
+      const d = new Date(String(endRaw));
+      if (!isNaN(d.getTime())) {
+        const today = new Date();
+        // End date strictly before today => inactive
+        if (d.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) return false;
+      }
+    }
+    // Default: active unless explicitly ended
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+/** Convenience: list only active employees */
+export async function listActiveEmployees(): Promise<Employee[]> {
+  const list = await listEmployees();
+  return (Array.isArray(list) ? list : []).filter(isActiveEmployee);
 }
 
 /** Get a single employee by id, with graceful fallbacks */

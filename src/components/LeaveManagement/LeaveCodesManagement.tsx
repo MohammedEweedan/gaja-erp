@@ -5,11 +5,10 @@ import {
   Button,
   Chip,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
+  DialogContent,
+  DialogActions,
   Divider,
-  Drawer,
   FormControl,
   FormControlLabel,
   Grid,
@@ -23,6 +22,8 @@ import {
   Snackbar,
   Stack,
   Switch,
+  Radio,
+  RadioGroup,
   Table,
   TableBody,
   TableCell,
@@ -59,11 +60,13 @@ export interface BaseCode {
   id?: string | number;
   code: string;
   label: string;
-  variables?: KV[];
-  rulesJson?: string; // JSON string (stored/edited as text)
   description?: string;
   // presentation
   color?: string | null;
+  // allowances
+  foodAllowance?: boolean;
+  commAllowance?: boolean;
+  transAllowance?: boolean;
 }
 
 export interface LeaveCode extends BaseCode {
@@ -82,23 +85,25 @@ export interface TimesheetCode extends BaseCode {
 const emptyLeave: LeaveCode = {
   code: "",
   label: "",
-  variables: [],
-  rulesJson: "",
   description: "",
   maxDays: null,
   paid: false,
   requiresDoctorNote: false,
   color: "",
+  foodAllowance: false,
+  commAllowance: false,
+  transAllowance: false,
 };
 
 const emptyTimesheet: TimesheetCode = {
   code: "",
   label: "",
-  variables: [],
-  rulesJson: "",
   description: "",
   billable: false,
   color: "",
+  foodAllowance: false,
+  commAllowance: false,
+  transAllowance: false,
 };
 
 function safeParseJson(txt?: string | null) {
@@ -129,11 +134,23 @@ function tsToUi(row: TSCode): LeaveCode | TimesheetCode {
     id: row.int_can,
     code: row.code,
     label: row.desig_can,
-    variables: [],               // not in DB; keep empty
-    rulesJson: row.Rule_days || "",
-    description: "",
-    color: "",
+    description: (row as any).description ?? "",
+    color: (row as any).color ?? "",
+    foodAllowance: !!(row as any).food_allowance,
+    commAllowance: !!(row as any).comm_allowance,
+    transAllowance: !!(row as any).trans_allowance,
   };
+  // Try to populate color from Rule_days if it's a JSON string
+  try {
+    const meta = safeParseJson(row.Rule_days);
+    if (meta && typeof meta === 'object') {
+      if ((meta as any).color && !base.color) (base as any).color = String((meta as any).color || "");
+      if ((meta as any).description && !base.description) (base as any).description = String((meta as any).description || "");
+      if ((meta as any).foodAllowance != null) (base as any).foodAllowance = !!(meta as any).foodAllowance;
+      if ((meta as any).commAllowance != null) (base as any).commAllowance = !!(meta as any).commAllowance;
+      if ((meta as any).transAllowance != null) (base as any).transAllowance = !!(meta as any).transAllowance;
+    }
+  } catch {}
 
   if ((row.max_day ?? 0) > 0) {
     // Leave code
@@ -155,15 +172,20 @@ function tsToUi(row: TSCode): LeaveCode | TimesheetCode {
 }
 
 // Map UI -> backend TS_Codes payload
-function uiToTsPayload(
-  ui: LeaveCode | TimesheetCode,
-  tab: "leave" | "timesheet"
-): Partial<TSCode> {
+function uiToTsPayload(ui: LeaveCode | TimesheetCode): Partial<TSCode> {
+  const isLeave = Number((ui as any).maxDays ?? 0) > 0;
   return {
     desig_can: ui.label,
     code: ui.code?.toUpperCase(),
-    max_day: tab === "leave" ? (ui as LeaveCode).maxDays ?? 0 : 0,
-    Rule_days: ui.rulesJson || "",
+    max_day: isLeave ? Number((ui as any).maxDays ?? 0) : 0,
+    // Write explicit columns directly to match DB schema
+    description: ui.description ?? null,
+    color: ui.color ?? null,
+    food_allowance: (ui as any).foodAllowance ?? false,
+    comm_allowance: (ui as any).commAllowance ?? false,
+    trans_allowance: (ui as any).transAllowance ?? false,
+    // Keep Rule_days empty to avoid truncation in legacy installs
+    Rule_days: "",
   };
 }
 
@@ -197,20 +219,13 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
   const [data, setData] = useState<LeaveCode | TimesheetCode>(
     (kind === "leave" ? emptyLeave : emptyTimesheet) as any
   );
-  const [jsonError, setJsonError] = useState<string | null>(null);
+  // no rules JSON field anymore
 
   useEffect(() => {
     if (!open) return;
-    setJsonError(null);
     if (initial) setData(initial);
     else setData((kind === "leave" ? emptyLeave : emptyTimesheet) as any);
   }, [open, initial, kind]);
-
-  const handleKVChange = (idx: number, key: string, value: string) => {
-    const arr = [...(data.variables || [])];
-    arr[idx] = { key, value };
-    setData({ ...data, variables: arr });
-  };
 
   const [allCodes, setAllCodes] = useState<CodeRow[]>([]);
   const [tab, setTab] = useState<"leave" | "timesheet">("leave");
@@ -233,46 +248,14 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
     return list;
   }, [allCodes, tab]);
 
-  const addKV = () =>
-    setData({
-      ...data,
-      variables: [...(data.variables || []), { key: "", value: "" }],
-    });
-  const removeKV = (idx: number) =>
-    setData({
-      ...data,
-      variables: (data.variables || []).filter((_, i) => i !== idx),
-    });
-
   const trySubmit = async () => {
-    // Validate JSON if present
-    if (data.rulesJson) {
-      try {
-        JSON.parse(data.rulesJson);
-        setJsonError(null);
-      } catch (e: any) {
-        setJsonError(t("codes.jsonInvalid", "Rules must be valid JSON."));
-        return;
-      }
-    }
     await onSubmit(data as any);
   };
 
-  const isLeave = kind === "leave";
+  const isLeave = Number((data as any)?.maxDays ?? 0) > 0;
 
   return (
-    <Drawer
-      anchor="right"
-      open={open}
-      onClose={onClose}
-      PaperProps={{
-        sx: {
-          width: { xs: "100%", sm: 520, md: 560 },
-          borderTopLeftRadius: { xs: 0, sm: 2 },
-          borderBottomLeftRadius: { xs: 0, sm: 2 },
-        },
-      }}
-    >
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
       <Box
         display="flex"
         alignItems="center"
@@ -315,6 +298,42 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
             onChange={(e) => setData({ ...data, label: e.target.value })}
           />
 
+          {/* Type selector to allow reassignment between Leave and Timesheet */}
+          <FormControl fullWidth>
+            <InputLabel>{t("codes.type", "Type")}</InputLabel>
+            <Select
+              label={t("codes.type", "Type")}
+              value={isLeave ? "leave" : "timesheet"}
+              onChange={(e) => {
+                const v = String(e.target.value);
+                if (v === "leave") {
+                  const current = Number((data as any).maxDays ?? 0);
+                  setData({
+                    ...data,
+                    maxDays: current > 0 ? current : 1,
+                  } as any);
+                } else {
+                  setData({
+                    ...data,
+                    maxDays: 0,
+                  } as any);
+                }
+              }}
+            >
+              <MenuItem value="leave">{t("codes.leave", "Leave")}</MenuItem>
+              <MenuItem value="timesheet">{t("codes.timesheet", "Timesheet")}</MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Description */}
+          <TextField
+            label={t("codes.description", "Description")}
+            value={data.description || ""}
+            onChange={(e) => setData({ ...data, description: e.target.value })}
+            multiline
+            minRows={2}
+          />
+
           {isLeave ? (
             <>
               <TextField
@@ -336,7 +355,9 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
                     <Switch
                       checked={!!(data as LeaveCode).paid}
                       onChange={(e) =>
-                        setData({ ...data, paid: e.target.checked } as any)
+                        setData(
+                          { ...data, paid: e.target.checked } as any
+                        )
                       }
                     />
                   }
@@ -347,10 +368,9 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
                     <Switch
                       checked={!!(data as LeaveCode).requiresDoctorNote}
                       onChange={(e) =>
-                        setData({
-                          ...data,
-                          requiresDoctorNote: e.target.checked,
-                        } as any)
+                        setData(
+                          { ...data, requiresDoctorNote: e.target.checked } as any
+                        )
                       }
                     />
                   }
@@ -368,9 +388,96 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
                   }
                 />
               }
-              label={t("codes.billable", "Billable")}
+              label={t("codes.paid", "Paid")}
             />
           )}
+
+          {/* Allowances: Yes/No radios per item */}
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 2,
+            }}
+          >
+            <Box sx={{ flex: "1 1 200px", minWidth: 200 }}>
+              <FormControl component="fieldset" fullWidth>
+                <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  {t("codes.foodAllowance", "Food allowance")}
+                </Typography>
+                <RadioGroup
+                  row
+                  value={data.foodAllowance ? "yes" : "no"}
+                  onChange={(e) =>
+                    setData({ ...data, foodAllowance: e.target.value === "yes" })
+                  }
+                >
+                  <FormControlLabel
+                    value="yes"
+                    control={<Radio size="small" />}
+                    label={t("common.yes", "Yes")}
+                  />
+                  <FormControlLabel
+                    value="no"
+                    control={<Radio size="small" />}
+                    label={t("common.no", "No")}
+                  />
+                </RadioGroup>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: "1 1 200px", minWidth: 200 }}>
+              <FormControl component="fieldset" fullWidth>
+                <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  {t("codes.commAllowance", "Communication allowance")}
+                </Typography>
+                <RadioGroup
+                  row
+                  value={data.commAllowance ? "yes" : "no"}
+                  onChange={(e) =>
+                    setData({ ...data, commAllowance: e.target.value === "yes" })
+                  }
+                >
+                  <FormControlLabel
+                    value="yes"
+                    control={<Radio size="small" />}
+                    label={t("common.yes", "Yes")}
+                  />
+                  <FormControlLabel
+                    value="no"
+                    control={<Radio size="small" />}
+                    label={t("common.no", "No")}
+                  />
+                </RadioGroup>
+              </FormControl>
+            </Box>
+
+            <Box sx={{ flex: "1 1 200px", minWidth: 200 }}>
+              <FormControl component="fieldset" fullWidth>
+                <Typography variant="caption" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  {t("codes.transAllowance", "Transportation (fuel)")}
+                </Typography>
+                <RadioGroup
+                  row
+                  value={data.transAllowance ? "yes" : "no"}
+                  onChange={(e) =>
+                    setData({ ...data, transAllowance: e.target.value === "yes" })
+                  }
+                >
+                  <FormControlLabel
+                    value="yes"
+                    control={<Radio size="small" />}
+                    label={t("common.yes", "Yes")}
+                  />
+                  <FormControlLabel
+                    value="no"
+                    control={<Radio size="small" />}
+                    label={t("common.no", "No")}
+                  />
+                </RadioGroup>
+              </FormControl>
+            </Box>
+          </Box>
 
           <TextField
             label={t("codes.color", "Color (hex or name)")}
@@ -378,68 +485,23 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
             value={data.color || ""}
             onChange={(e) => setData({ ...data, color: e.target.value })}
           />
-
           <Box>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              {t("codes.variables", "Variables")}
-            </Typography>
-            <Stack spacing={1}>
-              {(data.variables || []).map((row, i) => (
-                <Stack key={i} direction="row" spacing={1}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label={t("codes.varKey", "Key")}
-                    value={row.key}
-                    onChange={(e) =>
-                      handleKVChange(i, e.target.value, row.value)
-                    }
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    label={t("codes.varValue", "Value")}
-                    value={row.value}
-                    onChange={(e) => handleKVChange(i, row.key, e.target.value)}
-                  />
-                  <IconButton
-                    onClick={() => removeKV(i)}
-                    aria-label="remove-kv"
-                    size="small"
-                  >
-                    <Delete fontSize="small" />
-                  </IconButton>
-                </Stack>
-              ))}
-              <Button variant="outlined" onClick={addKV} startIcon={<Add />}>
-                {t("codes.addKV", "Add variable")}
-              </Button>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <input
+                aria-label="color-picker"
+                type="color"
+                value={(data.color && /^#/.test(data.color)) ? (data.color as string) : (data.color ? `#${String(data.color).replace(/^#/, '')}` : "#1976d2")}
+                onChange={(e) => {
+                  const hex = e.target.value;
+                  setData({ ...data, color: hex });
+                }}
+                style={{ width: 44, height: 32, border: 'none', background: 'transparent', padding: 0 }}
+              />
+              <Typography variant="caption" color="text.secondary">
+                {t("codes.color", "Color")}
+              </Typography>
             </Stack>
           </Box>
-
-          <TextField
-            multiline
-            minRows={3}
-            label={t("codes.rulesJson", "Rules (JSON)")}
-            value={data.rulesJson || ""}
-            onChange={(e) => setData({ ...data, rulesJson: e.target.value })}
-            error={!!jsonError}
-            helperText={
-              jsonError ||
-              t(
-                "codes.rulesHelper",
-                "Optional validation or accrual rules in JSON."
-              )
-            }
-          />
-
-          <TextField
-            multiline
-            minRows={3}
-            label={t("codes.description", "Description")}
-            value={data.description || ""}
-            onChange={(e) => setData({ ...data, description: e.target.value })}
-          />
 
           <Stack
             direction="row"
@@ -447,11 +509,10 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
             justifyContent="flex-end"
             sx={{ pt: 1 }}
           >
-            <Button onClick={onClose}>{t("common.cancel", "Cancel")}</Button>
             <Button
               type="submit"
               variant="contained"
-              disabled={!!jsonError || !!submitting}
+              disabled={!!submitting}
             >
               {submitting ? (
                 <CircularProgress size={18} color="inherit" />
@@ -462,7 +523,7 @@ const CodeFormDrawer: React.FC<DrawerProps> = ({
           </Stack>
         </Stack>
       </Box>
-    </Drawer>
+    </Dialog>
   );
 };
 
@@ -487,7 +548,6 @@ const ConfirmDeleteDialog: React.FC<{
         </Typography>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>{t("common.cancel", "Cancel")}</Button>
         <Button
           color="error"
           variant="contained"
@@ -564,8 +624,7 @@ const LeaveCodesManagement: React.FC = () => {
     const needle = q.trim().toLowerCase();
     if (!needle) return activeList;
     return activeList.filter((c) => {
-      const blob =
-        `${c.code}|${c.label}|${c.description || ""}|${JSON.stringify(kvToObject(c.variables))}|${c.rulesJson || ""}`.toLowerCase();
+      const blob = `${c.code}|${c.label}|${c.description || ""}`.toLowerCase();
       return blob.includes(needle);
     });
   }, [activeList, q]);
@@ -612,58 +671,14 @@ const LeaveCodesManagement: React.FC = () => {
   const submitForm = async (payload: LeaveCode | TimesheetCode) => {
     setSubmitting(true);
     try {
-      const tsPayload = uiToTsPayload(payload, tab);
-
+      const tsPayload = uiToTsPayload(payload);
       if (editing?.id) {
-        // UPDATE
-        const updatedTs = await updateTSCode(Number(editing.id), tsPayload);
-        const updatedUi = tsToUi(updatedTs);
-
-        if (tab === "leave") {
-          setLeaveCodes((prev) =>
-            prev.map((x) =>
-              x.id === editing.id ? (updatedUi as LeaveCode) : x
-            )
-          );
-          setToast({
-            open: true,
-            severity: "success",
-            msg: t("codes.saved", "Leave code saved"),
-          });
-        } else {
-          setTimesheetCodes((prev) =>
-            prev.map((x) =>
-              x.id === editing.id ? (updatedUi as TimesheetCode) : x
-            )
-          );
-          setToast({
-            open: true,
-            severity: "success",
-            msg: t("codes.savedTS", "Timesheet code saved"),
-          });
-        }
+        await updateTSCode(Number(editing.id), tsPayload);
       } else {
-        // CREATE
-        const createdTs = await createTSCode(tsPayload);
-        const createdUi = tsToUi(createdTs);
-
-        if (tab === "leave") {
-          setLeaveCodes((prev) => [createdUi as LeaveCode, ...prev]);
-          setToast({
-            open: true,
-            severity: "success",
-            msg: t("codes.created", "Leave code created"),
-          });
-        } else {
-          setTimesheetCodes((prev) => [createdUi as TimesheetCode, ...prev]);
-          setToast({
-            open: true,
-            severity: "success",
-            msg: t("codes.createdTS", "Timesheet code created"),
-          });
-        }
+        await createTSCode(tsPayload);
       }
-
+      await loadAll();
+      setToast({ open: true, severity: "success", msg: t("codes.saved", "Code saved") });
       setDrawerOpen(false);
       setEditing(null);
     } catch (e: any) {
@@ -710,7 +725,7 @@ const LeaveCodesManagement: React.FC = () => {
 
   return (
     <Box sx={containerSx}>
-      <Stack spacing={0.5} sx={{ mb: 2 }}>
+      <Stack spacing={0.5} sx={{ mb: 2 }} alignItems="center">
         <Typography variant="h5" fontWeight={700}>
           {t("codes.title", "Codes Management")}
         </Typography>
@@ -810,28 +825,24 @@ const LeaveCodesManagement: React.FC = () => {
                       </>
                     ) : (
                       <TableCell width={120}>
-                        {t("codes.billable", "Billable")}
+                        {t("codes.paid", "Paid")}
                       </TableCell>
                     )}
                     <TableCell width={120}>
                       {t("codes.color", "Color")}
                     </TableCell>
-                    <TableCell>{t("codes.variables", "Variables")}</TableCell>
-                    <TableCell>
-                      {t("codes.rulesJson", "Rules (JSON)")}
-                    </TableCell>
                     <TableCell>
                       {t("codes.description", "Description")}
                     </TableCell>
                     <TableCell width={120} align="right">
-                      {t("common.actions", "Actions")}
+                      {t("actions", "Actions")}
                     </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={10}>
+                      <TableCell colSpan={tab === "leave" ? 8 : 6}>
                         <Typography
                           variant="body2"
                           color="text.secondary"
@@ -919,53 +930,6 @@ const LeaveCodesManagement: React.FC = () => {
                               {row.color}
                             </Typography>
                           </Stack>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-
-                      <TableCell sx={{ maxWidth: 220 }}>
-                        {row.variables && row.variables.length ? (
-                          <Stack
-                            direction="row"
-                            spacing={0.5}
-                            useFlexGap
-                            flexWrap="wrap"
-                          >
-                            {row.variables.map((kv, idx) => (
-                              <Chip
-                                key={idx}
-                                size="small"
-                                variant="outlined"
-                                label={`${kv.key}:${kv.value}`}
-                              />
-                            ))}
-                          </Stack>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-
-                      <TableCell sx={{ maxWidth: 240 }}>
-                        {row.rulesJson ? (
-                          <Tooltip
-                            title={
-                              <pre style={{ margin: 0 }}>{row.rulesJson}</pre>
-                            }
-                            placement="top"
-                          >
-                            <Typography
-                              variant="caption"
-                              sx={{
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
-                              }}
-                            >
-                              {row.rulesJson}
-                            </Typography>
-                          </Tooltip>
                         ) : (
                           "—"
                         )}

@@ -31,6 +31,7 @@ import {} from "@mui/icons-material";
 import { format } from "date-fns";
 import axios from "axios";
 import { getAuthHeader } from "../../utils/auth";
+import { isActiveEmployee } from "../../api/employees";
 import {
   getLeaveRequests,
   getLeaveTypes,
@@ -285,9 +286,10 @@ const LeaveStatusScreen: React.FC<{ employeeId?: number | string }> = ({
           API_URL && API_URL.trim() ? API_URL : inferredBase
         ).replace(/\/+$/, "");
         const headers = await getAuthHeader();
-        const res = await axios.get(`${base}/employees`, { headers });
-        const arr = Array.isArray(res.data) ? res.data : res.data?.data || [];
-        setEmployees(arr);
+        const res = await axios.get(`${base}/employees`, { headers, params: { state: true } });
+        const raw = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        const active = raw.filter(isActiveEmployee);
+        setEmployees(active);
       } catch {
         setEmployees([]);
       } finally {

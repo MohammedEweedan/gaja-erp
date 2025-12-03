@@ -71,6 +71,7 @@ import {
   updateLeaveRequestFlexible,
 } from "../../services/leaveService";
 import { getAuthHeader } from "../../utils/auth";
+import { isActiveEmployee } from "../../api/employees";
 
 const localizer = momentLocalizer(moment);
 
@@ -198,6 +199,7 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
   const [leaveTypesMap, setLeaveTypesMap] = useState<
     Record<string, { name: string; color: string }>
   >({});
+  const [activeEmpIds, setActiveEmpIds] = useState<Set<string | number>>(new Set());
 
   const [leaveCodeMap, setLeaveCodeMap] = useState<Record<string, number>>({});
 
@@ -444,9 +446,13 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
       try {
         const res = await axios.get(`${apiBase}/employees`, {
           headers: await getAuthHeader(),
+          params: { state: true },
         });
-        const arr = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        const arrRaw = Array.isArray(res.data) ? res.data : res.data?.data || [];
+        // backend already filtered by state=true, keep guard just in case
+        const arr = arrRaw.filter(isActiveEmployee);
         const m: Record<string | number, string> = {};
+        const ids = new Set<string | number>();
         for (const e of arr) {
           const id = e?.ID_EMP ?? e?.id ?? e?.id_emp;
           const name =
@@ -458,9 +464,12 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
           if (id != null && name) {
             m[id] = String(name);
             m[String(id)] = String(name);
+            ids.add(id);
+            ids.add(String(id));
           }
         }
         setEmpNameById(m);
+        setActiveEmpIds(ids);
       } catch {
         /* ignore */
       }
@@ -939,6 +948,15 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
             const { code, color } = getTypeMeta(codeRaw);
 
             const empId = lr.employeeId ?? lr.id_emp ?? lr.ID_EMP;
+            // Skip events for inactive employees when we know the active set
+            if (empId != null && activeEmpIds && activeEmpIds.size > 0) {
+              if (!activeEmpIds.has(empId) && !activeEmpIds.has(String(empId))) {
+                return; // exclude inactive employee's event
+              }
+            } else {
+              // Fallback: if active set is not loaded, infer from record
+              if (!isActiveEmployee(lr)) return;
+            }
             const rawName =
               lr.employeeName ?? lr.employee_name ?? lr.NAME ?? lr.name ?? "";
             const nameFromMap =
@@ -1022,8 +1040,13 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
           );
         }
 
-        // Filters
+        // Filters (plus active employees safety)
         const filtered = calendarEvents.filter((ev) => {
+          // If we know the active set, drop events for inactive employees
+          const rid = (ev as any)?.resource?.id_emp ?? (ev as any)?.resource?.ID_EMP;
+          if (rid != null && activeEmpIds && activeEmpIds.size > 0) {
+            if (!activeEmpIds.has(rid) && !activeEmpIds.has(String(rid))) return false;
+          }
           if (ev.type === "leave" && !filters.showLeaves) return false;
           if (ev.type === "holiday" && !filters.showHolidays) return false;
           if (filters.leaveTypes.length) {
@@ -1086,6 +1109,7 @@ const CalendarLogScreen: React.FC<{ employeeId?: string | number }> = ({
     filters.leaveTypes,
     employeeId,
     empNameById,
+    activeEmpIds,
     computeEffectiveDays,
     getTypeMeta,
     t,

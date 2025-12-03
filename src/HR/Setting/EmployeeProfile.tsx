@@ -600,7 +600,7 @@ const OrgCard: React.FC<{ e: Employee; posName?: string }> = ({
           src={
             (e.PICTURE_URL ||
               (e.ID_EMP
-                ? `http://localhost:9000/employees/${e.ID_EMP}/picture`
+                ? `http://192.168.3.60:9000/employees/${e.ID_EMP}/picture`
                 : undefined)) as string | undefined
           }
           sx={{
@@ -2288,7 +2288,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                   src={
                     (selected.PICTURE_URL ||
                       (selected.ID_EMP
-                        ? `http://localhost:9000/employees/${selected.ID_EMP}/picture`
+                        ? `http://192.168.3.60:9000/employees/${selected.ID_EMP}/picture`
                         : undefined)) as string | undefined
                   }
                   sx={{
@@ -2344,7 +2344,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                       src={
                         (c.PICTURE_URL ||
                           (c.ID_EMP
-                            ? `http://localhost:9000/employees/${c.ID_EMP}/picture`
+                            ? `http://192.168.3.60:9000/employees/${c.ID_EMP}/picture`
                             : undefined)) as string | undefined
                       }
                       sx={{ width: 40, height: 40 }}

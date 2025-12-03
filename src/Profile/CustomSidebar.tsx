@@ -12,12 +12,12 @@ import {
 import { useTheme } from "@mui/material/styles";
 import { useTranslation } from "react-i18next";
 import { ExpandLess, ExpandMore } from "@mui/icons-material";
-import Brightness4Icon from "@mui/icons-material/Brightness4";
-import Brightness7Icon from "@mui/icons-material/Brightness7";
 import Logout from "@mui/icons-material/Logout";
 import { useLocation, useNavigate } from "react-router-dom";
-// Type definitions for props
 import type { ReactNode } from "react";
+
+// ⬇️ import your Switch
+import Switch from "../components/Switch"; // adjust path as needed
 
 interface NavItem {
   kind?: string;
@@ -35,7 +35,6 @@ interface CustomSidebarProps {
   onLogout: () => void;
 }
 
-// Accepts navigation config and routeMap as props
 function CustomSidebar({
   navigation,
   routeMap,
@@ -49,13 +48,11 @@ function CustomSidebar({
   const theme = useTheme();
   const { t } = useTranslation();
 
-  // Accent color from theme: use unified gaja[100] for both modes
   const gaja = (theme.palette as any)?.gaja as
     | Record<string, string>
     | undefined;
   const accent = gaja?.[100] ?? theme.palette.text.primary;
 
-  // Helper to get the full path for a segment
   const getPath = (segment: string | undefined, parent?: string) => {
     if (!segment) return "";
     if (segment.startsWith("/")) return segment;
@@ -63,7 +60,6 @@ function CustomSidebar({
     return `/${segment}`;
   };
 
-  // Recursively render navigation items
   const renderNavItems = (items: NavItem[], parentPath = ""): ReactNode[] => {
     return items.map((item, idx) => {
       if (item.kind === "header") {
@@ -111,7 +107,6 @@ function CustomSidebar({
           </React.Fragment>
         );
       }
-      // Leaf item
       const fullPath = getPath(item.segment, parentPath);
       return (
         <ListItemButton
@@ -129,7 +124,6 @@ function CustomSidebar({
     });
   };
 
-  // Expand the group containing the current route
   useEffect(() => {
     function expandForPath(items: NavItem[], parentPath = "") {
       items.forEach((item) => {
@@ -164,27 +158,16 @@ function CustomSidebar({
           borderTop: (theme) => `1px solid ${theme.palette.divider}`,
           display: "flex",
           justifyContent: "space-between",
+          alignItems: "center",
         }}
       >
-        <IconButton
-          onClick={onToggleTheme}
-          color="inherit"
-          aria-label={t("sidebar.toggleTheme")}
-          sx={{ mr: 1, color: accent }}
-        >
-          {mode === "dark" ? (
-            <Brightness7Icon sx={{ color: "inherit" }} />
-          ) : (
-            <Brightness4Icon sx={{ color: "inherit" }} />
-          )}
-        </IconButton>
         <IconButton
           onClick={onLogout}
           color="inherit"
           aria-label={t("sidebar.logout")}
-          sx={{ mr: 1, color: accent }}
+          sx={{ ml: 1, color: accent }}
         >
-          <Logout sx={{ color: "inherit" }} />
+          <Logout sx={{ color: "inherit", mr: 1 }} />
           {t("sidebar.logout")}
         </IconButton>
       </Box>

@@ -295,7 +295,7 @@ export default function ChatbotDialog({
       const origin =
         typeof window !== "undefined"
           ? new URL(window.location.href).origin
-          : "http://localhost:9000";
+          : "http://192.168.3.60:9000";
       const base = (window as any).GAJA_API_BASE || origin;
 
       const res = await fetch(`${base}/bot/web/webhook`, {

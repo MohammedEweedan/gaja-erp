@@ -10,7 +10,6 @@ import React, {
 import { useTranslation } from "react-i18next";
 import {
   Box,
-  Grid,
   TextField,
   Button,
   FormControl,
@@ -1011,7 +1010,7 @@ const LeaveRequestScreen: React.FC<
     }
   };
 
-  if (loading) {
+    if (loading) {
     return (
       <Box
         display="flex"
@@ -1024,51 +1023,63 @@ const LeaveRequestScreen: React.FC<
     );
   }
 
-  /** ---------- UI (Responsive & Sidebar-Adaptive) ---------- */
+  /** ---------- UI (Responsive & Sidebar-Adaptive, NO Grid) ---------- */
   return (
     <Box
       ref={contentRef}
       sx={{
         width: "100%",
-        // If your shell sets --sidebar-width, we use that; else we fallback to props.
         ml: { xs: 0, lg: "var(--content-ml, 0px)" },
         transition: "margin-left 200ms ease, width 200ms ease",
         px: { xs: 1.5, sm: 2, md: 2.5 },
         py: { xs: 1.5, sm: 2 },
       }}
     >
-      <Stack spacing={0.5} sx={{ mb: 2 }}>
-        <Typography variant="h5" fontWeight={700}>
-          {t("leave.request.title", "Request Time Off")}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {t(
-            "leave.request.subtitle",
-            "Select a leave type and a start date. Working days exclude Fridays and company holidays."
-          )}
-        </Typography>
-      </Stack>
+      {/* Center content and keep a comfortable max width */}
+      <Box sx={{ maxWidth: 1200, mx: "auto" }}>
+        {/* Header */}
+        <Stack spacing={0.5} sx={{ mb: 2 }}>
+          <Typography variant="h5" fontWeight={700}>
+            {t("leave.request.title", "Request Time Off")}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {t(
+              "leave.request.subtitle",
+              "Select a leave type and a start date. Working days exclude Fridays and company holidays."
+            )}
+          </Typography>
+        </Stack>
 
-      {/* Form */}
-      <Box component="form" onSubmit={handleSubmit} noValidate>
-        <Grid container spacing={2.5}>
-          {/* Alerts row */}
-          {(error || success) && (
-            <Grid>
-              {error && <Alert severity="error">{error}</Alert>}
-              {success && (
-                <Alert severity="success" sx={{ mt: error ? 1 : 0 }}>
-                  {t(
-                    "leave.request.success",
-                    "Your request has been submitted."
-                  )}
-                </Alert>
-              )}
-            </Grid>
-          )}
+        {/* Alerts */}
+        {(error || success) && (
+          <Box sx={{ mb: 2 }}>
+            {error && <Alert severity="error">{error}</Alert>}
+            {success && (
+              <Alert severity="success" sx={{ mt: error ? 1 : 0 }}>
+                {t(
+                  "leave.request.success",
+                  "Your request has been submitted."
+                )}
+              </Alert>
+            )}
+          </Box>
+        )}
 
-          {/* Left Column: Calendar + Legend */}
-          <Grid>
+        {/* Form */}
+        <Box component="form" onSubmit={handleSubmit} noValidate>
+          {/* Main 2-column layout: calendar | right side */}
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: {
+                xs: "1fr",
+                md: "320px minmax(0, 1fr)",
+              },
+              gap: 3,
+              alignItems: "flex-start",
+            }}
+          >
+            {/* Left: Calendar card */}
             <Card
               variant="outlined"
               sx={{ borderRadius: 3, overflow: "hidden" }}
@@ -1134,388 +1145,412 @@ const LeaveRequestScreen: React.FC<
                 </Stack>
               </CardContent>
             </Card>
-          </Grid>
 
-          {/* Right Column: Summary + Fields */}
-          <Grid>
-            <Grid container spacing={2}>
-              {/* Summary (sticky on desktop) */}
-              <Grid order={{ xs: 2, md: 0 }}>
+            {/* Right: summary + form fields */}
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: {
+                  xs: "1fr",
+                  md: "260px minmax(0, 1fr)",
+                },
+                gap: 3,
+                alignItems: "flex-start",
+              }}
+            >
+              {/* Summary tiles (sticky on desktop) */}
+              <Box
+                sx={{
+                  position: { md: "sticky" },
+                  top: { md: theme.spacing(2) },
+                  zIndex: 1,
+                }}
+              >
                 <Box
                   sx={{
-                    position: { md: "sticky" },
-                    top: { md: theme.spacing(2) },
-                    zIndex: 1,
+                    display: "grid",
+                    gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "1fr" },
+                    gap: 1.5,
                   }}
                 >
-                  <Grid container spacing={1.5}>
-                    <Grid>
-                      <StatTile
-                        title={t("leave.request.remaining", "Remaining")}
-                        value={remainingDays ?? "—"}
-                      />
-                    </Grid>
-                    <Grid>
+                  <StatTile
+                    title={t("leave.request.remaining", "Remaining")}
+                    value={remainingDays ?? "—"}
+                  />
+                  <StatTile
+                    title={t(
+                      "leave.request.daysRequested",
+                      "Days requested"
+                    )}
+                    value={daysRequested || 0}
+                  />
+                  <StatTile
+                    title={t("leave.request.effective", "Net Vacation")}
+                    value={calculatedDays || 0}
+                  />
+                  <StatTile
+                    title={t("leave.request.endDate", "End date")}
+                    value={
+                      formData.endDate ? toDMY(formData.endDate) : "—"
+                    }
+                  />
+
+                  {isEmergencyLike(activeLeaveType) && (
+                    <>
                       <StatTile
                         title={t(
-                          "leave.request.daysRequested",
-                          "Days requested"
+                          "leave.request.emergencyYear",
+                          "Emergency (Y rem)"
                         )}
-                        value={daysRequested || 0}
+                        value={emergencyYearRemaining}
                       />
-                    </Grid>
-                    <Grid>
                       <StatTile
-                        title={t("leave.request.effective", "Net Vacation")}
-                        value={calculatedDays || 0}
+                        title={t(
+                          "leave.request.emergencyMonth",
+                          "Emergency (M rem)"
+                        )}
+                        value={emergencyMonthRemaining}
                       />
-                    </Grid>
-                    <Grid>
-                      <StatTile
-                        title={t("leave.request.endDate", "End date")}
-                        value={formData.endDate ? toDMY(formData.endDate) : "—"}
-                      />
-                    </Grid>
-
-                    {isEmergencyLike(activeLeaveType) && (
-                      <>
-                        <Grid>
-                          <StatTile
-                            title={t(
-                              "leave.request.emergencyYear",
-                              "Emergency (Y rem)"
-                            )}
-                            value={emergencyYearRemaining}
-                          />
-                        </Grid>
-                        <Grid>
-                          <StatTile
-                            title={t(
-                              "leave.request.emergencyMonth",
-                              "Emergency (M rem)"
-                            )}
-                            value={emergencyMonthRemaining}
-                          />
-                        </Grid>
-                      </>
-                    )}
-
-                    {perTypeMaxDays != null && (
-                      <Grid>
-                        <Chip
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          sx={{ mt: 0.5 }}
-                          label={`${t("leave.request.perTypeLimit", "Type limit")}: ${perTypeMaxDays}`}
-                        />
-                      </Grid>
-                    )}
-                  </Grid>
-                </Box>
-              </Grid>
-
-              {/* Form Fields */}
-              <Grid order={{ xs: 0, md: 1 }}>
-                <Grid container spacing={2}>
-                  {/* Leave Type (FULL WIDTH) */}
-                  <Grid>
-                    <FormControl fullWidth required>
-                      <InputLabel id="leave-type-label">
-                        {t("leave.request.leaveType", "Leave type")}
-                      </InputLabel>
-                      <Select
-                        labelId="leave-type-label"
-                        name="leaveCode"
-                        value={formData.leaveCode}
-                        onChange={(e) =>
-                          setFormData((p) => ({
-                            ...p,
-                            leaveCode: Number((e.target as any).value),
-                          }))
-                        }
-                        label={t("leave.request.leaveType", "Leave type")}
-                      >
-                        {leaveTypes.map((lt) => (
-                          <MenuItem key={lt.int_can} value={lt.int_can}>
-                            {lt.code
-                              ? `${lt.code} — ${lt.desig_can}`
-                              : lt.desig_can}
-                            {typeof lt.max_day === "number"
-                              ? `  (${lt.max_day} ${t("leave.request.days", "days")})`
-                              : ""}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-
-                  {/* Start Date */}
-                  <Grid>
-                    <LocalizationProvider
-                      dateAdapter={AdapterDateFns}
-                      adapterLocale={enGB}
-                    >
-                      <DatePicker
-                        label={t("leave.request.startDate", "Start date")}
-                        value={formData.startDate}
-                        onChange={(value) =>
-                          handleDateChange("startDate", toDate(value))
-                        }
-                        minDate={new Date()}
-                        shouldDisableDate={(day) => {
-                          const d = toDate(day);
-                          if (!d) return true;
-                          if (isSickLike(activeLeaveType)) return false;
-                          return isNonWorking(d);
-                        }}
-                        slotProps={{ textField: { fullWidth: true } }}
-                        format="dd-MM-yyyy"
-                      />
-                    </LocalizationProvider>
-                    <TextField
-                      type="number"
-                      margin="normal"
-                      label={t("leave.request.daysRequested", "Days requested")}
-                      value={daysRequested || ""}
-                      onChange={(e) => {
-                        const raw = Number(
-                          (e.target as HTMLInputElement).value
-                        );
-                        const v = Math.max(0, Number.isFinite(raw) ? raw : 0);
-                        let capped = v;
-                        if (remainingDays != null)
-                          capped = Math.min(capped, remainingDays);
-                        if (perTypeMaxDays != null)
-                          capped = Math.min(capped, perTypeMaxDays);
-                        capped = Math.min(
-                          capped,
-                          MAX_SINGLE_REQUEST_CALENDAR_DAYS
-                        );
-                        setDaysRequested(capped);
-                        if (v !== capped) {
-                          setDaysError(
-                            t(
-                              "leave.request.maxReached",
-                              "Adjusted to allowed maximum for your balance/policy."
-                            )
-                          );
-                        } else {
-                          setDaysError(null);
-                        }
-                      }}
-                      inputProps={{
-                        min: 0,
-                        max:
-                          remainingDays != null
-                            ? Math.min(
-                                remainingDays,
-                                perTypeMaxDays ?? Number.MAX_SAFE_INTEGER,
-                                MAX_SINGLE_REQUEST_CALENDAR_DAYS
-                              )
-                            : (perTypeMaxDays ??
-                              MAX_SINGLE_REQUEST_CALENDAR_DAYS),
-                      }}
-                      helperText={
-                        daysError ||
-                        (remainingDays != null
-                          ? t("leave.request.remaining", "Remaining: ") +
-                            remainingDays
-                          : "")
-                      }
-                      error={!!daysError}
-                      fullWidth
-                    />
-                  </Grid>
-
-                  {/* Days Requested (AFTER Start, BEFORE End) */}
-                  <Grid></Grid>
-
-                  {/* End Date (auto) */}
-                  <Grid>
-                    <TextField
-                      label={t("leave.request.endDate", "End date (auto)")}
-                      value={formData.endDate ? toDMY(formData.endDate) : ""}
-                      InputProps={{ readOnly: true }}
-                      fullWidth
-                    />
-                  </Grid>
-
-                  {/* Contact number */}
-                  <Grid>
-                    <TextField
-                      fullWidth
-                      label={t(
-                        "leave.request.contactNumber",
-                        "Contact number during leave"
-                      )}
-                      name="contactNumber"
-                      value={formData.contactNumber}
-                      onChange={handleChange}
-                      variant="outlined"
-                    />
-                  </Grid>
-
-                  {/* Reason */}
-                  <Grid>
-                    <TextField
-                      fullWidth
-                      multiline
-                      minRows={4}
-                      label={t("leave.request.reason", "Reason")}
-                      name="reason"
-                      value={formData.reason}
-                      onChange={handleChange}
-                      variant="outlined"
-                    />
-                  </Grid>
-
-                  {/* Doctor note (Sick only) */}
-                  {isSickLike(activeLeaveType) && (
-                    <Grid>
-                      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                        <Stack spacing={1.5}>
-                          <Typography variant="subtitle1">
-                            {t(
-                              "leave.request.doctorNoteTitle",
-                              "Doctor’s note (optional, JPG)"
-                            )}
-                          </Typography>
-
-                          <Stack
-                            direction="row"
-                            spacing={2}
-                            alignItems="center"
-                            flexWrap="wrap"
-                          >
-                            <Button
-                              variant="outlined"
-                              component="label"
-                              disabled={uploadingNote || submitting}
-                            >
-                              {doctorNoteFile
-                                ? t(
-                                    "leave.request.replaceNote",
-                                    "Replace doctor’s note"
-                                  )
-                                : t(
-                                    "leave.request.uploadNote",
-                                    "Upload doctor’s note (JPG)"
-                                  )}
-                              <input
-                                hidden
-                                type="file"
-                                accept="image/jpeg"
-                                onChange={(e) =>
-                                  onDoctorNoteChange(
-                                    e.target.files?.[0] ?? null
-                                  )
-                                }
-                              />
-                            </Button>
-                            {doctorNoteFile && (
-                              <Chip
-                                label={doctorNoteFile.name}
-                                onDelete={() => onDoctorNoteChange(null)}
-                                deleteIcon={<CloseIcon />}
-                                variant="outlined"
-                              />
-                            )}
-                          </Stack>
-
-                          {doctorNotePreview && (
-                            <Box sx={{ mt: 1 }}>
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                                sx={{ display: "block", mb: 0.5 }}
-                              >
-                                {t("leave.request.notePreview", "Preview")}
-                              </Typography>
-                              <Box
-                                component="img"
-                                src={doctorNotePreview}
-                                alt="Doctor note preview"
-                                sx={{
-                                  maxWidth: "100%",
-                                  width: 360,
-                                  maxHeight: 260,
-                                  borderRadius: 1,
-                                  border: "1px solid",
-                                  borderColor: "divider",
-                                  display: "block",
-                                }}
-                              />
-                            </Box>
-                          )}
-                        </Stack>
-                      </Paper>
-                    </Grid>
+                    </>
                   )}
 
-                  {/* Submit */}
-                  <Grid>
-                    <Divider sx={{ my: 1.5 }} />
-                    <Box
-                      sx={{
-                        display: "flex",
-                        gap: 1,
-                        justifyContent: "stretch",
-                      }}
-                    >
-                      <Button
-                        type="submit"
-                        variant="contained"
-                        color="primary"
-                        fullWidth
-                        disabled={
-                          submitting ||
-                          uploadingNote ||
-                          submitLock ||
-                          calculatedDays === 0 ||
-                          !formData.startDate ||
-                          !formData.leaveCode ||
-                          !!daysError ||
-                          liveOverlap
-                        }
-                        startIcon={
-                          submitting ? (
-                            <CircularProgress size={20} color="inherit" />
-                          ) : null
-                        }
-                      >
-                        {submitting
-                          ? t("common.submitting", "Submitting…")
-                          : t("leave.request.submit", "Submit request")}
-                      </Button>
+                  {perTypeMaxDays != null && (
+                    <Box>
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        color="warning"
+                        sx={{ mt: 0.5 }}
+                        label={`${t(
+                          "leave.request.perTypeLimit",
+                          "Type limit"
+                        )}: ${perTypeMaxDays}`}
+                      />
                     </Box>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-        </Grid>
-      </Box>
+                  )}
+                </Box>
+              </Box>
 
-      {/* Toasts */}
-      <Snackbar
-        open={showSuccess}
-        autoHideDuration={3000}
-        onClose={() => setShowSuccess(false)}
-        message={t("leave.request.success", "Your request has been submitted.")}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      />
-      <Snackbar
-        open={showError && !!error}
-        autoHideDuration={4000}
-        onClose={() => setShowError(false)}
-        message={String(
-          error || t("leave.request.submitError", "Could not submit request.")
-        )}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      />
+              {/* Form fields */}
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                  gap: 2,
+                }}
+              >
+                {/* Leave Type */}
+                <Box sx={{ gridColumn: "1 / -1" }}>
+                  <FormControl fullWidth required>
+                    <InputLabel id="leave-type-label">
+                      {t("leave.request.leaveType", "Leave type")}
+                    </InputLabel>
+                    <Select
+                      labelId="leave-type-label"
+                      name="leaveCode"
+                      value={formData.leaveCode}
+                      onChange={(e) =>
+                        setFormData((p) => ({
+                          ...p,
+                          leaveCode: Number((e.target as any).value),
+                        }))
+                      }
+                      label={t("leave.request.leaveType", "Leave type")}
+                    >
+                      {leaveTypes.map((lt) => (
+                        <MenuItem key={lt.int_can} value={lt.int_can}>
+                          {lt.code
+                            ? `${lt.code} — ${lt.desig_can}`
+                            : lt.desig_can}
+                          {typeof lt.max_day === "number"
+                            ? `  (${lt.max_day} ${t(
+                                "leave.request.days",
+                                "days"
+                              )})`
+                            : ""}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+
+                {/* Start Date */}
+                <Box>
+                  <LocalizationProvider
+                    dateAdapter={AdapterDateFns}
+                    adapterLocale={enGB}
+                  >
+                    <DatePicker
+                      label={t("leave.request.startDate", "Start date")}
+                      value={formData.startDate}
+                      onChange={(value) =>
+                        handleDateChange("startDate", toDate(value))
+                      }
+                      minDate={new Date()}
+                      shouldDisableDate={(day) => {
+                        const d = toDate(day);
+                        if (!d) return true;
+                        if (isSickLike(activeLeaveType)) return false;
+                        return isNonWorking(d);
+                      }}
+                      slotProps={{ textField: { fullWidth: true } }}
+                      format="dd-MM-yyyy"
+                    />
+                  </LocalizationProvider>
+                </Box>
+
+                {/* Days requested */}
+                <Box>
+                  <TextField
+                    type="number"
+                    margin="normal"
+                    label={t(
+                      "leave.request.daysRequested",
+                      "Days requested"
+                    )}
+                    value={daysRequested || ""}
+                    onChange={(e) => {
+                      const raw = Number(
+                        (e.target as HTMLInputElement).value
+                      );
+                      const v = Math.max(0, Number.isFinite(raw) ? raw : 0);
+                      let capped = v;
+                      if (remainingDays != null)
+                        capped = Math.min(capped, remainingDays);
+                      if (perTypeMaxDays != null)
+                        capped = Math.min(capped, perTypeMaxDays);
+                      capped = Math.min(
+                        capped,
+                        MAX_SINGLE_REQUEST_CALENDAR_DAYS
+                      );
+                      setDaysRequested(capped);
+                      if (v !== capped) {
+                        setDaysError(
+                          t(
+                            "leave.request.maxReached",
+                            "Adjusted to allowed maximum for your balance/policy."
+                          )
+                        );
+                      } else {
+                        setDaysError(null);
+                      }
+                    }}
+                    inputProps={{
+                      min: 0,
+                      max:
+                        remainingDays != null
+                          ? Math.min(
+                              remainingDays,
+                              perTypeMaxDays ?? Number.MAX_SAFE_INTEGER,
+                              MAX_SINGLE_REQUEST_CALENDAR_DAYS
+                            )
+                          : perTypeMaxDays ??
+                            MAX_SINGLE_REQUEST_CALENDAR_DAYS,
+                    }}
+                    helperText={
+                      daysError ||
+                      (remainingDays != null
+                        ? t("leave.request.remaining", "Remaining: ") +
+                          remainingDays
+                        : "")
+                    }
+                    error={!!daysError}
+                    fullWidth
+                  />
+                </Box>
+
+                {/* End Date (auto, full width on small, half on larger) */}
+                <Box>
+                  <TextField
+                    label={t(
+                      "leave.request.endDate",
+                      "End date (auto)"
+                    )}
+                    value={formData.endDate ? toDMY(formData.endDate) : ""}
+                    InputProps={{ readOnly: true }}
+                    fullWidth
+                  />
+                </Box>
+
+                {/* Contact Number */}
+                <Box>
+                  <TextField
+                    fullWidth
+                    label={t(
+                      "leave.request.contactNumber",
+                      "Contact number during leave"
+                    )}
+                    name="contactNumber"
+                    value={formData.contactNumber}
+                    onChange={handleChange}
+                    variant="outlined"
+                  />
+                </Box>
+
+                {/* Reason (full width) */}
+                <Box sx={{ gridColumn: "1 / -1" }}>
+                  <TextField
+                    fullWidth
+                    multiline
+                    minRows={4}
+                    label={t("leave.request.reason", "Reason")}
+                    name="reason"
+                    value={formData.reason}
+                    onChange={handleChange}
+                    variant="outlined"
+                  />
+                </Box>
+
+                {/* Doctor note (Sick only) */}
+                {isSickLike(activeLeaveType) && (
+                  <Box sx={{ gridColumn: "1 / -1" }}>
+                    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                      <Stack spacing={1.5}>
+                        <Typography variant="subtitle1">
+                          {t(
+                            "leave.request.doctorNoteTitle",
+                            "Doctor’s note (optional, JPG)"
+                          )}
+                        </Typography>
+
+                        <Stack
+                          direction="row"
+                          spacing={2}
+                          alignItems="center"
+                          flexWrap="wrap"
+                        >
+                          <Button
+                            variant="outlined"
+                            component="label"
+                            disabled={uploadingNote || submitting}
+                          >
+                            {doctorNoteFile
+                              ? t(
+                                  "leave.request.replaceNote",
+                                  "Replace doctor’s note"
+                                )
+                              : t(
+                                  "leave.request.uploadNote",
+                                  "Upload doctor’s note (JPG)"
+                                )}
+                            <input
+                              hidden
+                              type="file"
+                              accept="image/jpeg"
+                              onChange={(e) =>
+                                onDoctorNoteChange(
+                                  e.target.files?.[0] ?? null
+                                )
+                              }
+                            />
+                          </Button>
+                          {doctorNoteFile && (
+                            <Chip
+                              label={doctorNoteFile.name}
+                              onDelete={() => onDoctorNoteChange(null)}
+                              deleteIcon={<CloseIcon />}
+                              variant="outlined"
+                            />
+                          )}
+                        </Stack>
+
+                        {doctorNotePreview && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{ display: "block", mb: 0.5 }}
+                            >
+                              {t("leave.request.notePreview", "Preview")}
+                            </Typography>
+                            <Box
+                              component="img"
+                              src={doctorNotePreview}
+                              alt="Doctor note preview"
+                              sx={{
+                                maxWidth: "100%",
+                                width: 360,
+                                maxHeight: 260,
+                                borderRadius: 1,
+                                border: "1px solid",
+                                borderColor: "divider",
+                                display: "block",
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </Stack>
+                    </Paper>
+                  </Box>
+                )}
+
+                {/* Submit (full width) */}
+                <Box sx={{ gridColumn: "1 / -1" }}>
+                  <Divider sx={{ my: 1.5 }} />
+                  <Box
+                    sx={{
+                      display: "flex",
+                      gap: 1,
+                      justifyContent: "stretch",
+                    }}
+                  >
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      color="primary"
+                      fullWidth
+                      disabled={
+                        submitting ||
+                        uploadingNote ||
+                        submitLock ||
+                        calculatedDays === 0 ||
+                        !formData.startDate ||
+                        !formData.leaveCode ||
+                        !!daysError ||
+                        liveOverlap
+                      }
+                      startIcon={
+                        submitting ? (
+                          <CircularProgress size={20} color="inherit" />
+                        ) : null
+                      }
+                    >
+                      {submitting
+                        ? t("common.submitting", "Submitting…")
+                        : t("leave.request.submit", "Submit request")}
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Toasts */}
+        <Snackbar
+          open={showSuccess}
+          autoHideDuration={3000}
+          onClose={() => setShowSuccess(false)}
+          message={t(
+            "leave.request.success",
+            "Your request has been submitted."
+          )}
+          anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        />
+        <Snackbar
+          open={showError && !!error}
+          autoHideDuration={4000}
+          onClose={() => setShowError(false)}
+          message={String(
+            error ||
+              t("leave.request.submitError", "Could not submit request.")
+          )}
+          anchorOrigin={{ vertical: "bottom", "horizontal": "center" }}
+        />
+      </Box>
     </Box>
   );
 };
+
 
 export default LeaveRequestScreen;

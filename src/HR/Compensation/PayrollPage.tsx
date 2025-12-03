@@ -28,17 +28,22 @@ import {
   Tooltip,
   IconButton,
   Avatar,
+  Radio,
+  RadioGroup,
+  FormControl,
+  FormLabel,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
 import type { PayrollRunResponse, Payslip } from "../../api/payroll";
 import { updateEmployee, listEmployees } from "../../api/employees";
-import { runPayroll, sendPayslipClient, computePayrollV2, savePayrollV2, closePayrollV2, listV2Loans, createV2Loan, skipV2LoanMonth, payoffV2Loan } from "../../api/payroll";
+import { runPayroll, sendPayslipClient, computePayrollV2, savePayrollV2, closePayrollV2, listV2Loans, createV2Loan, skipV2LoanMonth, payoffV2Loan, getPayrollV2 } from "../../api/payroll";
 import type { TimesheetDay } from "../../api/attendance";
 import { getTimesheetMonth, listPs, PsItem, listPsPoints } from "../../api/attendance";
 import jsPDF from "jspdf";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import SettingsIcon from "@mui/icons-material/Settings";
+import EditIcon from "@mui/icons-material/Edit";
 
 // Format PS as codes: keep OG/HQ, turn numerals into P#
 function formatPs(ps: any): string | undefined {
@@ -117,7 +122,8 @@ export default function PayrollPage() {
     comm: true,
     basePay: true,
     allowancePay: true,
-    adjustments: true,
+    advances: true,
+    loans: true,
     salesQty: false,
     salesTotal: false,
     gold: true,
@@ -129,6 +135,7 @@ export default function PayrollPage() {
   const [presentDaysMap, setPresentDaysMap] = React.useState<Record<number, number>>({});
   const [tsAgg, setTsAgg] = React.useState<Record<number, { presentP: number; phUnits: number; fridayA: number; missRatio: number }>>({});
   const [advMap, setAdvMap] = React.useState<Record<number, number>>({});
+  const [nameMap, setNameMap] = React.useState<Record<number, string>>({});
   const [contractStartMap, setContractStartMap] = React.useState<Record<number, string | null>>({});
   const [hrEmails, setHrEmails] = React.useState<string>(() => {
     try { return localStorage.getItem('payroll_settings_hr_emails') || ''; } catch { return ''; }
@@ -136,10 +143,125 @@ export default function PayrollPage() {
   const [financeEmails, setFinanceEmails] = React.useState<string>(() => {
     try { return localStorage.getItem('payroll_settings_finance_emails') || ''; } catch { return ''; }
   });
+
+  // Loan & Salary Advance rule settings (persisted in localStorage)
+  const [loanMaxMultiple, setLoanMaxMultiple] = React.useState<number>(() => {
+    try { const v = Number(localStorage.getItem('payroll_settings_loan_max_multiple') || '3'); return Number.isFinite(v) && v > 0 ? v : 3; } catch { return 3; }
+  });
+  const [loanMonthlyPercent, setLoanMonthlyPercent] = React.useState<number>(() => {
+    try { const v = Number(localStorage.getItem('payroll_settings_loan_monthly_percent') || '25'); return Number.isFinite(v) && v >= 0 ? v : 25; } catch { return 25; }
+  });
+  const [advanceMaxPercent, setAdvanceMaxPercent] = React.useState<number>(() => {
+    try { const v = Number(localStorage.getItem('payroll_settings_advance_max_percent') || '50'); return Number.isFinite(v) && v >= 0 ? v : 50; } catch { return 50; }
+  });
   const [isAdmin, setIsAdmin] = React.useState<boolean>(false);
   const [commList, setCommList] = React.useState<any[]>([]);
   const [commLoading, setCommLoading] = React.useState<boolean>(false);
   const [commDirty, setCommDirty] = React.useState<Record<number, any>>({});
+
+  // Commission weight mode: 'individual' (seller grams) vs 'total' (aggregate PS scope grams)
+  const [commissionWeightMode, setCommissionWeightMode] = React.useState<'individual' | 'total'>(() => {
+    try {
+      const v = localStorage.getItem('payroll_commission_weight_mode');
+      return v === 'total' ? 'total' : 'individual';
+    } catch { return 'individual'; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem('payroll_commission_weight_mode', commissionWeightMode); } catch {}
+  }, [commissionWeightMode]);
+
+  // Position filter (designation/TITLE)
+  const [positionFilter, setPositionFilter] = React.useState<string>('all');
+
+  // Row edit & autosave state
+  const [rowEditOpen, setRowEditOpen] = React.useState(false);
+  const [rowEdit, setRowEdit] = React.useState<any | null>(null);
+  const [rowForm, setRowForm] = React.useState<any>({});
+  const saveTimersRef = React.useRef<Record<string, any>>({});
+  const [savingRows, setSavingRows] = React.useState<Record<number, boolean>>({});
+
+  const toN = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const round2 = (n: number) => Number((n || 0).toFixed(2));
+
+  const formatMoney = (n: number) => {
+    const v = Number(n || 0);
+    return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+  const formatInt = (n: number) => {
+    const v = Number(n || 0);
+    return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  };
+
+  // Arabic name helpers: treat strings of only question marks/spaces as corrupted
+  const looksCorrupted = (s?: string) => {
+    if (!s) return true;
+    const t = String(s).trim();
+    return t !== "" && /^\?+(\s\?+)*$/.test(t);
+  };
+  const chooseDisplayName = (ar?: string, en?: string, id?: number): string => {
+    const sAr = (ar ?? "").trim();
+    const sEn = (en ?? "").trim();
+    if (sAr && !looksCorrupted(sAr)) return sAr;
+    if (sEn && !looksCorrupted(sEn)) return sEn;
+    return id != null ? `ID: ${id}` : "";
+  };
+
+  const openRowEditor = (idEmp: number) => {
+    const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(idEmp)) || {} as any;
+    setRowEdit(vr);
+    setRowForm({
+      gold_bonus_lyd: vr.gold_bonus_lyd ?? 0,
+      diamond_bonus_lyd: vr.diamond_bonus_lyd ?? 0,
+      other_bonus1_lyd: vr.other_bonus1_lyd ?? 0,
+      other_bonus2_lyd: vr.other_bonus2_lyd ?? 0,
+      other_additions_lyd: vr.other_additions_lyd ?? 0,
+      other_deductions_lyd: vr.other_deductions_lyd ?? 0,
+      loan_debit_lyd: vr.loan_debit_lyd ?? 0,
+      loan_credit_lyd: vr.loan_credit_lyd ?? 0,
+    });
+    setRowEditOpen(true);
+  };
+
+  const applyRowForm = React.useCallback((idEmp: number, draft: any) => {
+    setV2Rows((prev: any[]) => {
+      const arr = Array.isArray(prev) ? [...prev] : [];
+      const idx = arr.findIndex(r => Number(r.id_emp) === Number(idEmp));
+      if (idx === -1) return prev;
+      const base = arr[idx] || {} as any;
+      const next = { ...base, ...draft } as any;
+      // Recompute net locally to mirror BE save
+      const total = toN(next.total_salary_lyd ?? next.D7);
+      const net = total
+        + toN(next.gold_bonus_lyd)
+        + toN(next.diamond_bonus_lyd)
+        + toN(next.other_bonus1_lyd)
+        + toN(next.other_bonus2_lyd)
+        + toN(next.loan_debit_lyd)
+        + toN(next.other_additions_lyd)
+        - toN(next.loan_credit_lyd)
+        - toN(next.other_deductions_lyd);
+      next.net_salary_lyd = round2(net);
+      arr[idx] = next;
+      return arr;
+    });
+  }, [setV2Rows]);
+
+  const queueAutoSave = React.useCallback((idEmp: number) => {
+    const key = String(idEmp);
+    if (saveTimersRef.current[key]) clearTimeout(saveTimersRef.current[key]);
+    saveTimersRef.current[key] = setTimeout(async () => {
+      const row = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(idEmp));
+      if (!row) return;
+      try {
+        setSavingRows(s => ({ ...s, [idEmp]: true }));
+        await savePayrollV2({ year, month, rows: [row] });
+      } catch {
+        // no-op; UI stays updated and next save will retry
+      } finally {
+        setSavingRows(s => ({ ...s, [idEmp]: false }));
+      }
+    }, 600);
+  }, [v2Rows, year, month]);
 
   // Consistent NET calculator (matches PDF logic). Returns non-negative LYD.
   function computeNetLYDFor(id_emp: number): number {
@@ -232,7 +354,7 @@ export default function PayrollPage() {
         }
         if (tab === 'advances') {
           try {
-            const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+            const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -244,7 +366,7 @@ export default function PayrollPage() {
         }
         try {
           const q = new URLSearchParams({ employeeId: String(adjEmpId) });
-          const res = await fetch(`http://localhost:9000/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://192.168.3.60:9000/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
           const js = await res.json();
           if (res.ok) setHistoryPoints(Array.isArray(js?.points) ? js.points : []);
           else setHistoryPoints([]);
@@ -267,7 +389,8 @@ export default function PayrollPage() {
     if (cols.comm) w += 72;
     if (cols.basePay) w += 84;
     if (cols.allowancePay) w += 84;
-    if (cols.adjustments) w += 72;
+    if (cols.advances) w += 78;
+    if (cols.loans) w += 78;
     if (cols.salesQty) w += 64;
     if (cols.salesTotal) w += 84;
     if (cols.gold) w += 96;
@@ -331,7 +454,7 @@ export default function PayrollPage() {
     const id_emp = empRow.id_emp;
     setAdjOpen(true); setAdjLoading(true); setAdjEmpId(id_emp);
     try {
-      const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${id_emp}`;
+      const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${id_emp}`;
       const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
       if (res.ok) {
         const js = await res.json();
@@ -352,7 +475,7 @@ export default function PayrollPage() {
     setAdjLoading(true);
     try {
       const payload = { year, month, employeeId: adjEmpId, type: adjForm.type, amount: Number(adjForm.amount), currency: adjForm.currency, note: adjForm.note };
-      const res = await fetch(`http://localhost:9000/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
+      const res = await fetch(`http://192.168.3.60:9000/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Failed to add adjustment');
       const js = await res.json();
       setAdjRows(prev => [...prev, js.entry]);
@@ -393,7 +516,7 @@ export default function PayrollPage() {
   // Fetch sales metrics for the current window
   const fetchSales = React.useCallback(async () => {
     try {
-      const url = `http://localhost:9000/hr/payroll/sales-metrics?year=${year}&month=${month}`;
+      const url = `http://192.168.3.60:9000/hr/payroll/sales-metrics?year=${year}&month=${month}`;
       const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
       if (!res.ok) return setSales({});
       const js = await res.json();
@@ -432,7 +555,7 @@ export default function PayrollPage() {
       setCommLoading(true);
       (async () => {
         try {
-          const res = await fetch(`http://localhost:9000/employees`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://192.168.3.60:9000/employees`, { headers: authHeader() as unknown as HeadersInit });
           if (res.ok) {
             const js = await res.json();
             const arr: any[] = Array.isArray(js) ? js : (Array.isArray(js?.data) ? js.data : []);
@@ -465,7 +588,7 @@ export default function PayrollPage() {
             mp[e.id_emp] = days.filter((d: any) => !!d?.present).length;
           } catch {}
           try {
-            const r = await fetch(`http://localhost:9000/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+            const r = await fetch(`http://192.168.3.60:9000/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
             if (r.ok) {
               const js = await r.json();
               const obj = js?.data ?? js;
@@ -487,12 +610,129 @@ export default function PayrollPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month, ps, tab]);
 
+  // Recompute Gold commissions for all employees based on selected weight mode
+  React.useEffect(() => {
+    (async () => {
+      try {
+        if (!result || !Array.isArray(v2Rows) || v2Rows.length === 0) return;
+        const monthStartISO = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).format('YYYY-MM-DD');
+        const monthEndISO = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).endOf('month').format('YYYY-MM-DD');
+
+        // Load employees to resolve seller userId, role, and PS scope
+        let empList: any[] = [];
+        try { empList = await listEmployees() as any[]; } catch {}
+        const empMeta = new Map<number, { sellerUserId: number | null; roleKey: string; psScope: number[]; psFallback: number | null }>();
+        for (const e of (empList || [])) {
+          const id = Number(e?.ID_EMP ?? e?.id_emp ?? e?.id);
+          if (!Number.isFinite(id)) continue;
+          let roleKey = '';
+          let psScope: number[] = [];
+          let sellerUserId: number | null = null;
+          try {
+            const jd = e?.JOB_DESCRIPTION ? JSON.parse(e.JOB_DESCRIPTION) : {};
+            const sid = jd?.__sales__?.userId ?? jd?.__seller__?.userId ?? null;
+            if (sid != null && !Number.isNaN(Number(sid))) sellerUserId = Number(sid);
+            roleKey = String(jd?.__commissions__?.role || '').toLowerCase();
+            const psList = jd?.__commissions__?.ps;
+            if (Array.isArray(psList)) psScope = psList.map((x:any)=>Number(x)).filter((n:number)=>Number.isFinite(n));
+          } catch {}
+          const psFallback = Number(e?.PS ?? e?.ps ?? NaN);
+          empMeta.set(id, { sellerUserId, roleKey, psScope, psFallback: Number.isFinite(psFallback) ? Number(psFallback) : null });
+        }
+
+        // Fetch all invoice details once and aggregate gold grams by user and by PS
+        let rowsAll: any[] = [];
+        try {
+          const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
+          const r = await fetch(`http://192.168.3.60:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+          if (r.ok) rowsAll = await r.json();
+        } catch {}
+        const gramsByUser = new Map<number, number>();
+        const gramsByPs = new Map<number, number>();
+        for (const row of (Array.isArray(rowsAll) ? rowsAll : [])) {
+          const typeRaw = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
+          if (!typeRaw.includes('gold')) continue;
+          const achats = Array.isArray(row?.ACHATs) ? row.ACHATs : [];
+          let grams = 0;
+          for (const a of achats) {
+            const st = String(a?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
+            if (st.includes('gold')) {
+              const q = Number(a?.qty || 0);
+              if (!Number.isNaN(q)) grams += q;
+            }
+          }
+          if (grams <= 0) continue;
+          const uid = Number(row?.Utilisateur?.id_user ?? row?.user_id ?? NaN);
+          if (Number.isFinite(uid)) gramsByUser.set(uid, (gramsByUser.get(uid) || 0) + grams);
+          const psVal = Number(row?.ps ?? row?.PS ?? NaN);
+          if (Number.isFinite(psVal)) gramsByPs.set(psVal, (gramsByPs.get(psVal) || 0) + grams);
+        }
+
+        // Load commission settings (role -> LYD/g)
+        const commissionSettings = (() => {
+          try {
+            const raw = localStorage.getItem('commissionSettingsV1');
+            if (!raw) throw new Error('no settings');
+            const cfg = JSON.parse(raw);
+            return cfg && typeof cfg === 'object' ? cfg : {};
+          } catch { return {} as any; }
+        })();
+        const goldRates: Record<string, number> = {
+          sales_rep: 1,
+          senior_sales_rep: 1.25,
+          sales_lead: 1.5,
+          sales_manager: 1.5,
+          ...(commissionSettings.gold || {}),
+        };
+
+        // Build updated rows with new gold_bonus_lyd
+        const byId = new Map<number, any>();
+        (v2Rows || []).forEach((r:any) => byId.set(Number(r.id_emp), r));
+        const changed: any[] = [];
+        for (const emp of (result?.employees || [])) {
+          const id = Number((emp as any).id_emp);
+          const base = byId.get(id) || {};
+          const meta = empMeta.get(id);
+          if (!meta || meta.sellerUserId == null) continue;
+          const roleKey = String(meta.roleKey || '').toLowerCase();
+          const goldRate = goldRates[roleKey] ?? 0;
+          if (!goldRate) continue;
+          let gramsUsed = 0;
+          if (commissionWeightMode === 'total') {
+            const scope = (meta.psScope && meta.psScope.length > 0) ? meta.psScope : (meta.psFallback != null ? [meta.psFallback] : []);
+            for (const p of scope) gramsUsed += (gramsByPs.get(Number(p)) || 0);
+          } else {
+            gramsUsed = gramsByUser.get(Number(meta.sellerUserId)) || 0;
+          }
+          const newBonus = Number((gramsUsed * goldRate).toFixed(2));
+          const oldBonus = Number(base.gold_bonus_lyd || 0);
+          if (Math.abs(newBonus - oldBonus) > 0.009) {
+            const updated = { ...base, id_emp: id, gold_bonus_lyd: newBonus };
+            changed.push(updated);
+          }
+        }
+        if (changed.length > 0) {
+          setV2Rows((prev:any[]) => {
+            const map = new Map<number, any>();
+            (prev||[]).forEach((r:any)=> map.set(Number(r.id_emp), r));
+            for (const u of changed) map.set(Number(u.id_emp), { ...map.get(Number(u.id_emp)), ...u });
+            return Array.from(map.values());
+          });
+          try {
+            if (!viewOnly) await savePayrollV2({ year, month, rows: changed });
+          } catch {}
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commissionWeightMode, year, month]);
+
   // Sort/filter helpers
   const sortRows = React.useCallback((rows: Payslip[]) => {
     const arr = [...rows];
     const getVal = (e: Payslip): any => {
       switch (sortKey) {
-        case 'name': return String(e.name||'').toLowerCase();
+        case 'name': return String(nameMap[e.id_emp] ?? e.name ?? '').toLowerCase();
         case 'ps': {
           const raw = e.PS != null ? String(e.PS) : '';
           const label = psPoints[Number(e.PS)] || formatPs(raw) || '';
@@ -540,14 +780,35 @@ export default function PayrollPage() {
       return 0;
     });
     return arr;
-  }, [sortKey, sortDir, sales, v2Rows, advMap, psPoints]);
+  }, [sortKey, sortDir, sales, v2Rows, advMap, psPoints, nameMap]);
+
+  // Distinct positions for filter UI
+  const positionOptions = React.useMemo(() => {
+    const set = new Set<string>();
+    (result?.employees || []).forEach((e) => {
+      const d = String((e as any).designation || '').trim();
+      if (d) set.add(d);
+    });
+    return Array.from(set).sort((a,b)=> a.localeCompare(b));
+  }, [result]);
 
   const displayedRows: Payslip[] = React.useMemo(() => {
-    const rows = result?.employees || [];
+    let rows = result?.employees || [];
+    // Filter by position if selected
+    if (positionFilter && positionFilter !== 'all') {
+      const pf = positionFilter.toLowerCase();
+      rows = rows.filter(r => String((r as any).designation || '').toLowerCase() === pf);
+    }
+    // Filter by search text
     const f = String(filterText || '').toLowerCase();
-    const filtered = f ? rows.filter(r => String(r.name||'').toLowerCase().includes(f) || String(r.id_emp).includes(f)) : rows;
+    const filtered = f
+      ? rows.filter(r => {
+          const nm = String(nameMap[r.id_emp] ?? r.name ?? '').toLowerCase();
+          return nm.includes(f) || String(r.id_emp).includes(f);
+        })
+      : rows;
     return sortRows(filtered);
-  }, [result, filterText, sortRows]);
+  }, [result, positionFilter, filterText, sortRows, nameMap]);
 
   // Totals for current view
   const totals = React.useMemo(() => {
@@ -575,22 +836,28 @@ export default function PayrollPage() {
       t.diamond += Number(vr.diamond_bonus_lyd||0);
       { t.totalLyd += computeNetLYDFor(e.id_emp); }
       // Approximate USD: use baseSalaryUsd/factor if available
-      const W2 = Math.max(1, e.workingDays||1);
-      const F = e.factorSum != null && e.factorSum > 0 ? e.factorSum : ((e.components?.basePay||0) / (Math.max(1, e.baseSalary||0)/W2));
-      const baseUsd = e.baseSalaryUsd ? (e.baseSalaryUsd/W2)*F : 0;
-      const commUsd = Number(vr?.diamond_bonus_usd||0) + Number(vr?.gold_bonus_usd||0);
-      t.totalUsd += baseUsd + commUsd;
-    });
-    return t;
-  }, [displayedRows, sales, v2Rows, advMap]);
+          const W2 = Math.max(1, e.workingDays||1);
+          const F = e.factorSum != null && e.factorSum > 0 ? e.factorSum : ((e.components?.basePay||0) / (Math.max(1, e.baseSalary||0)/W2));
+          const baseUsd = e.baseSalaryUsd ? (e.baseSalaryUsd/W2)*F : 0;
+          const commUsd = Number(vr?.diamond_bonus_usd||0) + Number(vr?.gold_bonus_usd||0);
+          t.totalUsd += baseUsd + commUsd;
+      });
+      return t;
+    }, [displayedRows, sales, v2Rows, advMap]);
 
   const onRun = async () => {
     setError(null);
     setLoading(true);
     setResult(null);
     try {
-      // Prefer V2 compute; adapt to legacy shape expected by this UI
-      const v2 = await computePayrollV2({ year, month, ps: ps !== "" ? Number(ps) : undefined });
+      // Always compute fresh for active employees (ignore any saved data)
+      const v2 = await computePayrollV2({ year, month });
+      // Persist computed rows for this open month so backend tables stay in sync
+      try {
+        if (!v2.viewOnly && Array.isArray(v2.rows) && v2.rows.length) {
+          await savePayrollV2({ year: v2.year, month: v2.month, rows: v2.rows });
+        }
+      } catch {}
       const start = `${v2.year}-${String(v2.month).padStart(2,'0')}-01`;
       const end = `${v2.year}-${String(v2.month).padStart(2,'0')}-${String(new Date(v2.year, v2.month, 0).getDate()).padStart(2,'0')}`;
       setV2Rows(v2.rows || []);
@@ -598,6 +865,7 @@ export default function PayrollPage() {
       let allowMap: Record<number, { fuel: number; comm: number }> = {};
       try {
         const empList = await listEmployees();
+        const nm: Record<number, string> = {};
         if (Array.isArray(empList)) {
           for (const e of empList as any[]) {
             const id = Number(e?.ID_EMP ?? e?.id_emp);
@@ -606,8 +874,11 @@ export default function PayrollPage() {
               fuel: Number(e?.FUEL || 0),
               comm: Number(e?.COMMUNICATION || 0),
             };
+            const disp = chooseDisplayName(String(e?.NAME || ''), String(e?.NAME_ENGLISH || ''), id);
+            if (disp) nm[id] = disp;
           }
         }
+        setNameMap(nm);
       } catch {}
       setViewOnly(!!v2.viewOnly);
       const employees: Payslip[] = (v2.rows || []).map((r: any) => {
@@ -673,7 +944,7 @@ export default function PayrollPage() {
           const hasComm = Number((empRow as any).COMMUNICATION || 0) > 0;
           if (!hasFuel || !hasComm) {
             try {
-              const res = await fetch(`http://localhost:9000/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+              const res = await fetch(`http://192.168.3.60:9000/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
               if (res.ok) {
                 const payload = await res.json();
                 const obj = payload?.data ?? payload;
@@ -692,7 +963,7 @@ export default function PayrollPage() {
         const entries: Record<number, number> = {};
         await Promise.all(employees.map(async (e) => {
           try {
-            const url = `http://localhost:9000/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
+            const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -793,6 +1064,7 @@ export default function PayrollPage() {
 
   const buildPayslipPdf = async (emp: Payslip): Promise<{ dataUrl: string; blobUrl: string; filename: string }> => {
   const days = await ensureTimesheetDays(emp.id_emp);
+  const dispName = String(nameMap[emp.id_emp] ?? emp.name ?? emp.id_emp);
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4", compress: true });
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 36;
@@ -890,7 +1162,7 @@ export default function PayrollPage() {
   } catch {}
   const headerH = 95;
   
-  const title = `${emp.name}`;
+  const title = `${dispName}`;
   let roleStr = String(emp.designation || '').trim();
   const logoH = 80; // slightly smaller logo height
   let logoX = -10, logoW = 0, logoY = 0;
@@ -975,7 +1247,7 @@ export default function PayrollPage() {
   try {
     // Resolve Position (TITLE) before drawing header
     try {
-      const resTitle = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resTitle = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resTitle.ok) {
         const payload = await resTitle.json();
         const obj = payload?.data ?? payload;
@@ -1014,7 +1286,7 @@ export default function PayrollPage() {
     const valW = Math.max(0, Math.floor(colWPre) - labW);
 
     const leftRows: Array<[string, string]> = [
-      ['Name', String(emp.name || '')],
+      ['Name', String(dispName || '')],
       ['ID', String(emp.id_emp || '')],
     ];
     const rightRows: Array<[string, string]> = [
@@ -1106,7 +1378,7 @@ export default function PayrollPage() {
   let commPerDayPDF = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
   if (!fuelPerDayPDF && !commPerDayPDF) {
     try {
-      const resEmp = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resEmp = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resEmp.ok) {
         const payload = await resEmp.json();
         const obj = payload?.data ?? payload;
@@ -1133,7 +1405,7 @@ export default function PayrollPage() {
   // Fetch this month's Salary Advances total for this employee (to deduct from Net Pay)
   let advSumLYD = 0;
   try {
-    const adjUrlSum = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const adjUrlSum = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(adjUrlSum, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -1151,7 +1423,7 @@ export default function PayrollPage() {
   let commissionRole: string = '';
   let commissionPs: number[] = [];
   try {
-    const resEmp = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+    const resEmp = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
     if (resEmp.ok) {
       const payload = await resEmp.json();
       const obj = payload?.data ?? payload;
@@ -1189,7 +1461,7 @@ export default function PayrollPage() {
   if (sellerUserId != null) {
     try {
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-      const r = await fetch(`http://localhost:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+      const r = await fetch(`http://192.168.3.60:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
       if (r.ok) {
         const js = await r.json();
         const rowsAll: any[] = Array.isArray(js) ? js : [];
@@ -1589,7 +1861,7 @@ export default function PayrollPage() {
   // Fetch and render Financial Log (adjustments) if any exist
   let adjRowsPdf: Array<{ type: string; amount: number; currency: string; note?: string; ts?: string }> = [];
   try {
-    const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -1834,7 +2106,7 @@ export default function PayrollPage() {
 
   // Salary/Allowance change logs
   try {
-    const url2 = `http://localhost:9000/hr/payroll/change-logs?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url2 = `http://192.168.3.60:9000/hr/payroll/change-logs?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res2 = await fetch(url2, { headers: authHeader() as unknown as HeadersInit });
     if (res2.ok) {
       const js2 = await res2.json();
@@ -1961,7 +2233,7 @@ export default function PayrollPage() {
   const leaveDaysByCode: Record<string, number> = {};
   
   try {
-    const resLeaves = await fetch(`http://localhost:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
+    const resLeaves = await fetch(`http://192.168.3.60:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
     if (resLeaves.ok) {
       const rows = await resLeaves.json() as LeaveRow[];
       const my = rows.filter(r => Number(r.id_emp) === Number(emp.id_emp) && String(r.state||'').toLowerCase() !== 'rejected');
@@ -2125,9 +2397,11 @@ export default function PayrollPage() {
 
   const dataUrl = doc.output("datauristring");
   const blobUrl = (doc as any).output('bloburl');
-  const safeName = String(emp.name || emp.id_emp).trim().replace(/\s+/g, '_');
+  const baseNameRaw = String(dispName || emp.id_emp).trim();
+  // Remove illegal filename characters but keep Arabic letters
+  const baseName = baseNameRaw.replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_');
   const periodTag = dayjs(periodStart).format('MMM_YYYY');
-  const filename = `${safeName}_Payslip_${periodTag}.pdf`;
+  const filename = `${baseName || String(emp.id_emp)}_Payslip_${periodTag}.pdf`;
   return { dataUrl, blobUrl, filename };
 };
 
@@ -2135,7 +2409,7 @@ export default function PayrollPage() {
     try {
       const { dataUrl, blobUrl, filename } = await buildPayslipPdf(emp);
       const a = document.createElement('a');
-      a.href = dataUrl;
+      a.href = blobUrl || dataUrl;
       a.download = filename;
       a.click();
     } catch (e) {
@@ -2149,6 +2423,7 @@ export default function PayrollPage() {
       const { dataUrl, filename } = await buildPayslipPdf(emp);
       const prettyMonth = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).format('MMMM YYYY');
       const subject = `Payslip — ${prettyMonth}`;
+      const disp = String(nameMap[emp.id_emp] ?? emp.name ?? emp.id_emp);
       // Recompute with overrides for email summary
       const baseLyd = Number(emp.components?.basePay || 0);
       const allowLyd = Number(emp.components?.allowancePay || 0);
@@ -2160,7 +2435,7 @@ export default function PayrollPage() {
       const counts: Record<string, number> = { P:0, A:0, PHF:0, PH:0, PT:0, PL:0 };
       days.forEach(d => { const c = (codeBadge(d) || ''); if (c in counts) counts[c]++; });
       // Fetch adjustments and leaves for email (DD/MM/YYYY; leaves use working days only)
-      const adjUrl = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+      const adjUrl = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
       let adjRows: Array<{ ts?:string; type:string; amount:number; currency:string; note?:string }> = [];
       try {
         const r = await fetch(adjUrl, { headers: authHeader() as unknown as HeadersInit });
@@ -2173,7 +2448,7 @@ export default function PayrollPage() {
       const leaveRanges: Record<string, Array<{ start:string; end:string }>> = {};
       const leaveDaysByCode: Record<string, number> = {};
       try {
-        const r = await fetch(`http://localhost:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
+        const r = await fetch(`http://192.168.3.60:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
         if (r.ok) {
           const rows = await r.json() as LeaveRow2[];
           const my = rows.filter(v => Number(v.id_emp) === Number(emp.id_emp) && String(v.state||'').toLowerCase() !== 'rejected');
@@ -2231,8 +2506,8 @@ export default function PayrollPage() {
 
       const html = `
         <div style="font-family:Inter,Arial,sans-serif;">
-          <h2 style="margin:0 0 8px;">${emp.name}'s Payslip — ${prettyMonth}</h2>
-          <p style="margin:0 0 8px;">Dear ${emp.name} (ID: ${emp.id_emp}),</p>
+          <h2 style="margin:0 0 8px;">${disp}'s Payslip — ${prettyMonth}</h2>
+          <p style="margin:0 0 8px;">Dear ${disp} (ID: ${emp.id_emp}),</p>
           <p style="margin:0 0 8px;">Please find attached your payslip. Summary below:</p>
           ${grid}
           <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid ${b};min-width:520px;margin-top:8px;">
@@ -2315,6 +2590,21 @@ export default function PayrollPage() {
             ))}
           </TextField>
         </Box>
+        <Box minWidth={180}>
+          <TextField
+            select
+            fullWidth
+            size="small"
+            label={t("Position") || "Position"}
+            value={positionFilter}
+            onChange={(e) => setPositionFilter(e.target.value)}
+          >
+            <MenuItem value="all">{t("All Positions") || "All Positions"}</MenuItem>
+            {positionOptions.map((pos) => (
+              <MenuItem key={pos} value={pos}>{pos}</MenuItem>
+            ))}
+          </TextField>
+        </Box>
         <Box minWidth={200}>
           <TextField
             size="small"
@@ -2344,7 +2634,8 @@ export default function PayrollPage() {
                 "Base Pay",
                 "Allowance Pay",
               ];
-              if (cols.adjustments) headers.push("Adjustments");
+              if (cols.advances) headers.push("Advance");
+              if (cols.loans) headers.push("Loans");
               if (cols.salesQty) headers.push("Sales Qty");
               if (cols.salesTotal) headers.push("Sales Total (LYD)");
               headers.push("Total (LYD)");
@@ -2361,11 +2652,8 @@ export default function PayrollPage() {
                   advance: 0,
                   loanPayment: 0,
                 };
-                const netAdj =
-                  (adj.bonus || 0) -
-                  ((adj.deduction || 0) +
-                    (adj.advance || 0) +
-                    (adj.loanPayment || 0));
+                const advVal = Number(adj.advance || 0) * -1;
+                const loanVal = Number(adj.loanPayment || 0) * -1;
                 const W = Math.max(1, e.workingDays || 1);
                 const F =
                   e.factorSum != null && e.factorSum > 0
@@ -2376,7 +2664,7 @@ export default function PayrollPage() {
                 const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
                 const commUsd = Number((vr as any).diamond_bonus_usd || 0) + Number((vr as any).gold_bonus_usd || 0);
                 const row: any[] = [
-                  `${e.name}`,
+                  `${nameMap[e.id_emp] ?? e.name}`,
                   e.workingDays,
                   e.deductionDays,
                   e.presentWorkdays,
@@ -2410,7 +2698,8 @@ export default function PayrollPage() {
                   (e.components?.basePay || 0).toFixed(2),
                   (e.components?.allowancePay || 0).toFixed(2),
                 ];
-                if (cols.adjustments) row.push(netAdj.toFixed(2));
+                if (cols.advances) row.push(advVal.toFixed(2));
+                if (cols.loans) row.push(loanVal.toFixed(2));
                 if (cols.salesQty) row.push((s.qty || 0).toFixed(0));
                 if (cols.salesTotal)
                   row.push((s.total_lyd || 0).toFixed(2));
@@ -2460,10 +2749,8 @@ export default function PayrollPage() {
                 "Allow",
               ];
               const colX: number[] = [36, 220, 260, 300, 340, 380, 450];
-              if (cols.adjustments) {
-                header.push("Adj");
-                colX.push(520);
-              }
+              if (cols.advances) { header.push("Adv"); colX.push(520); }
+              if (cols.loans)    { header.push("Loan"); colX.push(560); }
               if (cols.salesQty) {
                 header.push("Qty");
                 colX.push(560);
@@ -2473,7 +2760,7 @@ export default function PayrollPage() {
                 colX.push(600);
               }
               header.push("Total");
-              colX.push(660);
+              colX.push(620);
               if (cols.totalUsd) {
                 header.push("USD");
                 colX.push(720);
@@ -2516,11 +2803,12 @@ export default function PayrollPage() {
                   (e.components?.basePay || 0).toFixed(0),
                   (e.components?.allowancePay || 0).toFixed(0),
                 ];
-                if (cols.adjustments) vals.push(netAdj.toFixed(0));
+                if (cols.advances) vals.push((Number(adj.advance||0)*-1).toFixed(2));
+                if (cols.loans)    vals.push((Number(adj.loanPayment||0)*-1).toFixed(2));
                 if (cols.salesQty) vals.push((s.qty || 0).toFixed(0));
                 if (cols.salesTotal)
-                  vals.push((s.total_lyd || 0).toFixed(0));
-                { vals.push(computeNetLYDFor(e.id_emp).toFixed(0)); }
+                  vals.push((s.total_lyd || 0).toFixed(2));
+                vals.push(computeNetLYDFor(e.id_emp).toFixed(2));
                 if (cols.totalUsd) vals.push((baseUsd + commUsd).toFixed(0));
                 vals.forEach((v, i) => doc.text(String(v), colX[i], y0));
                 y0 += 14;
@@ -2537,50 +2825,36 @@ export default function PayrollPage() {
             {t("Export PDF") || "Export PDF"}
           </Button>
 
-          <Button
-            variant="contained"
-            disabled={viewOnly}
-            onClick={async () => {
-              try {
-                await savePayrollV2({ year, month, rows: v2Rows });
-                alert("Saved");
-              } catch (e: any) {
-                alert(e?.message || "Failed to save");
-              }
-            }}
-          >
-            {t("Save Month") || "Save Month"}
-          </Button>
-
-          <Button
-            variant="outlined"
-            disabled={viewOnly}
-            onClick={async () => {
-              const bankAcc = window.prompt("Bank/Cash Account No", "");
-              if (!bankAcc) return;
-              const salaryExpenseAcc = window.prompt(
-                "Salary Expense Account No",
-                ""
-              );
-              if (!salaryExpenseAcc) return;
-              const note = window.prompt("Note", "");
-              try {
-                await closePayrollV2({
-                  year,
-                  month,
-                  bankAcc,
-                  salaryExpenseAcc,
-                  note: note || undefined,
-                });
-                alert("Month closed");
-                setViewOnly(true);
-              } catch (e: any) {
-                alert(e?.message || "Failed to close");
-              }
-            }}
-          >
-            {t("Close Month") || "Close Month"}
-          </Button>
+          {!viewOnly && (
+            <Button
+              variant="contained"
+              onClick={async () => {
+                const bankAcc = window.prompt("Bank/Cash Account No", "");
+                if (!bankAcc) return;
+                const salaryExpenseAcc = window.prompt(
+                  "Salary Expense Account No",
+                  ""
+                );
+                if (!salaryExpenseAcc) return;
+                const note = window.prompt("Note", "");
+                try {
+                  await closePayrollV2({
+                    year,
+                    month,
+                    bankAcc,
+                    salaryExpenseAcc,
+                    note: note || undefined,
+                  });
+                  alert("Month closed");
+                  setViewOnly(true);
+                } catch (e: any) {
+                  alert(e?.message || "Failed to close");
+                }
+              }}
+            >
+              {t("Close Month") || "Close Month"}
+            </Button>
+          )}
         </Box>
       </Box>
     )}
@@ -2652,7 +2926,7 @@ export default function PayrollPage() {
                             currency: "LYD",
                             note: "salary advance",
                           };
-                          const res = await fetch(`http://localhost:9000/hr/payroll/adjustments`, {
+                          const res = await fetch(`http://192.168.3.60:9000/hr/payroll/adjustments`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json", ...authHeader() } as unknown as HeadersInit,
                             body: JSON.stringify(payload),
@@ -2937,14 +3211,54 @@ export default function PayrollPage() {
           <Box display="grid" gap={2} maxWidth={600}>
             <Typography variant="h6">{t('Loan & Advance Settings') || 'Loan & Advance Settings'}</Typography>
             <Typography variant="subtitle2">{t('Default Loan Parameters') || 'Default Loan Parameters'}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {t('These settings control the default behavior for new loans. Loans use a fixed 25% monthly deduction rate with a 3x salary cap.') || 'These settings control the default behavior for new loans. Loans use a fixed 25% monthly deduction rate with a 3x salary cap.'}
-            </Typography>
+            <Box display="flex" flexWrap="wrap" gap={2}>
+              <TextField
+                type="number"
+                size="small"
+                sx={{ width: 160 }}
+                label={t('Max Loan Multiple of Salary') || 'Max Loan Multiple of Salary'}
+                value={loanMaxMultiple}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  const next = Number.isFinite(v) && v > 0 ? v : 0;
+                  setLoanMaxMultiple(next);
+                  try { localStorage.setItem('payroll_settings_loan_max_multiple', String(next || '')); } catch {}
+                }}
+                inputProps={{ step: 0.1, min: 0 }}
+              />
+              <TextField
+                type="number"
+                size="small"
+                sx={{ width: 160 }}
+                label={t('Loan Monthly Deduction %') || 'Loan Monthly Deduction %'}
+                value={loanMonthlyPercent}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  const next = Number.isFinite(v) && v >= 0 ? v : 0;
+                  setLoanMonthlyPercent(next);
+                  try { localStorage.setItem('payroll_settings_loan_monthly_percent', String(next || '')); } catch {}
+                }}
+                inputProps={{ step: 0.1, min: 0, max: 100 }}
+              />
+            </Box>
             <Divider />
             <Typography variant="subtitle2">{t('Salary Advance Limits') || 'Salary Advance Limits'}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {t('Salary advances are capped at 50% of the employee\'s monthly salary. The system automatically tracks existing advances and prevents exceeding this limit.') || 'Salary advances are capped at 50% of the employee\'s monthly salary. The system automatically tracks existing advances and prevents exceeding this limit.'}
-            </Typography>
+            <Box display="flex" flexWrap="wrap" gap={2}>
+              <TextField
+                type="number"
+                size="small"
+                sx={{ width: 200 }}
+                label={t('Max Advance % of Monthly Salary') || 'Max Advance % of Monthly Salary'}
+                value={advanceMaxPercent}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  const next = Number.isFinite(v) && v >= 0 ? v : 0;
+                  setAdvanceMaxPercent(next);
+                  try { localStorage.setItem('payroll_settings_advance_max_percent', String(next || '')); } catch {}
+                }}
+                inputProps={{ step: 0.5, min: 0, max: 100 }}
+              />
+            </Box>
             <TextField
               size="small"
               fullWidth
@@ -2989,7 +3303,7 @@ export default function PayrollPage() {
               — {t("common.showing") || "Showing"} {result?.count ?? 0}
             </Typography>
             {/* summary boxes removed per request */}
-            <TableContainer sx={{ overflowX: 'auto' }}>
+            <TableContainer sx={{ overflow: 'auto', maxHeight: 'calc(100vh - 280px)' }}>
               <Table
                 stickyHeader
                 size="small"
@@ -2998,6 +3312,7 @@ export default function PayrollPage() {
                   width: "100%",
                   minWidth: tableMinWidth,
                   "& .MuiTableCell-root": { py: 0.5, px: 1 },
+                  "& td, & th": { borderBottom: '1px solid', borderColor: 'divider' },
                 }}
               >
                 <TableHead
@@ -3030,7 +3345,7 @@ export default function PayrollPage() {
                       sortDirection={
                         sortKey === "name" ? sortDir : (false as any)
                       }
-                      sx={{ width: 180, maxWidth: 180, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}
+                      sx={{ width: 180, maxWidth: 180, position: 'sticky', left: 0, zIndex: 6, bgcolor: 'background.paper' }}
                     >
                       <TableSortLabel
                         active={sortKey === "name"}
@@ -3121,7 +3436,8 @@ export default function PayrollPage() {
                             comm: true,
                             basePay: true,
                             allowancePay: true,
-                            adjustments: true,
+                            advances: true,
+                            loans: true,
                             salesQty: true,
                             salesTotal: true,
                             gold: true,
@@ -3465,37 +3781,25 @@ export default function PayrollPage() {
                         </Box>
                       </TableCell>
                     )}
-                    {cols.adjustments && (
-                      <TableCell
-                        align="right"
-                        sortDirection={
-                          sortKey === "adjustments" ? sortDir : (false as any)
-                        }
-                        sx={{ width: 72 }}
-                      >
+                    {cols.advances && (
+                      <TableCell align="right" sx={{ width: 78 }}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                        <TableSortLabel
-                          active={sortKey === "adjustments"}
-                          direction={
-                            sortKey === "adjustments" ? sortDir : "asc"
-                          }
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              setCols((c) => ({
-                                ...c,
-                                adjustments: !c.adjustments,
-                              }));
-                              e.preventDefault();
-                              e.stopPropagation();
-                            } else handleSort("adjustments");
-                          }}
-                        >
-                          {t("Adjustments") || "Adjustments"}
-                        </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, adjustments: !c.adjustments })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
+                          <span>{t("Advance") || "Advance"}</span>
+                          <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
+                            onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, advances: !c.advances })); }}>
+                            <VisibilityOffIcon fontSize="inherit" />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    )}
+                    {cols.loans && (
+                      <TableCell align="right" sx={{ width: 78 }}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
+                          <span>{t("Loans") || "Loans"}</span>
+                          <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
+                            onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, loans: !c.loans })); }}>
+                            <VisibilityOffIcon fontSize="inherit" />
+                          </IconButton>
                         </Box>
                       </TableCell>
                     )}
@@ -3696,7 +4000,7 @@ export default function PayrollPage() {
                         </Box>
                       </TableCell>
                     )}
-                    <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 3, bgcolor: 'background.paper' }}>
+                    <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 6, bgcolor: 'background.paper' }}>
                       <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
                         <span>{t("Actions") || "Actions"}</span>
                         <IconButton size="small" aria-label="columns" onClick={(e)=> setColsAnchor(e.currentTarget)}>
@@ -3713,9 +4017,9 @@ export default function PayrollPage() {
                       hover
                       sx={{ "&:nth-of-type(odd)": { bgcolor: "action.hover" } }}
                     >
-                      <TableCell sx={{ position: 'sticky', left: 0, zIndex: 2, bgcolor: 'background.paper' }}>
+                      <TableCell sx={{ width: 180, maxWidth: 180, position: 'sticky', left: 0, zIndex: 2, bgcolor: 'background.paper' }}>
                         <Box display="flex" alignItems="center" gap={1.25}>
-                          <Avatar src={`http://localhost:9000/employees/${e.id_emp}/picture`} sx={{ width: 28, height: 28 }} />
+                          <Avatar src={`http://192.168.3.60:9000/employees/${e.id_emp}/picture`} sx={{ width: 28, height: 28 }} />
                           <Box
                             display="flex"
                             flexDirection="column"
@@ -3729,9 +4033,9 @@ export default function PayrollPage() {
                               fontWeight={500}
                               noWrap
                               sx={{ cursor: "pointer" }}
-                              onClick={() => openCalendar(e.id_emp, e.name)}
+                              onClick={() => openCalendar(e.id_emp, nameMap[e.id_emp] ?? e.name)}
                             >
-                              {e.name}
+                              {nameMap[e.id_emp] ?? e.name}
                             </Typography>
                             <Typography variant="caption">
                               {(() => {
@@ -3751,34 +4055,34 @@ export default function PayrollPage() {
                         </Box>
                       </TableCell>
                       {/* PS column cell */}
-                      <TableCell>
+                      <TableCell sx={{ width: 64 }}>
                         {e.PS != null ? formatPs(e.PS) : "-"}
                       </TableCell>
-                      <TableCell align="right">{e.workingDays || ""}</TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ width: 64 }}>{e.workingDays || ""}</TableCell>
+                      <TableCell align="right" sx={{ width: 64 }}>
                         {e.deductionDays
                           ? Number(e.deductionDays).toFixed(2)
                           : ""}
                       </TableCell>
                       {cols.presentWorkdays && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 64 }}>
                           {e.presentWorkdays || ""}
                         </TableCell>
                       )}
                       {cols.holidayWorked && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 64 }}>
                           {e.holidayWorked || ""}
                         </TableCell>
                       )}
                       {cols.baseSalary && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 80 }}>
                           {e.baseSalary || 0
-                            ? Number(e.baseSalary || 0).toFixed(2)
+                            ? formatMoney(Number(e.baseSalary || 0))
                             : ""}
                         </TableCell>
                       )}
                       {cols.food && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 72 }}>
                           {(() => {
                             const W = Math.max(1, e.workingDays || 1);
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
@@ -3790,71 +4094,88 @@ export default function PayrollPage() {
                             const present = Number(presentDaysMap[e.id_emp] ?? e.presentWorkdays ?? 0) || 0;
                             const fd = present;
                             const v = per * fd;
-                            return Number.isFinite(v) ? v.toFixed(2) : "0.00";
+                            return Number.isFinite(v) ? formatMoney(v) : "0.00";
+                          })()}
+                        </TableCell>
+                      )}
+                      {cols.fuel && (
+                        <TableCell align="right" sx={{ width: 72 }}>
+                          {(() => {
+                            const W = Math.max(1, e.workingDays || 1);
+                            const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
+                            const per = Number(((e as any).FUEL ?? (vr as any).FUEL) || 0);
+                            const v = per * W;
+                            return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.comm && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 72 }}>
                           {(() => {
                             const W = Math.max(1, e.workingDays || 1);
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
                             const per = Number(((e as any).COMMUNICATION ?? (vr as any).COMMUNICATION) || 0);
                             const v = per * W;
-                            return v ? v.toFixed(2) : "";
+                            return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.basePay && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 84 }}>
                           {e.components?.basePay || 0
-                            ? (e.components?.basePay || 0).toFixed(2)
+                            ? formatMoney(e.components?.basePay || 0)
                             : ""}
                         </TableCell>
                       )}
                       {cols.allowancePay && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 84 }}>
                           {e.components?.allowancePay || 0
-                            ? (e.components?.allowancePay || 0).toFixed(2)
+                            ? formatMoney(e.components?.allowancePay || 0)
                             : ""}
                         </TableCell>
                       )}
-                      {cols.adjustments && (
-                        <TableCell align="right">
+                      {cols.advances && (
+                        <TableCell align="right" sx={{ width: 78 }}>
                           {(() => {
-                            const a = e.components?.adjustments || {
-                              bonus: 0,
-                              deduction: 0,
-                              advance: 0,
-                              loanPayment: 0,
-                            };
-                            const v =
-                              (a.bonus || 0) -
-                              ((a.deduction || 0) +
-                                (a.advance || 0) +
-                                (a.loanPayment || 0));
-                            return v ? v.toFixed(2) : "";
+                            const a = e.components?.adjustments || ({} as any);
+                            const adv = Number(a.advance || 0);
+                            const v = adv ? -Math.abs(adv) : 0;
+                            return v ? (
+                              <Box component="span" sx={{ color: 'error.main' }}>{formatMoney(v)}</Box>
+                            ) : "";
+                          })()}
+                        </TableCell>
+                      )}
+                      {cols.loans && (
+                        <TableCell align="right" sx={{ width: 78 }}>
+                          {(() => {
+                            const a = e.components?.adjustments || ({} as any);
+                            const loan = Number(a.loanPayment || 0);
+                            const v = loan ? -Math.abs(loan) : 0;
+                            return v ? (
+                              <Box component="span" sx={{ color: 'error.main' }}>{formatMoney(v)}</Box>
+                            ) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.salesQty && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 64 }}>
                           {(() => {
                             const v = sales[String(e.id_emp)]?.qty ?? 0;
-                            return v ? v.toFixed(0) : "";
+                            return v ? formatInt(v) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.salesTotal && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 84 }}>
                           {(() => {
                             const v = sales[String(e.id_emp)]?.total_lyd ?? 0;
-                            return v ? v.toFixed(2) : "";
+                            return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.gold && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 96 }}>
                           {(() => {
                             const vr =
                               (v2Rows || []).find(
@@ -3862,12 +4183,12 @@ export default function PayrollPage() {
                                   Number(x.id_emp) === Number(e.id_emp)
                               ) || {};
                             const v = Number((vr as any).gold_bonus_lyd || 0);
-                            return v ? v.toFixed(2) : "";
+                            return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
                       {cols.diamond && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 96 }}>
                           {(() => {
                             const vr =
                               (v2Rows || []).find(
@@ -3877,18 +4198,18 @@ export default function PayrollPage() {
                             const v = Number(
                               (vr as any).diamond_bonus_lyd || 0
                             );
-                            return v ? v.toFixed(2) : "";
+                            return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ width: 96 }}>
                         <strong>{(() => {
                           const val = computeNetLYDFor(e.id_emp);
-                          return val ? val.toFixed(2) : "";
+                          return val ? formatMoney(val) : "";
                         })()}</strong>
                       </TableCell>
                       {cols.totalUsd && (
-                        <TableCell align="right">
+                        <TableCell align="right" sx={{ width: 84 }}>
                           {(() => {
                             const W = Math.max(1, e.workingDays || 1);
                             const F =
@@ -3902,12 +4223,22 @@ export default function PayrollPage() {
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
                             const commUsd = Number((vr as any).diamond_bonus_usd || 0) + Number((vr as any).gold_bonus_usd || 0);
                             const totalUsdVal = baseUsd + commUsd;
-                            return totalUsdVal ? totalUsdVal.toFixed(2) : "";
+                            return totalUsdVal ? formatMoney(totalUsdVal) : "";
                           })()}
                         </TableCell>
                       )}
-                      <TableCell align="right" sx={{ position: 'sticky', right: 0, zIndex: 2, bgcolor: 'background.paper' }}>
-                        <Box display="flex" gap={0.5} justifyContent="flex-end" alignItems="center">
+                      <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 2, bgcolor: 'background.paper' }}>
+                        <Box display="flex" flexDirection="column" gap={0.5} alignItems="stretch">
+                          {savingRows[e.id_emp] && <CircularProgress size={14} />}
+                          <Button
+                            size="small"
+                            variant="text"
+                            startIcon={<EditIcon fontSize="small" />}
+                            disabled={viewOnly}
+                            onClick={() => openRowEditor(e.id_emp)}
+                          >
+                            {t('Edit') || 'Edit'}
+                          </Button>
                           <Button
                             size="small"
                             variant="outlined"
@@ -3928,12 +4259,9 @@ export default function PayrollPage() {
                   ))}
                   {/* Totals row */}
                   <TableRow>
-                    <TableCell>
+                    <TableCell colSpan={3}>
                       <strong>{t("Totals") || "Totals"}</strong>
                     </TableCell>
-                    {/* PS column placeholder */}
-                    <TableCell align="right">—</TableCell>
-                    <TableCell align="right">—</TableCell>
                     <TableCell align="right">—</TableCell>
                     {cols.presentWorkdays && (
                       <TableCell align="right">—</TableCell>
@@ -3943,65 +4271,76 @@ export default function PayrollPage() {
                     )}
                     {cols.baseSalary && (
                       <TableCell align="right">
-                        <strong>{totals.baseSalary.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.baseSalary)}</strong>
                       </TableCell>
                     )}
                     {cols.food && (
                       <TableCell align="right">
-                        <strong>{totals.food.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.food)}</strong>
                       </TableCell>
                     )}
                     {cols.fuel && (
                       <TableCell align="right">
-                        <strong>{totals.fuel.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.fuel)}</strong>
                       </TableCell>
                     )}
                     {cols.comm && (
                       <TableCell align="right">
-                        <strong>{totals.comm.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.comm)}</strong>
                       </TableCell>
                     )}
                     {cols.basePay && (
                       <TableCell align="right">
-                        <strong>{totals.base.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.base)}</strong>
                       </TableCell>
                     )}
                     {cols.allowancePay && (
                       <TableCell align="right">
-                        <strong>{totals.allow.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.allow)}</strong>
                       </TableCell>
                     )}
-                    {cols.adjustments && (
+                    {cols.advances && (
                       <TableCell align="right">
-                        <strong>{totals.adj.toFixed(2)}</strong>
+                        {(() => {
+                          const sum = displayedRows.reduce((acc, e) => acc + (Number(e.components?.adjustments?.advance||0)*-1), 0);
+                          return <Box component="strong" sx={{ color: sum < 0 ? 'error.main' : undefined }}>{formatMoney(sum)}</Box>;
+                        })()}
+                      </TableCell>
+                    )}
+                    {cols.loans && (
+                      <TableCell align="right">
+                        {(() => {
+                          const sum = displayedRows.reduce((acc, e) => acc + (Number(e.components?.adjustments?.loanPayment||0)*-1), 0);
+                          return <Box component="strong" sx={{ color: sum < 0 ? 'error.main' : undefined }}>{formatMoney(sum)}</Box>;
+                        })()}
                       </TableCell>
                     )}
                     {cols.salesQty && (
                       <TableCell align="right">
-                        <strong>{totals.salesQty.toFixed(0)}</strong>
+                        <strong>{formatInt(totals.salesQty)}</strong>
                       </TableCell>
                     )}
                     {cols.salesTotal && (
                       <TableCell align="right">
-                        <strong>{totals.salesTotal.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.salesTotal)}</strong>
                       </TableCell>
                     )}
                     {cols.gold && (
                       <TableCell align="right">
-                        <strong>{totals.gold.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.gold)}</strong>
                       </TableCell>
                     )}
                     {cols.diamond && (
                       <TableCell align="right">
-                        <strong>{totals.diamond.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.diamond)}</strong>
                       </TableCell>
                     )}
                     <TableCell align="right">
-                      <strong>{totals.totalLyd.toFixed(2)}</strong>
+                      <strong>{formatMoney(totals.totalLyd)}</strong>
                     </TableCell>
                     {cols.totalUsd && (
                       <TableCell align="right">
-                        <strong>{totals.totalUsd.toFixed(2)}</strong>
+                        <strong>{formatMoney(totals.totalUsd)}</strong>
                       </TableCell>
                     )}
                     <TableCell align="right">—</TableCell>
@@ -4032,7 +4371,8 @@ export default function PayrollPage() {
               ['comm', 'Communication'],
               ['basePay', 'Base Pay'],
               ['allowancePay', 'Allowance Pay'],
-              ['adjustments', 'Adjustments'],
+              ['advances', 'Advance'],
+              ['loans', 'Loans'],
               ['salesQty', 'Sales Qty'],
               ['salesTotal', 'Sales Total'],
               ['gold', 'Gold Bonus'],
@@ -4157,6 +4497,59 @@ export default function PayrollPage() {
         <DialogActions>
           <Button onClick={() => setCalOpen(false)}>
             {t("common.close") || "Close"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Row adjustments editor (autosave) */}
+      <Dialog open={rowEditOpen} onClose={() => setRowEditOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>
+          {t('Adjustments') || 'Adjustments'} — {String(rowEdit?.name || rowEdit?.id_emp || '')}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            {t('Autosaves on change') || 'Autosaves on change'}
+          </Typography>
+          <Box display="grid" gridTemplateColumns="repeat(2, 1fr)" gap={1.25}>
+            <TextField size="small" type="number" label="Gold Bonus (LYD)" disabled={viewOnly}
+              value={rowForm.gold_bonus_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, gold_bonus_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { gold_bonus_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+            <TextField size="small" type="number" label="Diamond Bonus (LYD)" disabled={viewOnly}
+              value={rowForm.diamond_bonus_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, diamond_bonus_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { diamond_bonus_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+
+            <TextField size="small" type="number" label="Other Bonus 1 (LYD)" disabled={viewOnly}
+              value={rowForm.other_bonus1_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, other_bonus1_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_bonus1_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+            <TextField size="small" label="Other Bonus 1 Account" disabled={viewOnly}
+              value={rowForm.other_bonus1_acc ?? ''}
+              onChange={(e)=>{ const v=e.target.value; setRowForm((f:any)=>({...f, other_bonus1_acc:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_bonus1_acc:v }); queueAutoSave(rowEdit.id_emp);} }} />
+
+            <TextField size="small" type="number" label="Other Bonus 2 (LYD)" disabled={viewOnly}
+              value={rowForm.other_bonus2_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, other_bonus2_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_bonus2_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+            <TextField size="small" label="Other Bonus 2 Account" disabled={viewOnly}
+              value={rowForm.other_bonus2_acc ?? ''}
+              onChange={(e)=>{ const v=e.target.value; setRowForm((f:any)=>({...f, other_bonus2_acc:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_bonus2_acc:v }); queueAutoSave(rowEdit.id_emp);} }} />
+
+            <TextField size="small" type="number" label="Other Additions (LYD)" disabled={viewOnly}
+              value={rowForm.other_additions_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, other_additions_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_additions_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+            <TextField size="small" type="number" label="Other Deductions (LYD)" disabled={viewOnly}
+              value={rowForm.other_deductions_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, other_deductions_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { other_deductions_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+
+            <TextField size="small" type="number" label="Loan Debit (LYD)" disabled={viewOnly}
+              value={rowForm.loan_debit_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, loan_debit_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { loan_debit_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+            <TextField size="small" type="number" label="Loan Credit (LYD)" disabled={viewOnly}
+              value={rowForm.loan_credit_lyd ?? 0}
+              onChange={(e)=>{ const v=toN(e.target.value); setRowForm((f:any)=>({...f, loan_credit_lyd:v})); if(rowEdit){ applyRowForm(rowEdit.id_emp, { loan_credit_lyd:v }); queueAutoSave(rowEdit.id_emp);} }} />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRowEditOpen(false)}>
+            {t('common.close') || 'Close'}
           </Button>
         </DialogActions>
       </Dialog>
