@@ -38,6 +38,8 @@ import { getTimesheetMonth, listPs, PsItem, listPsPoints } from "../../api/atten
 import jsPDF from "jspdf";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import SettingsIcon from "@mui/icons-material/Settings";
+import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
+import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 
 // Format PS as codes: keep OG/HQ, turn numerals into P#
 function formatPs(ps: any): string | undefined {
@@ -3831,7 +3833,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                     {cols.p && (
                       <TableCell align="right" sx={{ width: 110 }}>
                         <Box display="flex" flexDirection="column" alignItems="flex-end">
-                          <span>{t("P") || "P"}</span>
+                          <span>P</span>
                           <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
                         </Box>
                       </TableCell>
@@ -3839,7 +3841,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                     {cols.ph && (
                       <TableCell align="right" sx={{ width: 110 }}>
                         <Box display="flex" flexDirection="column" alignItems="flex-end">
-                          <span>{t("PH") || "PH"}</span>
+                          <span>PH</span>
                           <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
                         </Box>
                       </TableCell>
@@ -3847,7 +3849,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                     {cols.phf && (
                       <TableCell align="right" sx={{ width: 110 }}>
                         <Box display="flex" flexDirection="column" alignItems="flex-end">
-                          <span>{t("PHF") || "PHF"}</span>
+                          <span>PHF</span>
                           <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
                         </Box>
                       </TableCell>
@@ -3889,7 +3891,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Base") || "Base"}
+                          {t("Base Pay") || "Base"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, baseSalary: !c.baseSalary })); }}>
@@ -3935,7 +3937,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Food Allow.") || "Food Allow."}
+                          {t("Food Allowance") || "Food Allow."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, food: !c.food })); }}>
@@ -3981,7 +3983,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Transport.") || "Transport."}
+                          {t("Fuel Allowance") || "Transport."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, fuel: !c.fuel })); }}>
@@ -4027,8 +4029,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Comm.") ||
-                            "Comm."}
+                          {t("Communication Allowance") || "Comm."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, comm: !c.comm })); }}>
@@ -4040,7 +4041,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                     {cols.advances && (
                       <TableCell align="right" sx={{ width: 78 }}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                          <span>{t("S. Adv") || "S. Adv"}</span>
+                          <span>{t("Salary Advance") || "S. Adv"}</span>
                           <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                             onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, advances: !c.advances })); }}>
                             <VisibilityOffIcon fontSize="inherit" />
@@ -4157,7 +4158,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Gold Comm") || "Gold Comm"}
+                          {t("Gold Commission") || "Gold Comm"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, gold: !c.gold })); }}>
@@ -4203,7 +4204,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Diamond Comm") || "Diamond Comm"}
+                          {t("Diamond Commission") || "Diamond Comm"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, diamond: !c.diamond })); }}>
@@ -4215,7 +4216,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                     {cols.watchComm && (
                       <TableCell align="right" sx={{ width: 84 }}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                          <span>{t("Watch Comm") || "Watch Comm"}</span>
+                          <span>{t("Watch Commission") || "Watch Comm"}</span>
                           <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                             onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, watchComm: !c.watchComm })); }}>
                             <VisibilityOffIcon fontSize="inherit" />
@@ -4614,7 +4615,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                         })()}
                       </TableCell>
                       <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 2, bgcolor: 'background.paper' }}>
-                        <Box display="flex" flexDirection="column" gap={0.5} alignItems="stretch">
+                        <Box display="flex" flexDirection="row" gap={1} alignItems="center" justifyContent="flex-end">
                           {savingRows[e.id_emp] && <CircularProgress size={14} />}
                           {/* <Button
                             size="small"
@@ -4628,16 +4629,18 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
                           <Button
                             size="small"
                             variant="outlined"
+                            startIcon={<PictureAsPdfOutlinedIcon fontSize="small" />}
                             onClick={() => exportPdfClient(e)}
                           >
-                            Payslip
+                            {t("Payslip") || "Payslip"}
                           </Button>
                           <Button
                             size="small"
                             variant="contained"
+                            startIcon={<SendOutlinedIcon fontSize="small" />}
                             onClick={() => sendPayslipEmailClient(e)}
                           >
-                            Send
+                            {t("Send") || "Send"}
                           </Button>
                         </Box>
                       </TableCell>

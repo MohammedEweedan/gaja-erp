@@ -598,7 +598,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
-      doc.text("Leave Balance Report", pageWidth - M, y + 14, {
+      const reportTitle = t(
+        "leave.balance.reportTitle",
+        "Leave Balance Report"
+      );
+      doc.text(reportTitle, pageWidth - M, y + 14, {
         align: "right",
       });
       doc.setFont("helvetica", "normal");
@@ -738,11 +742,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
       });
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
-      doc.text(
-        "Leave Distribution & Balance (Working Year)",
-        pieCard.padX,
-        pieCard.padY + 2
+      const distTitle = t(
+        "leave.balance.distributionTitle",
+        "Leave Distribution & Balance (Working Year)"
       );
+      doc.text(distTitle, pieCard.padX, pieCard.padY + 2);
 
       const pieYTop = pieCard.padY + 20;
       const imgWidth = 250;
@@ -877,7 +881,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           newPageIfNeeded(60);
           doc.setFont("helvetica", "italic");
           doc.setFontSize(10);
-          doc.text("No approved leave found in the working year.", M, y);
+          const noApproved = t(
+            "leave.balance.noApprovedWorkingYear",
+            "No approved leave found in the working year."
+          );
+          doc.text(noApproved, M, y);
           y += 16;
         }
       }

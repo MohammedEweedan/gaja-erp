@@ -216,7 +216,7 @@ const LeaveStatusScreen: React.FC<{ employeeId?: number | string }> = ({
           const msg =
             (e as any)?.response?.data?.message ||
             (e as any)?.message ||
-            "Delegation email failed";
+            t("leave.delegate.emailFailed", "Delegation email failed");
           setActionError(msg);
           if (/No delegate found/i.test(String(msg)))
             setShowDelegatePicker(true);
@@ -230,7 +230,9 @@ const LeaveStatusScreen: React.FC<{ employeeId?: number | string }> = ({
       }
     } catch (e: any) {
       setActionError(
-        e?.response?.data?.message || e?.message || "Action failed"
+        e?.response?.data?.message ||
+          e?.message ||
+          t("leave.status.actionFailed", "Action failed")
       );
     } finally {
       setActionLoading(false);
@@ -263,7 +265,7 @@ const LeaveStatusScreen: React.FC<{ employeeId?: number | string }> = ({
       setActionError(
         e?.response?.data?.message ||
           e?.message ||
-          "Failed to send delegation email"
+          t("leave.delegate.sendError", "Failed to send delegation email")
       );
       if (
         /No delegate found/i.test(

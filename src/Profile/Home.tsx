@@ -29,8 +29,6 @@ import {
   DialogActions,
   TextField,
   Autocomplete,
-  Paper,
-  MenuItem,
   Typography,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
@@ -70,20 +68,17 @@ import {
   Person2Outlined,
   Sell,
   TransitEnterexit,
-  Menu as MenuIcon,
-  MenuOpen as MenuOpenIcon,
-  ShoppingBagOutlined,
 } from "@mui/icons-material";
-import { MoneyOffCsred } from "@mui/icons-material";
+import Brightness4Icon from "@mui/icons-material/Brightness4";
+import Brightness7Icon from "@mui/icons-material/Brightness7";
+import ChatIcon from "@mui/icons-material/Chat";
 
 import Logo from "../ui-component/Logo2";
 import LanguageSwitcher from "../components/LanguageSwitcher";
+import ChatbotWidget from "../components/ChatbotWidget";
 import { hasRole } from "../Setup/getUserInfo";
 import { useAuth } from "../contexts/AuthContext";
 import axios from "../api";
-
-// Theme switch
-import Switch from "../components/Switch";
 
 import Dashboard from "./Dashboard/Dashboard";
 import P404 from "./Dashboard/P404";
@@ -115,17 +110,12 @@ import CashBookReports from "../Finance/CashBookReports";
 import createCache from "@emotion/cache";
 import { CacheProvider } from "@emotion/react";
 
-import {
-  DYNAMIC_PREFIXES,
-  decodeEmployeeToken,
-  decodeClientToken,
-  decodeSellerToken,
-} from "../utils/routeCrypto";
+import { DYNAMIC_PREFIXES, decodeEmployeeToken, decodeClientToken, decodeSellerToken } from "../utils/routeCrypto";
 import SellerReports from "../Invoices/SellerReports";
 import EmployeeProfile from "../HR/Setting/EmployeeProfile";
 import CommissionsPage from "../HR/Setting/CommissionsPage";
 
-// ---------------- CustomerProfileRoute ----------------
+// Resolve-focused CustomerProfile wrapper for static route
 function CustomerProfileRoute() {
   const [resolvedId, setResolvedId] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -135,13 +125,11 @@ function CustomerProfileRoute() {
       try {
         let id: number | null = null;
         try {
-          const raw =
-            typeof window !== "undefined"
-              ? localStorage.getItem("customerFocusId")
-              : null;
+          const raw = typeof window !== "undefined" ? localStorage.getItem("customerFocusId") : null;
           if (raw !== null && raw !== "") id = Number(raw);
         } catch {}
         if (!id || Number.isNaN(id)) {
+          // try resolve from hint (name/phone)
           let hintName = "";
           let hintPhone = "";
           try {
@@ -149,29 +137,14 @@ function CustomerProfileRoute() {
             hintPhone = localStorage.getItem("customerFocusPhone") || "";
           } catch {}
           if (hintName || hintPhone) {
-            const token =
-              typeof window !== "undefined"
-                ? localStorage.getItem("token")
-                : null;
+            const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
             try {
               const res = await axios.get(`/customers/all`, {
-                headers: {
-                  Authorization: token ? `Bearer ${token}` : undefined,
-                },
+                headers: { Authorization: token ? `Bearer ${token}` : undefined },
               });
               const list = Array.isArray(res.data) ? res.data : [];
-              const byTel = hintPhone
-                ? list.find(
-                    (c: any) => String(c.tel_client) === String(hintPhone)
-                  )
-                : null;
-              const byName =
-                !byTel && hintName
-                  ? list.find(
-                      (c: any) =>
-                        String(c.client_name) === String(hintName)
-                    )
-                  : null;
+              const byTel = hintPhone ? list.find((c: any) => String(c.tel_client) === String(hintPhone)) : null;
+              const byName = !byTel && hintName ? list.find((c: any) => String(c.client_name) === String(hintName)) : null;
               const found = byTel || byName || null;
               if (found) {
                 id = Number(found.id_client || found.Id_client || found.id);
@@ -199,7 +172,7 @@ function CustomerProfileRoute() {
   return <CustomerProfile id={resolvedId} />;
 }
 
-// ---------------- Theme augmentation ----------------
+// ---------- Theme augmentation ----------
 declare module "@mui/material/styles" {
   interface Palette {
     gaja: {
@@ -222,8 +195,9 @@ declare module "@mui/material/styles" {
 
 type _ProfileWithId = React.ComponentType<{ id?: number }>;
 
-const PANTONE_BLUE = "#374151" as const; // match dock grey
-const PANTONE_TAN = "#B7A27D" as const;
+// Pantone-inspired accents
+const PANTONE_BLUE = "#0057B8" as const; // Reflex Blue-ish
+const PANTONE_TAN = "#B7A27D" as const; // provided
 
 const getDesignTokens = (mode: "light" | "dark") => ({
   palette: {
@@ -231,15 +205,15 @@ const getDesignTokens = (mode: "light" | "dark") => ({
     gaja: (() => {
       const accent = mode === "light" ? "#4b5563" : "#9e9e9e";
       return {
-        50: "#374151",
+        50: "#334d68",
         100: accent,
-        200: "#374151",
+        200: "#334d68",
         300: accent,
         400: accent,
         500: accent,
-        600: "#374151",
+        600: "#334d68",
         700: accent,
-        800: "#374151",
+        800: "#334d68",
         900: accent,
       } as any;
     })(),
@@ -263,7 +237,7 @@ const getDesignTokens = (mode: "light" | "dark") => ({
   typography: { fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif' },
 });
 
-// ---------------- ChangePos ----------------
+// ---------- Change POS (PS selection dropdown) ----------
 type ChangePosProps = { currentPosName?: string };
 
 function ChangePos(_props: ChangePosProps) {
@@ -283,15 +257,14 @@ function ChangePos(_props: ChangePosProps) {
   });
   const [posOptions, setPosOptions] = React.useState<any[]>([]);
 
+  // current stored user id used for special-case UI grants (e.g., id 68)
   const currentStoredUserId = React.useMemo(() => {
     try {
       const raw =
         typeof window !== "undefined" ? localStorage.getItem("user") : null;
       if (!raw) return null;
       const obj = JSON.parse(raw);
-      return (
-        obj?.Cuser ?? obj?.id ?? obj?.id_user ?? obj?.Id_user ?? null
-      );
+      return obj?.Cuser ?? obj?.id ?? obj?.id_user ?? obj?.Id_user ?? null;
     } catch {
       return null;
     }
@@ -308,6 +281,7 @@ function ChangePos(_props: ChangePosProps) {
     return -1;
   });
 
+  // Find the current POS name from posOptions using psValue
   const currentPosName = React.useMemo(() => {
     if (psValue === "" || psValue === "-1")
       return t("analytics.posAll") || "All Stores";
@@ -322,14 +296,15 @@ function ChangePos(_props: ChangePosProps) {
 
   const handleSavePs = () => {
     try {
-      const rawValue =
-        selectedId !== undefined ? selectedId : psValue || "";
+      // persist selected POS id (use '' for All / -1)
+      const rawValue = selectedId !== undefined ? selectedId : psValue || "";
       const valueToSave = Number(rawValue) === -1 ? "" : rawValue;
 
       if (auth && typeof (auth as any).updatePs === "function") {
         (auth as any).updatePs(valueToSave);
       }
 
+      // update or create localStorage.user.ps
       try {
         const u = localStorage.getItem("user");
         if (u) {
@@ -339,12 +314,10 @@ function ChangePos(_props: ChangePosProps) {
         } else {
           localStorage.setItem("user", JSON.stringify({ ps: valueToSave }));
         }
-      } catch {
+      } catch (e) {
+        // fallback: set minimal user object
         try {
-          localStorage.setItem(
-            "user",
-            JSON.stringify({ ps: valueToSave })
-          );
+          localStorage.setItem("user", JSON.stringify({ ps: valueToSave }));
         } catch {}
       }
 
@@ -352,10 +325,12 @@ function ChangePos(_props: ChangePosProps) {
         localStorage.setItem("selectedPs", String(rawValue ?? ""));
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error("Failed to save PS", e);
     }
     handleClosePs();
 
+    // Refresh the page so dashboards pick up the new PS immediately
     try {
       if (typeof window !== "undefined") {
         setTimeout(() => window.location.reload(), 120);
@@ -378,7 +353,9 @@ function ChangePos(_props: ChangePosProps) {
         if (mounted && Array.isArray(res?.data)) {
           setPosOptions(res.data);
         }
-      } catch {}
+      } catch (e) {
+        // ignore
+      }
     };
     fetchPOS();
     return () => {
@@ -386,6 +363,7 @@ function ChangePos(_props: ChangePosProps) {
     };
   }, []);
 
+  // Real-time subscription for privilege changes (kept from original ChangePos)
   React.useEffect(() => {
     const sseUrl = process.env.REACT_APP_USERS_SSE_URL || null;
     const wsUrl = process.env.REACT_APP_USERS_WS_URL || null;
@@ -404,13 +382,7 @@ function ChangePos(_props: ChangePosProps) {
         const raw = localStorage.getItem("user");
         if (!raw) return null;
         const obj = JSON.parse(raw);
-        return (
-          obj?.Cuser ??
-          obj?.id ??
-          obj?.id_user ??
-          obj?.Id_user ??
-          null
-        );
+        return obj?.Cuser ?? obj?.id ?? obj?.id_user ?? obj?.Id_user ?? null;
       } catch {
         return null;
       }
@@ -419,9 +391,7 @@ function ChangePos(_props: ChangePosProps) {
     const handlePayload = (payloadRaw: any) => {
       try {
         const payload =
-          typeof payloadRaw === "string"
-            ? JSON.parse(payloadRaw)
-            : payloadRaw;
+          typeof payloadRaw === "string" ? JSON.parse(payloadRaw) : payloadRaw;
         const currentId = parseStoredCurrentId();
         const userId =
           payload?.id_user ??
@@ -446,21 +416,22 @@ function ChangePos(_props: ChangePosProps) {
               (auth as any).setPrivilege(remotePrv);
             } catch {}
           } else if (typeof window !== "undefined") {
+            // fallback: write and refresh
             try {
               const raw = localStorage.getItem("user");
               const obj = raw ? JSON.parse(raw) : {};
               const updated = { ...obj, Prvilege: remotePrv };
               localStorage.setItem("user", JSON.stringify(updated));
               try {
-                if (
-                  typeof (auth as any)?.refreshUser === "function"
-                )
+                if (typeof (auth as any)?.refreshUser === "function")
                   (auth as any).refreshUser();
               } catch {}
             } catch {}
           }
         }
-      } catch {}
+      } catch {
+        // ignore malformed messages
+      }
     };
 
     if (inferredSse) {
@@ -469,16 +440,24 @@ function ChangePos(_props: ChangePosProps) {
         es.onmessage = (evt) => {
           if (!closed) handlePayload(evt.data);
         };
-        es.onerror = () => {};
-      } catch {}
+        es.onerror = () => {
+          // no-op
+        };
+      } catch (e) {
+        // ignore
+      }
     } else if (wsUrl) {
       try {
         ws = new WebSocket(wsUrl);
         ws.onmessage = (evt) => {
           if (!closed) handlePayload(evt.data);
         };
-        ws.onerror = () => {};
-      } catch {}
+        ws.onerror = () => {
+          // ignore
+        };
+      } catch (e) {
+        // ignore
+      }
     }
 
     return () => {
@@ -492,6 +471,7 @@ function ChangePos(_props: ChangePosProps) {
     };
   }, [auth]);
 
+  // Determine if user is ROLE_ADMIN
   let isAdmin = false;
   try {
     const u = localStorage.getItem("user");
@@ -533,11 +513,18 @@ function ChangePos(_props: ChangePosProps) {
             "100%": { transform: "rotate(360deg) scale(1)" },
           },
         }}
-        startIcon={<Inventory2 />}
-        aria-label={t("POS") || "POS"}
+        startIcon={
+          <Box
+            component="span"
+            sx={{ display: "inline-flex" }}
+          >
+            {/* <Inventory2 /> */}
+          </Box>
+        }
+        aria-label={t("Change POS") || "Change POS"}
         disabled={!(isAdmin || String(currentStoredUserId) === "68")}
       >
-        {`${t("POS") || "POS"} (${currentPosName})`}
+        {`${t("Change POS") || "Change POS"} (${currentPosName})`}
       </Button>
 
       <Dialog open={openPs} onClose={handleClosePs} fullWidth maxWidth="sm">
@@ -550,9 +537,7 @@ function ChangePos(_props: ChangePosProps) {
             getOptionLabel={(o: any) =>
               o?.name_point || String(o?.Id_point ?? "")
             }
-            value={
-              posOptions.find((p) => p?.Id_point === selectedId) || null
-            }
+            value={posOptions.find((p) => p?.Id_point === selectedId) || null}
             onChange={(_e, value) => {
               const valId = value ? Number(value.Id_point) : -1;
               setSelectedId(valId);
@@ -582,7 +567,7 @@ function ChangePos(_props: ChangePosProps) {
   );
 }
 
-// ---------------- Encrypted routing ----------------
+// ---------- Encrypted routing ----------
 function generateRandomPath() {
   const chars =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -637,36 +622,22 @@ if (savedMapping) {
     encryptedToRoute = parsed.encryptedToRoute || {};
   } catch {}
 }
-// Preserve existing mapping; only add missing routes. Never blow away old mappings
-// to ensure currently open encrypted URLs remain valid across reloads/UI changes.
-{
-  const used = new Set<string>(Object.values(routeToEncrypted));
-  let changed = false;
-  for (const route of realRoutes) {
-    const existing = routeToEncrypted[route];
-    if (existing) {
-      if (!encryptedToRoute[existing]) {
-        encryptedToRoute[existing] = route;
-        changed = true;
-      }
-      continue;
-    }
-    let crypted: string;
+if (Object.keys(routeToEncrypted).length !== realRoutes.length) {
+  routeToEncrypted = {};
+  encryptedToRoute = {};
+  realRoutes.forEach((route) => {
+    let crypted;
     do {
       crypted = generateRandomPath();
-    } while (used.has(crypted));
+    } while (Object.values(routeToEncrypted).includes(crypted));
     routeToEncrypted[route] = crypted;
     encryptedToRoute[crypted] = route;
-    used.add(crypted);
-    changed = true;
-  }
-  if (changed && typeof window !== "undefined") {
-    try {
-      localStorage.setItem(
-        mappingKey,
-        JSON.stringify({ routeToEncrypted, encryptedToRoute })
-      );
-    } catch {}
+  });
+  if (typeof window !== "undefined") {
+    localStorage.setItem(
+      mappingKey,
+      JSON.stringify({ routeToEncrypted, encryptedToRoute })
+    );
   }
 }
 
@@ -675,18 +646,22 @@ function useDemoRouter(initialPath: string): Router {
     if (typeof window !== "undefined" && window.location?.pathname) {
       const current = window.location.pathname;
 
+      // Keep dynamic prefixes AS-IS
       if (DYNAMIC_PREFIXES.some((p) => current.startsWith(p))) {
         return current;
       }
 
+      // If current is a real route, rewrite to encrypted
       if (routeToEncrypted[current]) {
         const crypted = routeToEncrypted[current];
         window.history.replaceState({}, "", crypted);
         return crypted;
       }
 
+      // If current already looks encrypted, keep it
       if (encryptedToRoute[current]) return current;
 
+      // Otherwise, keep whatever was there (404 handler will catch)
       return current;
     }
     return initialPath;
@@ -705,9 +680,8 @@ function useDemoRouter(initialPath: string): Router {
       navigate: (path: string | URL) => {
         let newPath = String(path);
 
-        const isDynamic = DYNAMIC_PREFIXES.some((p) =>
-          newPath.startsWith(p)
-        );
+        // SKIP encryption for dynamic prefixes like /p/
+        const isDynamic = DYNAMIC_PREFIXES.some((p) => newPath.startsWith(p));
         if (!isDynamic && routeToEncrypted[newPath]) {
           newPath = routeToEncrypted[newPath];
         }
@@ -726,7 +700,7 @@ function useDemoRouter(initialPath: string): Router {
   );
 }
 
-// ---------------- Page wrappers ----------------
+// ---------- Page wrappers ----------
 const DashboardPage = () => <Dashboard />;
 const PurchaseWrapper = ({ type }: { type: string }) => (
   <GPurchase key={type} Type={type} />
@@ -750,6 +724,7 @@ const BInventoryWrapper = ({ type }: { type: string }) => (
 const ProfileWithId = EmployeeProfile as unknown as _ProfileWithId;
 
 function getPageComponent(pathname: string) {
+  // 1) Handle dynamic /p/<token> FIRST
   if (pathname.startsWith("/p/")) {
     const token = pathname.slice(3);
     const id = decodeEmployeeToken(token);
@@ -757,9 +732,11 @@ function getPageComponent(pathname: string) {
     return <ProfileWithId id={id} />;
   }
 
+  // 1b) Handle dynamic /c/<token> for client (customer) profile redirect (Timesheets-like)
   if (pathname.startsWith("/c/")) {
     const token = pathname.slice(3);
     const id = decodeClientToken(token);
+    // Stash focused id for any nested pages to read and render a profile shell
     try {
       if (id && typeof window !== "undefined") {
         localStorage.setItem("customerFocusId", String(id));
@@ -769,6 +746,7 @@ function getPageComponent(pathname: string) {
     return <CustomerProfile id={id} />;
   }
 
+  // 1c) Handle dynamic /s/<token> for seller reports redirect
   if (pathname.startsWith("/s/")) {
     const token = pathname.slice(3);
     const id = decodeSellerToken(token);
@@ -847,7 +825,7 @@ function getPageComponent(pathname: string) {
   }
 }
 
-// ---------------- Navigation -> Dock ----------------
+// ---------- Navigation ----------
 function buildNavigation(
   t: (k: string) => string,
   accent: string,
@@ -910,7 +888,7 @@ function buildNavigation(
           {
             segment: "purchaseProducts",
             title: t("nav.purchase.root"),
-            icon: <ShoppingBagOutlined {...iconSx} />,
+            icon: <ShoppingCartIcon {...iconSx} />,
             children: [
               {
                 segment: "OPurchase",
@@ -1049,7 +1027,7 @@ function buildNavigation(
               {
                 segment: "Sell​currency",
                 title: t("nav.cashbook.sellCurrency"),
-                icon: <MoneyOffCsred {...iconSx} />,
+                icon: <Sell {...iconSx} />,
               },
               {
                 segment: "buycurrency",
@@ -1146,338 +1124,7 @@ function buildNavigation(
   ];
 }
 
-type DockItem = {
-  key: string;
-  title: string;
-  icon?: React.ReactNode;
-  path?: string;
-  children?: DockItem[];
-};
-
-function buildDockItems(nav: Navigation): DockItem[] {
-  const getPath = (segment?: string, parentPath?: string) => {
-    if (!segment) return parentPath || "";
-    if (segment.startsWith("/")) return segment;
-    if (parentPath) return `${parentPath}/${segment}`;
-    return `/${segment}`;
-  };
-
-  const collectLeaves = (node: any, parentPath: string): DockItem[] => {
-    if (node?.kind === "header" || node?.kind === "divider") return [];
-    const path = getPath(node.segment, parentPath);
-
-    if (node.children && node.children.length) {
-      return (node.children as any[]).flatMap((child) =>
-        collectLeaves(child, path)
-      );
-    }
-
-    if (!node.segment) return [];
-    return [
-      {
-        key: path,
-        title: node.title ?? "",
-        icon: node.icon,
-        path,
-      },
-    ];
-  };
-
-  return (nav as any[])
-    .map((item, index) => {
-      if (item.kind === "header" || item.kind === "divider") return null;
-
-      const basePath = item.segment ? getPath(item.segment, "") : "";
-      const leaves = item.children
-        ? (item.children as any[]).flatMap((child: any) =>
-            collectLeaves(child, basePath)
-          )
-        : undefined;
-
-      return {
-        key: item.segment || `root-${index}`,
-        title: item.title ?? "",
-        icon: item.icon,
-        path: !leaves?.length ? (basePath || undefined) : undefined,
-        children: leaves,
-      } as DockItem;
-    })
-    .filter(Boolean) as DockItem[];
-}
-
-interface DockNavigationProps {
-  nav: Navigation;
-  router: Router;
-  accent: string;
-  currentPath: string;
-  mode: "light" | "dark";
-  onHoverChange?: (hover: boolean) => void;
-}
-
-function DockNavigation({
-  nav,
-  router,
-  accent,
-  currentPath,
-  mode,
-  onHoverChange,
-}: DockNavigationProps) {
-  const items = React.useMemo(() => buildDockItems(nav), [nav]);
-  const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(
-    null
-  );
-  const [openKey, setOpenKey] = React.useState<string | null>(null);
-
-  return (
-    <Box
-      sx={{
-        position: "fixed",
-        left: 16,
-        top: "50%",
-        transform: "translateY(-50%)",
-        zIndex: (theme) => theme.zIndex.drawer + 2,
-        pointerEvents: "auto",
-      }}
-      onMouseEnter={() => onHoverChange?.(true)}
-      onMouseLeave={() => onHoverChange?.(false)}
-    >
-      <Paper
-        elevation={8}
-        sx={{
-          pointerEvents: "auto",
-          px: 0.5,
-          py: 0.75,
-          borderRadius: "999px",
-          bgcolor:
-            mode === "dark" ? "rgba(10, 12, 18, 0.92)" : "#ffffff",
-          border:
-            mode === "dark"
-              ? "1px solid rgba(255,255,255,0.16)"
-              : "1px solid rgba(55,65,81,0.4)",
-          boxShadow:
-            mode === "dark"
-              ? "0 18px 50px rgba(0,0,0,0.7)"
-              : "0 14px 30px rgba(15,23,42,0.18)",
-          backdropFilter: mode === "dark" ? "blur(16px)" : "blur(10px)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 0.75,
-        }}
-      >
-        {items.map((item, index) => {
-          const hasChildren = !!item.children?.length;
-
-          const isActive =
-            (item.path && currentPath.startsWith(item.path)) ||
-            (hasChildren &&
-              item.children!.some(
-                (c) => c.path && currentPath.startsWith(c.path)
-              ));
-
-          const dist =
-            hoveredIndex == null ? Infinity : Math.abs(hoveredIndex - index);
-          const scale =
-            hoveredIndex == null
-              ? 1
-              : dist === 0
-              ? 1.25
-              : dist === 1
-              ? 1.12
-              : 1;
-
-          return (
-            <Box
-              key={item.key}
-              sx={{ position: "relative" }}
-              onMouseEnter={() => setHoveredIndex(index)}
-              onMouseLeave={() => setHoveredIndex(null)}
-            >
-              <Tooltip title={item.title} placement="right">
-                <IconButton
-                  onClick={() => {
-                    if (hasChildren) {
-                      setOpenKey((prev) =>
-                        prev === item.key ? null : item.key
-                      );
-                    } else if (item.path) {
-                      setOpenKey(null);
-                      router.navigate(item.path);
-                    }
-                  }}
-                  sx={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: "50%",
-                    color: accent,
-                    transform: `scale(${scale})`,
-                    transition:
-                      "transform 180ms ease-out, box-shadow 180ms ease-out, background-color 180ms ease-out",
-                    bgcolor: isActive
-                      ? mode === "dark"
-                        ? "rgba(255,255,255,0.06)"
-                        : "rgba(15,23,42,0.06)"
-                      : "transparent",
-                    boxShadow: isActive
-                      ? mode === "dark"
-                        ? "0 0 0 1px rgba(237, 237, 237, 0.3), 0 12px 30px rgba(0,0,0,0.65)"
-                        : "0 0 0 1px rgba(55,65,81,0.4), 0 10px 24px rgba(15,23,42,0.25)"
-                      : "none",
-                    "&:hover": {
-                      bgcolor:
-                        mode === "dark"
-                          ? "rgba(255,255,255,0.04)"
-                          : "rgba(15,23,42,0.04)",
-                    },
-                  }}
-                >
-                  {item.icon}
-                </IconButton>
-              </Tooltip>
-
-              {isActive && (
-                <Box
-                  sx={{
-                    position: "absolute",
-                    bottom: 2,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    bgcolor:
-                      mode === "dark"
-                        ? "rgba(255,255,255,0.9)"
-                        : "rgba(55,65,81,0.95)",
-                    boxShadow:
-                      mode === "dark"
-                        ? "0 0 10px rgba(255,255,255,0.75)"
-                        : "0 0 8px rgba(55,65,81,0.7)",
-                  }}
-                />
-              )}
-
-              {hasChildren && openKey === item.key && (
-                <Paper
-                  elevation={8}
-                  sx={{
-                    position: "absolute",
-                    left: 60,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    minWidth: 220,
-                    bgcolor:
-                      mode === "dark"
-                        ? "rgba(15, 18, 26, 0.98)"
-                        : "#ffffff",
-                    borderRadius: 3,
-                    border:
-                      mode === "dark"
-                        ? "1px solid rgba(255,255,255,0.16)"
-                        : "1px solid rgba(55,65,81,0.2)",
-                    boxShadow:
-                      mode === "dark"
-                        ? "0 18px 50px rgba(0,0,0,0.75)"
-                        : "0 16px 36px rgba(15,23,42,0.22)",
-                    overflow: "hidden",
-                    backdropFilter: "blur(12px)",
-                  }}
-                >
-                  <Box
-                    sx={{
-                      px: 2,
-                      py: 1,
-                      borderBottom:
-                        mode === "dark"
-                          ? "1px solid rgba(255,255,255,0.04)"
-                          : "1px solid rgba(15,23,42,0.06)",
-                    }}
-                  >
-                    <Typography
-                      sx={{
-                        fontWeight: 700,
-                        letterSpacing: 0.6,
-                        textTransform: "uppercase",
-                        fontSize: 11,
-                        color:
-                          mode === "dark" ? "#f5f5f5" : "#111827",
-                      }}
-                    >
-                      {item.title || "Menu"}
-                    </Typography>
-                  </Box>
-                  {item.children!.map((child) => {
-                    const childActive =
-                      child.path && currentPath.startsWith(child.path);
-                    return (
-                      <MenuItem
-                        key={child.key}
-                        onClick={() => {
-                          if (child.path) {
-                            router.navigate(child.path);
-                            setOpenKey(null);
-                          }
-                        }}
-                        sx={{
-                          py: 1,
-                          px: 2,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1.5,
-                          color: childActive
-                            ? mode === "dark"
-                              ? "#fef9c3"
-                              : "#0f172a"
-                            : mode === "dark"
-                            ? "#e5e5e5"
-                            : "#374151",
-                          "&:hover": {
-                            bgcolor:
-                              mode === "dark"
-                                ? "rgba(255,255,255,0.06)"
-                                : "rgba(15,23,42,0.04)",
-                          },
-                        }}
-                      >
-                        {child.icon && (
-                          <Box
-                            sx={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: 26,
-                              height: 26,
-                              borderRadius: "50%",
-                              bgcolor:
-                                mode === "dark"
-                                  ? "rgba(255,255,255,0.03)"
-                                  : "rgba(15,23,42,0.03)",
-                              color: accent,
-                            }}
-                          >
-                            {child.icon}
-                          </Box>
-                        )}
-                        <Typography
-                          variant="body2"
-                          sx={{ fontWeight: childActive ? 700 : 500 }}
-                        >
-                          {child.title}
-                        </Typography>
-                      </MenuItem>
-                    );
-                  })}
-                </Paper>
-              )}
-            </Box>
-          );
-        })}
-      </Paper>
-    </Box>
-  );
-}
-
-// ---------------- LTR cache ----------------
+// ---------- LTR cache creator ----------
 function createEmotionCacheLTR() {
   return createCache({
     key: "mui-ltr",
@@ -1485,26 +1132,25 @@ function createEmotionCacheLTR() {
   });
 }
 
-// ---------------- Home ----------------
+// ---------- Component ----------
 export default function Home(props: any) {
   const { t } = useTranslation();
 
+  // Lock to LTR
   const dir: "ltr" = "ltr";
 
   const [mode, setMode] = React.useState<"light" | "dark">(() => {
     try {
       const saved =
         typeof window !== "undefined"
-          ? (localStorage.getItem("themeMode") as
-              | "light"
-              | "dark"
-              | null)
+          ? (localStorage.getItem("themeMode") as "light" | "dark" | null)
           : null;
       if (saved === "light" || saved === "dark") return saved;
     } catch {}
     return "light";
   });
 
+  // Build theme with **fixed LTR** direction
   const appTheme: Theme = React.useMemo(() => {
     const tokens = getDesignTokens(mode) as any;
     const base = createTheme({ direction: dir, ...tokens }) as any;
@@ -1512,65 +1158,27 @@ export default function Home(props: any) {
     return base as Theme;
   }, [mode]);
 
-  // DON'T shadow global window
-  const { window: win } = props;
-
+  const { window } = props;
   const [initialPath] = React.useState(() =>
-    typeof win !== "undefined" && win?.location
-      ? win.location.pathname || "/dashboard"
+    typeof window !== "undefined"
+      ? window.location?.pathname || "/dashboard"
       : "/dashboard"
   );
   const router = useDemoRouter(initialPath);
   const location = useLocation();
-  const demoWindow = typeof win !== "undefined" ? win : undefined;
+  const demoWindow = typeof window !== "undefined" ? window : undefined;
 
   const [snackbarOpen, setSnackbarOpen] = React.useState(false);
   const [aiOpen, setAiOpen] = React.useState(false);
 
-  // Dock pin/auto-hide
-  const [dockPinned, setDockPinned] = React.useState(true);
-  const [dockHoveringEdge, setDockHoveringEdge] = React.useState(false);
-  const [dockHovering, setDockHovering] = React.useState(false);
-  const [dockEdgeActive, setDockEdgeActive] = React.useState(false);
-
-  const dockVisible = dockPinned || dockHoveringEdge || dockHovering;
-
-  // Guard: lock route while toggling dock to avoid accidental navigation
-  const routeLockRef = React.useRef<string>("");
-  const suppressNavRef = React.useRef(false);
-
+  // Sync Toolpad router with BrowserRouter so navigating to /p/<token> opens profile instantly
   React.useEffect(() => {
     const path = location.pathname;
-    if (!path) return;
-    if (suppressNavRef.current) return; // do not sync while dock toggle is in-flight
-    // Normalize: if a real route was pushed, translate to encrypted; if already encrypted, keep
-    let target = path;
-    const isDynamic = DYNAMIC_PREFIXES.some((p) => path.startsWith(p));
-    if (!isDynamic && routeToEncrypted[path]) {
-      target = routeToEncrypted[path];
-    }
-    if (target && target !== router.pathname) {
-      router.navigate(target);
+    if (path && path !== router.pathname) {
+      router.navigate(path);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
-
-  // Auto-restore route if something changed it during dock toggle
-  React.useEffect(() => {
-    if (!suppressNavRef.current) return;
-    const locked = routeLockRef.current;
-    if (!locked) return;
-    if (router.pathname !== locked) {
-      router.navigate(locked);
-    }
-    if (
-      typeof window !== "undefined" &&
-      window.location &&
-      window.location.pathname !== locked
-    ) {
-      try { window.history.replaceState({}, "", locked); } catch {}
-    }
-  }, [router.pathname]);
 
   const colorMode = React.useMemo(
     () => ({
@@ -1587,45 +1195,55 @@ export default function Home(props: any) {
     []
   );
 
+  // Set document dir to LTR once
   React.useEffect(() => {
     document.documentElement.setAttribute("dir", dir);
   }, []);
 
-  // macOS-style auto-hide: show when pointer hits left edge
+  // USD→LYD rates storage helpers
+  const formatNow = React.useCallback(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }, []);
+  const parseTs = React.useCallback((s: string) => {
+    // Expect DD/MM/YYYY HH:MM:SS
+    const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return new Date();
+    const [, dd, mm, yyyy, HH, MM, SS] = m;
+    return new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(HH), Number(MM), Number(SS));
+  }, []);
+  const [rateOpen, setRateOpen] = React.useState(false);
+  const [rateInput, setRateInput] = React.useState<string>("");
+  const [tsInput, setTsInput] = React.useState<string>(() => formatNow());
+  const [recentRates, setRecentRates] = React.useState<Array<{ rate: number; ts: string; tsText?: string }>>([]);
+  const latestRate = React.useMemo(() => (recentRates.length ? recentRates[0] : null), [recentRates]);
+  const loadRates = React.useCallback(() => {
+    try {
+      const raw = localStorage.getItem("usd_lyd_rates_v1");
+      const arr = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(arr)) {
+        const sorted = [...arr].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+        setRecentRates(sorted);
+      } else setRecentRates([]);
+    } catch {
+      setRecentRates([]);
+    }
+  }, []);
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    let timeoutId: ReturnType<typeof setTimeout>;
-
-    const handleMove = (e: MouseEvent) => {
-      if (dockPinned) {
-        if (dockEdgeActive) setDockEdgeActive(false);
-        return;
-      }
-
-      const threshold = 15;
-      const atEdge = e.clientX <= threshold;
-
-      if (atEdge !== dockEdgeActive) {
-        if (atEdge) {
-          clearTimeout(timeoutId);
-          setDockEdgeActive(true);
-        } else {
-          timeoutId = setTimeout(() => {
-            if (!dockHovering) {
-              setDockEdgeActive(false);
-            }
-          }, 120);
-        }
-      }
+    loadRates();
+    const onStorage = (e: StorageEvent) => {
+      if (e && e.key === "usd_lyd_rates_v1") loadRates();
     };
-
-    window.addEventListener("mousemove", handleMove);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      clearTimeout(timeoutId);
-    };
-  }, [dockPinned, dockEdgeActive, dockHovering]);
+    const w: any = (typeof globalThis !== "undefined" && (globalThis as any).window) ? (globalThis as any).window : undefined;
+    if (w && typeof w.addEventListener === "function") {
+      w.addEventListener("storage", onStorage);
+      return () => {
+        try { w.removeEventListener("storage", onStorage); } catch {}
+      };
+    }
+    return () => {};
+  }, [loadRates]);
 
   const navigate = useNavigate();
   const handleLogout = () => {
@@ -1668,10 +1286,7 @@ export default function Home(props: any) {
         if ("segment" in item && item.segment && path.includes(item.segment))
           return item.title ?? null;
         if ("children" in item && item.children) {
-          const childTitle = findTitle(
-            item.children as Navigation,
-            path
-          );
+          const childTitle = findTitle(item.children as Navigation, path);
           if (childTitle) return childTitle;
         }
       }
@@ -1682,6 +1297,7 @@ export default function Home(props: any) {
     document.title = title;
   }, [router.pathname, NAV, t]);
 
+  // Role label
   const roleLabel = React.useMemo(() => {
     const normalizeRoles = (input: any): string[] => {
       if (!input) return [];
@@ -1691,10 +1307,7 @@ export default function Home(props: any) {
             typeof r === "string"
               ? r
               : String(
-                  (r as any)?.name ||
-                    (r as any)?.role ||
-                    (r as any)?.value ||
-                    r
+                  (r as any)?.name || (r as any)?.role || (r as any)?.value || r
                 )
           )
           .flatMap((s) => String(s).split(/[\s,;]+/))
@@ -1753,11 +1366,8 @@ export default function Home(props: any) {
     }
   }, []);
 
+  // Emotion cache per direction
   const cache = React.useMemo(() => createEmotionCacheLTR(), []);
-
-  const handleDockHoverChange = React.useCallback((hover: boolean) => {
-    setDockHovering(hover);
-  }, []);
 
   return (
     <CacheProvider value={cache}>
@@ -1773,132 +1383,77 @@ export default function Home(props: any) {
               logo: (
                 <Box
                   sx={{
-                    display: "flex",
+                    display: "center",
                     alignItems: "center",
-                    gap: 1,
-                    maxHeight: 40,
-                    "& svg, & img": {
-                      maxHeight: "40px",
-                      width: "auto",
-                    },
+                    justifyContent: "center",
+                    width: "100%",
                     color: accent,
                   }}
                 >
-                  <Tooltip
-                    title={
-                      dockPinned
-                        ? t("tooltip.hideDock") || "Hide dock (auto-hide)"
-                        : t("tooltip.showDock") || "Show dock (pin open)"
-                    }
-                  >
-                    <IconButton
-                      edge="start"
-                      onClick={() => {
-                        // Lock current encrypted route and suppress sync briefly
-                        routeLockRef.current = router.pathname;
-                        try { localStorage.setItem("lastEncryptedPath", router.pathname); } catch {}
-                        suppressNavRef.current = true;
-                        setTimeout(() => { suppressNavRef.current = false; }, 200);
-
-                        setDockPinned((prev) => {
-                          const next = !prev;
-                          if (!next) {
-                            setDockEdgeActive(false);
-                            setDockHovering(false);
-                          }
-                          return next;
-                        });
-                      }}
-                      aria-label={t("aria.toggleDock") || "Toggle dock"}
-                      sx={{ color: accent }}
-                    >
-                      {dockPinned ? <MenuOpenIcon /> : <MenuIcon />}
-                    </IconButton>
-                  </Tooltip>
-
                   <Logo />
                 </Box>
               ),
               title: "",
             }}
           >
-            {dockVisible && (
-              <DockNavigation
-                nav={NAV}
-                router={router}
-                accent={accent}
-                currentPath={
-                  encryptedToRoute[router.pathname] || router.pathname
-                }
-                mode={mode}
-                onHoverChange={handleDockHoverChange}
-              />
-            )}
-
             <DashboardLayout
-              hideNavigation
-              navigation={NAV}
               sx={{
                 bgcolor: "background.default",
                 m: 0,
-                transition: "all 200ms cubic-bezier(0.4, 0, 0.2, 1)",
-                "& .MuiDrawer-root": {
-                  display: "none",
-                },
+                "& .MuiDrawer-root": { position: "relative", height: "100vh" },
                 "& .MuiDrawer-paper": {
-                  display: "none",
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "space-between",
+                  borderInlineEnd: `1px solid ${accent}`,
+                },
+                "& .MuiDrawer-paper .MuiListItemIcon-root, & .MuiDrawer-paper .MuiListItemIcon-root svg": {
+                  color: `${accent} !important`,
+                  fontWeight: 800,
+                  letterSpacing: "0.2px",
+                },
+                "& .MuiDrawer-paper .MuiListItemText-root .MuiTypography-root": {
+                  color: `${accent} !important`,
+                  fontWeight: 800,
+                  fontSize: "1rem",
+                  letterSpacing: "0.3px",
+                },
+                "& .MuiDrawer-paper .Mui-selected .MuiListItemIcon-root svg": {
+                  color: `${accent} !important`,
+                },
+                "& .MuiDrawer-paper .MuiListItemButton-root:hover .MuiListItemIcon-root svg": {
+                  color: `${accent} !important`,
                 },
               }}
+              navigation={NAV}
               slots={{
-                // Only RIGHT SIDE actions here now
                 toolbarActions: () => (
                   <Box
                     sx={{
-                      width: "100%",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "flex-end",
-                      minHeight: 56,
-                      pr: 1.5,
-                      gap: 1.5,
+                      gap: 1,
+                      width: "100%",
                     }}
                   >
+                    {/* LEFT: spacer to push everything to the right */}
+                    <Box sx={{ flex: 1 }} />
+
+                    {/* RIGHT cluster — EXACT ORDER: Role → ChangePOS → Logout → Theme → Lang → AI */}
                     {roleLabel && (
-                      <Paper
-                        variant="outlined"
-                        sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
-                          px: 1.25,
-                          py: 0.5,
-                          borderRadius: "999px",
-                          bgcolor:
-                            mode === "dark"
-                              ? "rgba(15,23,42,0.9)"
-                              : "rgba(249,250,251,0.9)",
-                          borderColor:
-                            mode === "dark"
-                              ? "rgba(148,163,184,0.5)"
-                              : "rgba(148,163,184,0.6)",
-                        }}
-                      >
+                      <>
                         <Chip
                           label={roleLabel}
                           color={roleLabel === "Admin" ? "primary" : "default"}
                           size="small"
-                          sx={{
-                            fontWeight: 800,
-                            letterSpacing: 0.3,
-                          }}
+                          sx={{ fontWeight: 800, letterSpacing: 0.3 }}
                         />
+
+                        {/* PS selection dropdown button */}
                         <ChangePos />
-                      </Paper>
+                      </>
                     )}
 
-                    <LanguageSwitcher />
-
-                    {/* premium theme toggle */}
                     <Tooltip
                       title={
                         mode === "dark"
@@ -1906,19 +1461,35 @@ export default function Home(props: any) {
                           : t("tooltip.darkMode")
                       }
                     >
-                      <Box
+                      <IconButton
+                        onClick={colorMode.toggleColorMode}
+                        aria-label={t("aria.toggleTheme")}
                         sx={{
-                          display: "flex",
-                          alignItems: "center",
+                          color: accent,
+                          "&:hover": { backgroundColor: "action.hover" },
                         }}
                       >
-                        <Switch
-                          checked={mode === "dark"}
-                          onChange={colorMode.toggleColorMode}
-                        />
-                      </Box>
+                        {mode === "dark" ? (
+                          <Brightness7Icon />
+                        ) : (
+                          <Brightness4Icon />
+                        )}
+                      </IconButton>
                     </Tooltip>
 
+                    <LanguageSwitcher />
+                    
+                    <Button size="small" variant="outlined" onClick={() => { setRateInput(""); setTsInput(formatNow()); setRateOpen(true); }}>
+                      Add Rate
+                    </Button>
+                    {(
+                      <Chip
+                        label={`USD→LYD: ${latestRate?.rate ? Number(latestRate.rate).toFixed(3) : "-"}`}
+                        size="small"
+                        sx={{ fontWeight: 700 }}
+                      />
+                    )}
+                    
                     <Tooltip title={t("tooltip.logout")}>
                       <IconButton
                         onClick={handleLogout}
@@ -1932,18 +1503,14 @@ export default function Home(props: any) {
                 ),
               }}
             >
-              <Box
-                sx={{
-                  px: 3,
-                  py: 1,
-                  width: "100%",
-                  pl: dockVisible ? "96px" : "32px",
-                  transition: "padding-left 200ms ease-out",
-                }}
-              >
+              {/* content wrapper to give side padding for inner pages */}
+              <Box sx={{ px: 3, py: 1, width: '100%' }}>
                 {getPageComponent(router.pathname)}
               </Box>
             </DashboardLayout>
+
+            {/* ChatGPT-style dialog (imported) */}
+            <ChatbotWidget open={aiOpen} onClose={() => setAiOpen(false)} />
 
             <Snackbar
               open={snackbarOpen}
@@ -1962,11 +1529,64 @@ export default function Home(props: any) {
                 variant="filled"
               >
                 {t("toast.currentTheme")}:{" "}
-                {mode === "dark"
-                  ? t("toast.darkMode")
-                  : t("toast.lightMode")}
+                {mode === "dark" ? t("toast.darkMode") : t("toast.lightMode")}
               </Alert>
             </Snackbar>
+
+            {/* USD→LYD Rates Dialog */}
+            <Dialog open={rateOpen} onClose={() => setRateOpen(false)} maxWidth="xs" fullWidth>
+              <DialogTitle>USD→LYD Rate</DialogTitle>
+              <DialogContent>
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 1 }}>
+                  <TextField
+                    label="Rate (USD→LYD)"
+                    type="number"
+                    value={rateInput}
+                    onChange={(e) => setRateInput(e.target.value)}
+                    size="small"
+                    inputProps={{ step: "0.0001" }}
+                  />
+                  <TextField
+                    label="Timestamp (DD/MM/YYYY HH:MM:SS)"
+                    value={tsInput}
+                    onChange={(e) => setTsInput(e.target.value)}
+                    size="small"
+                  />
+                  {recentRates.length > 0 && (
+                    <Box sx={{ mt: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 700 }}>Recent</Typography>
+                      <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>
+                        {recentRates.slice(0, 5).map((r, idx) => (
+                          <Chip key={idx} size="small" label={`${(r.tsText || new Date(r.ts).toLocaleString())}: ${Number(r.rate).toFixed(3)}`} />
+                        ))}
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setRateOpen(false)}>Close</Button>
+                <Button
+                  onClick={() => {
+                    const rate = Number(rateInput);
+                    if (!rate || Number.isNaN(rate) || rate <= 0) return;
+                    const tsDate = parseTs(tsInput);
+                    const entry = { rate, ts: tsDate.toISOString(), tsText: tsInput };
+                    try {
+                      const raw = localStorage.getItem("usd_lyd_rates_v1");
+                      const arr = raw ? JSON.parse(raw) : [];
+                      const next = Array.isArray(arr) ? [...arr, entry] : [entry];
+                      localStorage.setItem("usd_lyd_rates_v1", JSON.stringify(next));
+                    } catch {}
+                    loadRates();
+                    setRateOpen(false);
+                  }}
+                  variant="contained"
+                >
+                  Save
+                </Button>
+              </DialogActions>
+            </Dialog>
           </AppProvider>
         </ThemeProvider>
       </StyledEngineProvider>

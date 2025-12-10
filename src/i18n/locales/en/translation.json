@@ -406,6 +406,42 @@
       "month": "Month",
       "year": "Year"
       },
+       "commissions": {
+          "title": "Commissions",
+          "subtitle": "Configure default commission rates for gold, diamond, and watch sales. These are used by payslip commission logic.",
+      "tabGold": "Gold",
+      "tabDiamond": "Diamond",
+      "tabWatch": "Watch",
+      "watchCommissionTitle": "Watch — Percent of final sale price (%)",
+      "watchNotWired": "Watch commission settings are not wired into the APIs or database yet. Changing these values will not affect payslips until backend support is implemented.",
+      "employeesTitle": "Employees & commission roles",
+      "employeesLoading": "Loading employees...",
+      "employeesError": "Failed to load employees.",
+      "employeesEmpty": "No employees found.",
+      "employeesName": "Employee",
+      "employeesRole": "Commission role",
+          "savedOk": "Saved successfully. These rates apply to payslip commission calculations.",
+          "savedError": "Failed to save commission settings.",
+          "goldTitle": "Gold — Per-gram (LYD/g)",
+          "goldHint": "Sales Lead/Manager use grams aggregated from their PS scope (set per employee in profile).",
+          "diamondTitle": "Diamond — Percent of final sale price (%)",
+          "watchTitle": "Current commission settings (read-only)",
+          "watchGold": "Gold: {{val}} LYD/g",
+          "watchDiamond": "Diamond: {{val}} %",
+          "watchWatch": "Watch: {{val}} %",
+          "resetDefaults": "Reset to defaults",
+          "save": "Save",
+          "notesTitle": "Notes:",
+          "noteRolePs": "Set each employee's role and PS scope in their profile (Compensation section).",
+          "notePayslip": "Payslip PDF shows commission details in Earnings and in the \"Missing Hours & Commission\" table.",
+          "noteWatchNotWired": "Watch commissions are currently front-end only and do not update anything in the database or payroll APIs.",
+          "roles": {
+            "sales_rep": "Sales Rep",
+            "senior_sales_rep": "Senior Sales Rep",
+            "sales_lead": "Sales Lead",
+            "sales_manager": "Sales Manager"
+          }
+        },
     "jobs": {
         "title": "Jobs",
         "add": "Add Job",
@@ -538,7 +574,9 @@
       "submitted": "Submitted Date",
       "actions": "Actions",
       "noRequests": "No leave requests found",
-      "fetchError": "Error fetching leave requests"
+      "fetchError": "Error fetching leave requests",
+      "actionFailed": "Action failed",
+      "noPending": "No pending requests"
     },
     "calendar": {
       "title": "Leave Calendar",
@@ -603,7 +641,7 @@
       "exp20": "20 years experience on",
       "period": "Period",
       "to": "TO",
-      "reportTitle": "Leave Report",
+      "reportTitle": "Leave Balance Report",
       "employeeInfo": "Employee Information",
       "name": "Name:",
       "empId": "Employee ID:",
@@ -611,7 +649,9 @@
       "ps": "PS:",
       "approvedSection": "Approved Leave (Period)",
       "approvedTotal": "Approved total in period",
-      "days": "days"
+      "days": "days",
+      "distributionTitle": "Leave Distribution & Balance (Working Year)",
+      "noApprovedWorkingYear": "No approved leave found in the working year."
     },
     "codes": {
       "title": "Code Management"
@@ -635,6 +675,20 @@
       "maternity": "Maternity Leave",
       "paternity": "Paternity Leave",
       "unpaid": "Unpaid Leave"
+    },
+    "vacations": {
+      "title": "Vacations",
+      "subtitle": "Company calendar and leave tools",
+      "employee": "Employee",
+      "allEmployees": "All employees",
+      "selected": "Showing data for",
+      "tools": "Leave Tools"
+    },
+    "pending": {
+      "title": "Review Leave Requests",
+      "tooltipOne": "Pending for this employee",
+      "tooltipAll": "Pending for all employees",
+      "open": "Open pending requests"
     }
   },
   "finance": {
@@ -783,11 +837,13 @@
   "Close Month": "Close Month",
   "Profile Picture": "Profile Picture",
   "Employees": "Employees",
+  "Employee": "Employee",
   "Period": "Period",
   "Working Days": "Working Days",
   "Deduction Days": "Deduction Days",
   "Present Days": "Present Days",
   "Holidays Worked": "Holidays Worked",
+  "Absence": "Absence",
   "Food Allowance": "Food Allowance",
   "Fuel Allowance": "Fuel Allowance",
   "Communication Allowance": "Communication Allowance",
@@ -799,5 +855,18 @@
   "Diamond Commission": "Diamond Commission",
   "Total (LYD)": "Total (LYD)",
   "Total (USD)": "Total (USD)",
+  "Gross": "Gross",
+  "Total": "Total",
+  "Totals": "Totals",
+  "Payroll": "Payroll",
+  "Salary Advance": "Salary Advance",
+  "Loans": "Loans",
+  "Settings": "Settings",
+  "Position": "Position",
+  "All Positions": "All Positions",
+  "Send Payslips": "Send Payslips",
+  "Payslip": "Payslip",
+  "Send": "Send",
+  "LYD": "LYD",
   "Search": "Search"
 }

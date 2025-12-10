@@ -1042,12 +1042,6 @@ const LeaveRequestScreen: React.FC<
           <Typography variant="h5" fontWeight={700}>
             {t("leave.request.title", "Request Time Off")}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {t(
-              "leave.request.subtitle",
-              "Select a leave type and a start date. Working days exclude Fridays and company holidays."
-            )}
-          </Typography>
         </Stack>
 
         {/* Alerts */}

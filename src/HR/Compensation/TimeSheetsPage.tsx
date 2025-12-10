@@ -891,26 +891,43 @@ export default function TimeSheetsPage() {
         return { lateCount, lateMinTotal, lateRows };
       };
       const missing = (daysList: TimesheetDay[]) => {
-        const totalMissing = daysList.reduce((acc, d) => acc + Math.min(0, d.deltaMin ?? 0), 0);
+        const today = dayjs();
+        const pastDays = daysList.filter((d) => {
+          const dayNum = (d as any).day ?? null;
+          if (!dayNum) return false;
+          const dateStr = `${exportYear}-${String(exportMonth).padStart(2,"0")}-${String(dayNum).padStart(2,"0")}`;
+          const dt = dayjs(dateStr);
+          return dt.isBefore(today, "day");
+        });
+        const totalMissing = pastDays.reduce((acc, d) => acc + Math.min(0, d.deltaMin ?? 0), 0);
         return { missingMin: Math.abs(totalMissing) };
       };
 
-      const totalWorkMin = days.reduce((sum, d) => sum + (d.workMin ?? 0), 0);
+      const today = dayjs();
+      const pastDays = days.filter((d) => {
+        const dayNum = (d as any).day ?? null;
+        if (!dayNum) return false;
+        const dateStr = `${exportYear}-${String(exportMonth).padStart(2,"0")}-${String(dayNum).padStart(2,"0")}`;
+        const dt = dayjs(dateStr);
+        return dt.isBefore(today, "day");
+      });
+
+      const totalWorkMin = pastDays.reduce((sum, d) => sum + (d.workMin ?? 0), 0);
       const totalHours = Number.isFinite(totalWorkMin) ? (totalWorkMin / 60).toFixed(2) : "0.00";
-      const { lateCount, lateMinTotal, lateRows } = lateness(days);
-      const { missingMin } = missing(days);
-      const deltaTotalMin = days.reduce((sum, d) => sum + (d.deltaMin ?? 0), 0);
+      const { lateCount, lateMinTotal, lateRows } = lateness(pastDays);
+      const { missingMin } = missing(pastDays);
+      const deltaTotalMin = pastDays.reduce((sum, d) => sum + (d.deltaMin ?? 0), 0);
       const deltaLabel = roundedHoursWithSign(deltaTotalMin);
-      const daysWorked = days.filter((d) => hasPresence(d)).length;
-      const absentDays = days.filter((d) => isAbsentDay(d)).length;
-      const leaveSummary = computeLeaveSummary(days);
+      const daysWorked = pastDays.filter((d) => hasPresence(d)).length;
+      const absentDays = pastDays.filter((d) => isAbsentDay(d)).length;
+      const leaveSummary = computeLeaveSummary(pastDays);
       
       // Convert minutes to hours for display
       const lateHours = (lateMinTotal / 60).toFixed(2);
       const missingHours = (missingMin / 60).toFixed(2);
       
-      const summaryHeaders = ["±h", "Days Worked", "Absent", "Late (cnt)", "Late (hrs)", "Missing (hrs)", ...leaveColumnOrder];
-      const summaryRow = [deltaLabel, String(daysWorked), String(absentDays), String(lateCount), lateHours, missingHours, ...leaveColumnOrder.map((code) => String(leaveSummary[code] ?? 0))];
+      const summaryHeaders = ["±h", "Absent", "Late (cnt)", "Late (hrs)", "Missing (hrs)", ...leaveColumnOrder];
+      const summaryRow = [deltaLabel, String(absentDays), String(lateCount), lateHours, missingHours, ...leaveColumnOrder.map((code) => String(leaveSummary[code] ?? 0))];
       doc.text(`Total Hours Worked: ${totalHours}`, 110, 120);
 
       autoTable(doc, {
@@ -3555,7 +3572,7 @@ useEffect(() => {
               </Typography>
             )}
 
-            {rec?.deltaMin != null && (
+            {rec?.deltaMin != null && !isToday && (
               <>
                 <Typography
                   sx={{
@@ -3640,23 +3657,24 @@ useEffect(() => {
           const response = await getTimesheetMonth(employeeId, year, month + 1);
           if (response && response.data) {
             // Process the timesheet data
+            const today = dayjs().startOf("day");
             const days = response.data.map((day: TimesheetDay) => {
               const ymd = `${year}-${String(month + 1).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`;
-              const isFuture = dayjs(ymd).isAfter(dayjs(), "day");
+              const isFutureOrToday = !dayjs(ymd).isBefore(today, "day");
 
-              // Calculate expected hours from schedule or day data
+              // Calculate expected hours from schedule or day data (past days only)
               let expectedHours = 0;
-              if (!isFuture && day.expectedMin != null) {
+              if (!isFutureOrToday && day.expectedMin != null) {
                 expectedHours = day.expectedMin / 60;
-              } else if (!isFuture && sched?.start && sched?.end) {
+              } else if (!isFutureOrToday && sched?.start && sched?.end) {
                 const start = dayjs(`${ymd}T${sched.start}:00`);
                 const end = dayjs(`${ymd}T${sched.end}:00`);
                 expectedHours = end.diff(start, "minute") / 60;
               }
 
-              // Calculate worked hours
+              // Calculate worked hours (past days only)
               let workedHours = 0;
-              if (!isFuture && day.workMin != null) {
+              if (!isFutureOrToday && day.workMin != null) {
                 workedHours = day.workMin / 60;
               }
 
@@ -3708,23 +3726,24 @@ useEffect(() => {
 
         // Build days array from cached data
         const days: any[] = [];
+        const today = dayjs().startOf("day");
         let current = monthStart;
         while (current.isSameOrBefore(monthEnd, "day")) {
           const ymd = current.format("YYYY-MM-DD");
           const dayData = employeeData.get(ymd);
-          const isFuture = current.isAfter(dayjs(), "day");
+          const isFutureOrToday = !current.isBefore(today, "day");
 
           let expectedHours = 0;
-          if (!isFuture && dayData?.expectedMin != null) {
+          if (!isFutureOrToday && dayData?.expectedMin != null) {
             expectedHours = dayData.expectedMin / 60;
-          } else if (!isFuture && sched?.start && sched?.end) {
+          } else if (!isFutureOrToday && sched?.start && sched?.end) {
             const start = dayjs(`${ymd}T${sched.start}:00`);
             const end = dayjs(`${ymd}T${sched.end}:00`);
             expectedHours = end.diff(start, "minute") / 60;
           }
 
           let workedHours = 0;
-          if (!isFuture && dayData?.workMin != null) {
+          if (!isFutureOrToday && dayData?.workMin != null) {
             workedHours = dayData.workMin / 60;
           }
 
@@ -4099,7 +4118,8 @@ useEffect(() => {
                       const isFri = d.day() === 5;
                       const isHolidayDate = holidaysSet.has(ymd);
                       const todayStart = dayjs().startOf("day");
-                      const isFuture = d.isAfter(todayStart, "day");
+                      // Treat today as not finished: only days strictly before today are "past"
+                      const isFutureOrToday = !d.isBefore(todayStart, "day");
 
                       const leaveCodeFinal = finalLeaveCodeForDay(
                         row.id_emp,
@@ -4129,7 +4149,7 @@ useEffect(() => {
                       }
 
                       let expectedMin: number | null = null;
-                      if (!isFuture) {
+                      if (!isFutureOrToday) {
                         if (sched?.start && sched?.end) {
                           const stt = dayjs(`${ymd}T${sched.start}:00`);
                           const ent = dayjs(`${ymd}T${sched.end}:00`);
@@ -4141,7 +4161,8 @@ useEffect(() => {
                       }
 
                       let deltaMin: number | null = null;
-                      if (workMin != null && expectedMin != null) {
+                      // Only compute delta for completed (past) days
+                      if (!isFutureOrToday && workMin != null && expectedMin != null) {
                         deltaMin = workMin - expectedMin;
                       }
 
@@ -4254,7 +4275,8 @@ useEffect(() => {
                           pillText = roundedHoursWithSign(deltaMin);
                           pillTone = deltaMin < 0 ? "negative" : "positive";
                         }
-                      } else if (hasES) {
+                      } else if (hasES && !isFutureOrToday) {
+                        // Completed day with punches but no delta (e.g., exactly on time)
                         pillText = roundedHoursWithSign(0);
                       }
                       if (isFri) {
@@ -4282,7 +4304,8 @@ useEffect(() => {
                     const gridTemplateColumns = (() => {
                       const base = ["56px", "180px"];
                       const dayCols = dates.map(() => "1fr");
-                      const summary = ["56px", "56px"];
+                      // single summary column for ±h only
+                      const summary = ["56px"];
                       const leaveCols = leaveColumnOrder
                         .filter((code) => visibleLeaveSet.has(code))
                         .map(() => "70px");
@@ -4391,7 +4414,7 @@ useEffect(() => {
                             );
                           })}
 
-                          {/* summary headers */}
+                          {/* summary header: ±h only */}
                           <Box
                             sx={{
                               p: 0.5,
@@ -4404,20 +4427,6 @@ useEffect(() => {
                               sx={{ fontWeight: 700 }}
                             >
                               −/+h
-                            </Typography>
-                          </Box>
-                          <Box
-                            sx={{
-                              p: 0.5,
-                              bgcolor: APPLE.datePillBg,
-                              textAlign: "center",
-                            }}
-                          >
-                            <Typography
-                              variant="caption"
-                              sx={{ fontWeight: 700 }}
-                            >
-                              Days Worked
                             </Typography>
                           </Box>
 
@@ -4525,6 +4534,7 @@ useEffect(() => {
                             const attendanceCounts: Record<string, number> = {};
                             let debugDeltaCount = 0;
 
+                            const today = dayjs().startOf("day");
                             dates.forEach((d) => {
                               const ymd = d.format("YYYY-MM-DD");
                               const tsd = tsByEmp.get(r.id_emp)?.get(ymd);
@@ -4559,10 +4569,11 @@ useEffect(() => {
 
                               // expected
                               const sched = empSchedule.get(r.id_emp) || null;
-                                let expectedMin: number | null = null;
-                              const todayStart = dayjs().startOf("day");
-                              const isFuture = d.isAfter(todayStart, "day");
-                              if (!isFuture) {
+                              let expectedMin: number | null = null;
+                              const isFuture = d.isAfter(today, "day");
+                              const isFriday = d.day() === 5;
+                              // Only count completed, non-Friday days towards aggregate delta
+                              if (!isFuture && !isFriday) {
                                 if (sched?.start && sched?.end) {
                                   const stt = dayjs(`${ymd}T${sched.start}:00`);
                                   const ent = dayjs(`${ymd}T${sched.end}:00`);
@@ -4589,7 +4600,6 @@ useEffect(() => {
                                 rec as any
                               );
                               const isHoliday = holidaysSet.has(ymd);
-                              const isFriday = d.day() === 5;
                               const isSick = /^(SL)$/i.test(finalCode || "");
 
                               if (finalCode) {
@@ -4888,23 +4898,6 @@ useEffect(() => {
                                       </Typography>
                                     </Tooltip>
                                   )}
-                                </Box>
-
-                                <Box
-                                  sx={{
-                                    minHeight: 56,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    borderLeft: `1px solid ${APPLE.border}`,
-                                  }}
-                                >
-                                  <Typography
-                                    variant="caption"
-                                    sx={{ fontWeight: 700 }}
-                                  >
-                                    {workDaysTotal}
-                                  </Typography>
                                 </Box>
 
                                 {/* leave counts */}
@@ -5899,10 +5892,15 @@ useEffect(() => {
                       </TableHead>
                       <TableBody>
                         {timeLogData.days
-                          .filter((day) => Math.abs(day.deltaHours) > 0.01) // Only show days with missing/surplus hours
+                          .filter((day) => {
+                            const d = dayjs(day.date);
+                            const isPast = d.isBefore(dayjs(), "day");
+                            const isFriday = d.day() === 5;
+                            return isPast && !isFriday && Math.abs(day.deltaHours) > 0.01;
+                          }) // Only show past non-Friday days with missing/surplus hours
                           .map((day) => (
-                          <TableRow
-                            key={day.date}
+                            <TableRow
+                              key={day.date}
                             sx={{
                               bgcolor: day.isWeekend
                                 ? "action.hover"
