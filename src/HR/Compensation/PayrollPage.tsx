@@ -25,13 +25,8 @@ import {
   Menu,
   FormControlLabel,
   Checkbox,
-  Tooltip,
   IconButton,
   Avatar,
-  Radio,
-  RadioGroup,
-  FormControl,
-  FormLabel,
 } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import dayjs from "dayjs";
@@ -43,7 +38,6 @@ import { getTimesheetMonth, listPs, PsItem, listPsPoints } from "../../api/atten
 import jsPDF from "jspdf";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import SettingsIcon from "@mui/icons-material/Settings";
-import EditIcon from "@mui/icons-material/Edit";
 
 // Format PS as codes: keep OG/HQ, turn numerals into P#
 function formatPs(ps: any): string | undefined {
@@ -92,6 +86,32 @@ export default function PayrollPage() {
   const [adjRows, setAdjRows] = React.useState<Array<{ type: string; amount: number; currency: string; note?: string; ts?: string }>>([]);
   const [adjForm, setAdjForm] = React.useState<{ type: string; amount: string; currency: string; note: string }>({ type: "bonus", amount: "", currency: "LYD", note: "" });
 
+  // Adjustment types and behavior
+  const adjTypeOptions: Array<{ value: string; label: string }> = [
+    { value: 'bonus', label: 'Bonus (LYD/USD)' },
+    { value: 'deduction', label: 'Deduction (LYD/USD)' },
+    { value: 'food_allow', label: 'Food Allowance (LYD)' },
+    { value: 'comm_allow', label: 'Communication Allowance (LYD)' },
+    { value: 'transport_allow', label: 'Transport Allowance (LYD)' },
+    { value: 'gold_comm', label: 'Gold Sales Bonus' },
+    { value: 'diamond_comm', label: 'Diamond Sales Bonus' },
+    { value: 'watch_comm', label: 'Watch Commission' },
+    { value: 'eid_bonus', label: 'Eid Bonus' },
+    { value: 'advance', label: 'Advance (LYD)' },
+    { value: 'loanPayment', label: 'Loan Payment (LYD)' },
+  ];
+  const adjLydOnlyTypes = new Set([
+    'food_allow',
+    'comm_allow',
+    'transport_allow',
+    'gold_comm',
+    'diamond_comm',
+    'watch_comm',
+    'eid_bonus',
+    'advance',
+    'loanPayment',
+  ]);
+
   const [bdOpen, setBdOpen] = React.useState(false);
   const [bdEmp, setBdEmp] = React.useState<Payslip | null>(null);
   const [bdLines, setBdLines] = React.useState<Array<{ label: string; lyd: number; usd: number; note?: string }>>([]);
@@ -109,31 +129,32 @@ export default function PayrollPage() {
   const [sales, setSales] = React.useState<Record<string, { qty: number; total_lyd: number }>>({});
 
   // Payroll table UI state
-  const [tab, setTab] = React.useState<'payroll'|'advances'|'loans'|'settings'>('payroll');
+  const [tab, setTab] = React.useState<'payroll'|'advances'|'loans'|'adjustments'|'settings'>('payroll');
   const [filterText, setFilterText] = React.useState<string>('');
   const [sortKey, setSortKey] = React.useState<string>('name');
   const [sortDir, setSortDir] = React.useState<'asc'|'desc'>('asc');
   const [cols, setCols] = React.useState({
-    presentWorkdays: true,
-    holidayWorked: true,
+    holidayWorked: false,
+    p: true,
+    ph: true,
+    phf: true,
     baseSalary: true,
     food: true,
     fuel: true,
     comm: true,
-    basePay: true,
-    allowancePay: true,
     advances: true,
     loans: true,
     salesQty: false,
     salesTotal: false,
     gold: true,
     diamond: true,
+    watchComm: true,
     totalUsd: true,
   });
   const [loanAmount, setLoanAmount] = React.useState<string>("");
   const [existingAdvances, setExistingAdvances] = React.useState<number>(0);
   const [presentDaysMap, setPresentDaysMap] = React.useState<Record<number, number>>({});
-  const [tsAgg, setTsAgg] = React.useState<Record<number, { presentP: number; phUnits: number; fridayA: number; missRatio: number }>>({});
+  const [tsAgg, setTsAgg] = React.useState<Record<number, { presentP: number; phUnits: number; fridayA: number; missRatio: number; phFullDays: number; phPartDays: number; absenceDays: number }>>({});
   const [advMap, setAdvMap] = React.useState<Record<number, number>>({});
   const [nameMap, setNameMap] = React.useState<Record<number, string>>({});
   const [contractStartMap, setContractStartMap] = React.useState<Record<number, string | null>>({});
@@ -143,6 +164,10 @@ export default function PayrollPage() {
   const [financeEmails, setFinanceEmails] = React.useState<string>(() => {
     try { return localStorage.getItem('payroll_settings_finance_emails') || ''; } catch { return ''; }
   });
+  const [jobs, setJobs] = React.useState<Array<{ id_job: number; job_name: string; Job_title: string; Job_code: string }>>([]);
+  const [employeesByTitle, setEmployeesByTitle] = React.useState<Record<string, number[]>>({});
+  const [sendDialogOpen, setSendDialogOpen] = React.useState(false);
+  const [sendSelection, setSendSelection] = React.useState<Record<number, boolean>>({});
 
   // Loan & Salary Advance rule settings (persisted in localStorage)
   const [loanMaxMultiple, setLoanMaxMultiple] = React.useState<number>(() => {
@@ -206,22 +231,6 @@ export default function PayrollPage() {
     return id != null ? `ID: ${id}` : "";
   };
 
-  const openRowEditor = (idEmp: number) => {
-    const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(idEmp)) || {} as any;
-    setRowEdit(vr);
-    setRowForm({
-      gold_bonus_lyd: vr.gold_bonus_lyd ?? 0,
-      diamond_bonus_lyd: vr.diamond_bonus_lyd ?? 0,
-      other_bonus1_lyd: vr.other_bonus1_lyd ?? 0,
-      other_bonus2_lyd: vr.other_bonus2_lyd ?? 0,
-      other_additions_lyd: vr.other_additions_lyd ?? 0,
-      other_deductions_lyd: vr.other_deductions_lyd ?? 0,
-      loan_debit_lyd: vr.loan_debit_lyd ?? 0,
-      loan_credit_lyd: vr.loan_credit_lyd ?? 0,
-    });
-    setRowEditOpen(true);
-  };
-
   const applyRowForm = React.useCallback((idEmp: number, draft: any) => {
     setV2Rows((prev: any[]) => {
       const arr = Array.isArray(prev) ? [...prev] : [];
@@ -263,13 +272,84 @@ export default function PayrollPage() {
     }, 600);
   }, [v2Rows, year, month]);
 
+  // Compute monetary values for P / PH / PHF columns.
+  // Prefer backend-calculated fields (v2Rows) so UI/PDF share the same logic,
+  // but fall back to local tsAgg-based computation if backend fields are missing.
+  type PPhPhfVals = {
+  pLyd: number;
+  pUsd: number;
+  phLyd: number;
+  phUsd: number;
+  phfLyd: number;
+  phfUsd: number;
+};
+
+const computePPhPhf = (e: Payslip): PPhPhfVals => {
+  const vr =
+    (v2Rows || []).find(
+      (x: any) => Number(x.id_emp) === Number(e.id_emp)
+    ) || ({} as any);
+
+  // --- 1) Daily base rate from BASIC SALARY only ---
+  const W = Math.max(1, Number(e.workingDays || vr.workingDays || 0) || 1);
+
+  const baseLyd =
+    Number(e.baseSalary ?? vr.base_salary_lyd ?? 0) || 0;
+  const baseUsd =
+    Number((e as any).baseSalaryUsd ?? vr.base_salary_usd ?? 0) || 0;
+
+  const baseDailyLyd = baseLyd / W;
+  const baseDailyUsd = baseUsd / W;
+
+  // --- 2) Number of days for each type ---
+  const pDays =
+    Number((vr as any).p_days ?? e.presentWorkdays ?? 0) || 0;
+  const phDays = Number((vr as any).ph_days ?? 0) || 0;
+  const phfDays = Number((vr as any).phf_days ?? 0) || 0;
+
+  // --- 3) Food per working day (for PHF) ---
+  let foodPerDay = Number(
+    (e as any).FOOD || (e as any).FOOD_ALLOWANCE || vr.food_per_day_lyd || 0
+  );
+  if (!foodPerDay) {
+    const totalFoodLyd = Number((vr as any).wd_food_lyd || 0);
+    const present =
+      Number(pDays || presentDaysMap[e.id_emp] || e.presentWorkdays || 0) || 0;
+    foodPerDay =
+      totalFoodLyd && present ? totalFoodLyd / present : 0;
+  }
+
+  // --- 4) P / PH / PHF amounts ---
+  // P = normal daily rate
+  const pLyd = pDays * baseDailyLyd;
+  const pUsd = pDays * baseDailyUsd;
+
+  // PH = double daily rate (no extra food)
+  const phLyd = phDays * (baseDailyLyd * 2);
+  const phUsd = phDays * (baseDailyUsd * 2);
+
+  // PHF = double daily rate + normal food allowance
+  const phfLyd = phfDays * (baseDailyLyd * 2 + foodPerDay);
+  const phfUsd = phfDays * (baseDailyUsd * 2);
+
+  return {
+    pLyd: Number(pLyd.toFixed(2)),
+    pUsd: Number(pUsd.toFixed(2)),
+    phLyd: Number(phLyd.toFixed(2)),
+    phUsd: Number(phUsd.toFixed(2)),
+    phfLyd: Number(phfLyd.toFixed(2)),
+    phfUsd: Number(phfUsd.toFixed(2)),
+  };
+};
+
+
   // Consistent NET calculator (matches PDF logic). Returns non-negative LYD.
   function computeNetLYDFor(id_emp: number): number {
     try {
       const emp = (result?.employees || []).find((e) => Number(e.id_emp) === Number(id_emp));
       const v2 = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(id_emp)) || ({} as any);
       if (!emp) return 0;
-      const agg = tsAgg[id_emp] || { presentP: 0, phUnits: 0, fridayA: 0, missRatio: 1 };
+      const agg = tsAgg[id_emp] || { presentP: 0, phUnits: 0, fridayA: 0, missRatio: 1, phFullDays: 0, phPartDays: 0 };
       const W = Math.max(1, Number(emp.workingDays || (v2 as any).workingDays || 0) || 1);
       const base = Math.max(0, Number(v2.base_salary_lyd || emp.baseSalary || 0));
       const dailyLyd = W > 0 ? base / W : 0;
@@ -293,11 +373,11 @@ export default function PayrollPage() {
       }
       const present = Number(tsAgg[id_emp]?.presentP ?? emp.presentWorkdays ?? 0) || 0;
       const foodAdj = Math.max(0, Number((per * present).toFixed(2)));
-      // Transportation (FUEL) and Communication allowances — per working day
-      const fuelPer = Number(((emp as any).FUEL ?? (v2 as any).FUEL) || 0);
-      const commPer = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
-      const transportAdj = Math.max(0, Number((fuelPer * W).toFixed(2)));
-      const commAdj = Math.max(0, Number((commPer * W).toFixed(2)));
+      // Transportation (FUEL) and Communication allowances — flat monthly amounts
+      const fuelMonthly = Number(((emp as any).FUEL ?? (v2 as any).FUEL) || 0);
+      const commMonthly = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
+      const transportAdj = Math.max(0, Number(fuelMonthly.toFixed(2)));
+      const commAdj = Math.max(0, Number(commMonthly.toFixed(2)));
       const net = base + ph + foodAdj + transportAdj + commAdj + gold + dia + otherAdds - absence - missing - adv - loanPay - otherDedExAdv;
       return Math.max(0, Number(net.toFixed(2)));
     } catch { return 0; }
@@ -354,7 +434,7 @@ export default function PayrollPage() {
         }
         if (tab === 'advances') {
           try {
-            const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+            const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -366,7 +446,7 @@ export default function PayrollPage() {
         }
         try {
           const q = new URLSearchParams({ employeeId: String(adjEmpId) });
-          const res = await fetch(`http://192.168.3.60:9000/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://localhost:9000/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
           const js = await res.json();
           if (res.ok) setHistoryPoints(Array.isArray(js?.points) ? js.points : []);
           else setHistoryPoints([]);
@@ -375,26 +455,62 @@ export default function PayrollPage() {
     }
   }, [tab, adjEmpId, year, month]);
 
+  // Load monthly adjustments for the selected employee in the Adjustments tab
+  React.useEffect(() => {
+    if (tab !== 'adjustments' || !adjEmpId) {
+      setAdjRows([]);
+      return;
+    }
+    (async () => {
+      try {
+        const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+        const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
+        if (!res.ok) {
+          setAdjRows([]);
+          return;
+        }
+        const js = await res.json();
+        const rows = (js?.data?.[String(adjEmpId)] || []) as Array<{ type: string; amount: number; currency: string; note?: string; ts?: string }>;
+        setAdjRows(rows);
+      } catch {
+        setAdjRows([]);
+      }
+    })();
+  }, [tab, adjEmpId, year, month]);
+
+  // Per-type subtotals for Adjustments dialog
+  const adjTypeTotals = React.useMemo(() => {
+    const map: Record<string, { lyd: number; usd: number }> = {};
+    (adjRows || []).forEach((r) => {
+      if (!r) return;
+      const k = r.type || 'other';
+      if (!map[k]) map[k] = { lyd: 0, usd: 0 };
+      const amt = Number(r.amount || 0) || 0;
+      if (!amt) return;
+      if ((r.currency || 'LYD').toUpperCase() === 'USD') map[k].usd += amt;
+      else map[k].lyd += amt;
+    });
+    return map;
+  }, [adjRows]);
+
   // Dynamic table min width for horizontal scrolling based on visible columns
   const tableMinWidth = React.useMemo(() => {
     let w = 0;
     w += 180; // Employee
-    w += 64; // Working Days
-    w += 64; // Deduction Days
-    if (cols.presentWorkdays) w += 64;
+    w += 64; // Absence (LYD)
     if (cols.holidayWorked) w += 64;
     if (cols.baseSalary) w += 80;
     if (cols.food) w += 72;
     if (cols.fuel) w += 72;
     if (cols.comm) w += 72;
-    if (cols.basePay) w += 84;
-    if (cols.allowancePay) w += 84;
     if (cols.advances) w += 78;
     if (cols.loans) w += 78;
     if (cols.salesQty) w += 64;
     if (cols.salesTotal) w += 84;
     if (cols.gold) w += 96;
     if (cols.diamond) w += 96;
+    if (cols.watchComm) w += 84;
+    w += 120; // Gross (LYD | USD)
     w += 96; // Total (LYD)
     if (cols.totalUsd) w += 84; // Total (USD)
     w += 220; // Actions
@@ -408,74 +524,38 @@ export default function PayrollPage() {
     } catch { return {} as Record<string, string>; }
   };
 
-  const openBreakdown = async (empRow: Payslip) => {
+  React.useEffect(() => {
+  (async () => {
     try {
-      const v2 = (v2Rows || []).find((x:any) => Number(x.id_emp) === Number(empRow.id_emp)) || {} as any;
-      const days = await ensureTimesheetDays(empRow.id_emp);
-      const missMin = days.reduce((acc, d) => acc + (((d?.deltaMin ?? 0) < 0 && codeBadge(d) !== 'PT') ? Math.abs(d!.deltaMin!) : 0), 0);
-      const missH = Math.floor(missMin / 60);
-      const missM = Math.floor(missMin % 60);
-      const missStr = (missH||missM) ? `${String(missH)}h${missM?` ${String(missM)}m`:''}` : '';
-      const bv = (n:any)=>Number(n||0);
-      const lines: Array<{ label: string; lyd: number; usd: number; note?: string }> = [
-        { label: 'bs', lyd: bv(v2.base_salary_lyd), usd: bv(v2.base_salary_usd) },
-        { label: 'wd (food)', lyd: bv(v2.wd_food_lyd), usd: bv(v2.wd_food_usd), note: String(v2.food_days || empRow.workingDays || '') },
-        { label: 'absence day', lyd: bv(v2.absence_lyd), usd: bv(v2.absence_usd), note: String(v2.absence_days || '') },
-        { label: 'ph', lyd: bv(v2.ph_lyd), usd: bv(v2.ph_usd), note: String(v2.ph_days || '') },
-        { label: 'missing hour', lyd: bv(v2.missing_lyd), usd: bv(v2.missing_usd), note: missStr },
-        { label: 'total salary', lyd: bv(v2.total_salary_lyd ?? v2.D7), usd: bv(v2.total_salary_usd ?? v2.C7) },
-        { label: 'gold bonus', lyd: bv(v2.gold_bonus_lyd), usd: bv(v2.gold_bonus_usd) },
-        { label: 'diamond bonus', lyd: bv(v2.diamond_bonus_lyd), usd: bv(v2.diamond_bonus_usd) },
-        { label: 'other bonus 1', lyd: bv(v2.other_bonus1_lyd), usd: bv(v2.other_bonus1_usd), note: v2.other_bonus1_acc ? String(v2.other_bonus1_acc) : '' },
-        { label: 'other bonus 2', lyd: bv(v2.other_bonus2_lyd), usd: bv(v2.other_bonus2_usd), note: v2.other_bonus2_acc ? String(v2.other_bonus2_acc) : '' },
-        { label: 'loan (debit)', lyd: bv(v2.loan_debit_lyd), usd: bv(v2.loan_debit_usd) },
-        { label: 'loan (credit)', lyd: bv(v2.loan_credit_lyd), usd: bv(v2.loan_credit_usd) },
-        { label: 'other addit.', lyd: bv(v2.other_additions_lyd), usd: bv(v2.other_additions_usd) },
-        { label: 'other deduct.', lyd: bv(v2.other_deductions_lyd), usd: bv(v2.other_deductions_usd) },
-        { label: 'net salary', lyd: bv(v2.net_salary_lyd ?? v2.D16), usd: bv(v2.net_salary_usd ?? v2.C16) },
-      ];
-      let sL = Number(v2.base_salary_lyd || 0) > 0;
-      let sU = Number(v2.base_salary_usd || 0) > 0;
-      if (!sL && !sU) sL = true;
-      const rows = lines.filter(r => ((sL && Number(r.lyd||0) > 0) || (sU && Number(r.usd||0) > 0)));
-      setBdEmp(empRow);
-      setBdLines(rows);
-      setBdShowLyd(sL);
-      setBdShowUsd(sU);
-      setBdOpen(true);
+      const res = await fetch(`${process.env.REACT_APP_API_IP || 'http://localhost:9000'}/jobs/jobs`, {
+        headers: authHeader() as any,
+      });
+      if (!res.ok) return;
+      const js = await res.json();
+      const arr = Array.isArray(js) ? js : (js.data || []);
+      setJobs(arr);
     } catch {
-      setBdEmp(empRow);
-      setBdLines([]);
-      setBdOpen(true);
+      // ignore
     }
-  };
-
-  const openAdjust = async (empRow: Payslip) => {
-    const id_emp = empRow.id_emp;
-    setAdjOpen(true); setAdjLoading(true); setAdjEmpId(id_emp);
-    try {
-      const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${id_emp}`;
-      const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
-      if (res.ok) {
-        const js = await res.json();
-        const data = js?.data || {};
-        const rows = data[String(id_emp)] || [];
-        setAdjRows(rows);
-      } else {
-        setAdjRows([]);
-      }
-    } catch {
-      setAdjRows([]);
-    } finally { setAdjLoading(false); }
-  };
+  })();
+}, []);
 
   const addAdjustment = async () => {
     if (!adjEmpId) return;
     if (!adjForm.amount) { alert('Amount required'); return; }
     setAdjLoading(true);
     try {
-      const payload = { year, month, employeeId: adjEmpId, type: adjForm.type, amount: Number(adjForm.amount), currency: adjForm.currency, note: adjForm.note };
-      const res = await fetch(`http://192.168.3.60:9000/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
+      const isLydOnly = adjLydOnlyTypes.has(adjForm.type);
+      const payload = {
+        year,
+        month,
+        employeeId: adjEmpId,
+        type: adjForm.type,
+        amount: Number(adjForm.amount),
+        currency: isLydOnly ? 'LYD' : adjForm.currency,
+        note: adjForm.note,
+      };
+      const res = await fetch(`http://localhost:9000/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Failed to add adjustment');
       const js = await res.json();
       setAdjRows(prev => [...prev, js.entry]);
@@ -516,7 +596,7 @@ export default function PayrollPage() {
   // Fetch sales metrics for the current window
   const fetchSales = React.useCallback(async () => {
     try {
-      const url = `http://192.168.3.60:9000/hr/payroll/sales-metrics?year=${year}&month=${month}`;
+      const url = `http://localhost:9000/hr/payroll/sales-metrics?year=${year}&month=${month}`;
       const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
       if (!res.ok) return setSales({});
       const js = await res.json();
@@ -555,7 +635,7 @@ export default function PayrollPage() {
       setCommLoading(true);
       (async () => {
         try {
-          const res = await fetch(`http://192.168.3.60:9000/employees`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://localhost:9000/employees`, { headers: authHeader() as unknown as HeadersInit });
           if (res.ok) {
             const js = await res.json();
             const arr: any[] = Array.isArray(js) ? js : (Array.isArray(js?.data) ? js.data : []);
@@ -588,7 +668,7 @@ export default function PayrollPage() {
             mp[e.id_emp] = days.filter((d: any) => !!d?.present).length;
           } catch {}
           try {
-            const r = await fetch(`http://192.168.3.60:9000/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+            const r = await fetch(`http://localhost:9000/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
             if (r.ok) {
               const js = await r.json();
               const obj = js?.data ?? js;
@@ -644,7 +724,7 @@ export default function PayrollPage() {
         let rowsAll: any[] = [];
         try {
           const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-          const r = await fetch(`http://192.168.3.60:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+          const r = await fetch(`http://localhost:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
           if (r.ok) rowsAll = await r.json();
         } catch {}
         const gramsByUser = new Map<number, number>();
@@ -733,16 +813,7 @@ export default function PayrollPage() {
     const getVal = (e: Payslip): any => {
       switch (sortKey) {
         case 'name': return String(nameMap[e.id_emp] ?? e.name ?? '').toLowerCase();
-        case 'ps': {
-          const raw = e.PS != null ? String(e.PS) : '';
-          const label = psPoints[Number(e.PS)] || formatPs(raw) || '';
-          // Sort by numeric when P#; otherwise by label
-          const m = String(label).match(/^P(\d+)$/i);
-          return m ? Number(m[1]) : String(label);
-        }
-        case 'workingDays': return Number(e.workingDays||0);
         case 'deductionDays': return Number(e.deductionDays||0);
-        case 'presentWorkdays': return Number(e.presentWorkdays||0);
         case 'holidayWorked': return Number(e.holidayWorked||0);
         case 'baseSalary': return Number(e.baseSalary||0);
         case 'food': {
@@ -757,16 +828,17 @@ export default function PayrollPage() {
         case 'comm': {
           const W=Math.max(1,e.workingDays||1); const per=Number((e as any).COMMUNICATION||0); return per*W;
         }
-        case 'basePay': return Number(e.components?.basePay||0);
-        case 'allowancePay': return Number(e.components?.allowancePay||0);
         case 'adjustments': { const a=e.components?.adjustments||{bonus:0,deduction:0,advance:0,loanPayment:0}; return (a.bonus||0)-((a.deduction||0)+(a.advance||0)+(a.loanPayment||0)); }
         case 'salesQty': return Number((sales[String(e.id_emp)]?.qty) || 0);
         case 'salesTotal': return Number((sales[String(e.id_emp)]?.total_lyd) || 0);
         case 'gold': { const vr=(v2Rows||[]).find((x:any)=>Number(x.id_emp)===Number(e.id_emp))||{}; return Number(vr.gold_bonus_lyd||0); }
         case 'diamond': { const vr=(v2Rows||[]).find((x:any)=>Number(x.id_emp)===Number(e.id_emp))||{}; return Number(vr.diamond_bonus_lyd||0); }
-        case 'total': return computeNetLYDFor(e.id_emp);
+        case 'total': {
+          const vr=(v2Rows||[]).find((x:any)=>Number(x.id_emp)===Number(e.id_emp))||{};
+          return Number((vr as any).net_salary_lyd ?? (vr as any).D16 ?? 0);
+        }
         case 'totalUsd': {
-          const W=Math.max(1,e.workingDays||1); const F=e.factorSum!=null&&e.factorSum>0?e.factorSum:((e.components?.basePay||0)/(Math.max(1,e.baseSalary||0)/W)); const baseUsd=e.baseSalaryUsd? (e.baseSalaryUsd/W)*F:0; const vr=(v2Rows||[]).find((x:any)=>Number(x.id_emp)===Number(e.id_emp))||{}; const commUsd=Number((vr as any).diamond_bonus_usd||0)+Number((vr as any).gold_bonus_usd||0); return baseUsd+commUsd;
+          const W=Math.max(1,e.workingDays||1); const baseUsd=e.baseSalaryUsd? (e.baseSalaryUsd/W)*(e.factorSum || 1):0; const vr=(v2Rows||[]).find((x:any)=>Number(x.id_emp)===Number(e.id_emp))||{}; const commUsd=Number((vr as any).diamond_bonus_usd||0)+Number((vr as any).gold_bonus_usd||0); return baseUsd+commUsd;
         }
         default: return 0;
       }
@@ -782,22 +854,37 @@ export default function PayrollPage() {
     return arr;
   }, [sortKey, sortDir, sales, v2Rows, advMap, psPoints, nameMap]);
 
-  // Distinct positions for filter UI
-  const positionOptions = React.useMemo(() => {
-    const set = new Set<string>();
-    (result?.employees || []).forEach((e) => {
-      const d = String((e as any).designation || '').trim();
-      if (d) set.add(d);
-    });
-    return Array.from(set).sort((a,b)=> a.localeCompare(b));
-  }, [result]);
+  // Distinct positions for filter UI (from Jobs list)
+  const positionOptions = React.useMemo(
+    () =>
+      jobs.map((j) => ({
+        id: j.id_job,
+        label: j.Job_title || j.job_name || j.Job_code || String(j.id_job),
+      })),
+    [jobs]
+  );
 
   const displayedRows: Payslip[] = React.useMemo(() => {
     let rows = result?.employees || [];
-    // Filter by position if selected
-    if (positionFilter && positionFilter !== 'all') {
-      const pf = positionFilter.toLowerCase();
-      rows = rows.filter(r => String((r as any).designation || '').toLowerCase() === pf);
+    if (positionFilter && positionFilter !== "all") {
+      const jobId = Number(positionFilter);
+      const job = jobs.find((j) => Number(j.id_job) === jobId);
+      if (job) {
+        const titleKey = String(job.Job_title || "").trim();
+        if (titleKey) {
+          const ids = employeesByTitle[titleKey] || [];
+          if (ids.length > 0) {
+            rows = rows.filter((r) => {
+              const id = Number((r as any).id_emp ?? (r as any).ID_EMP);
+              return ids.includes(id);
+            });
+          } else {
+            rows = [];
+          }
+        } else {
+          rows = [];
+        }
+      }
     }
     // Filter by search text
     const f = String(filterText || '').toLowerCase();
@@ -808,18 +895,48 @@ export default function PayrollPage() {
         })
       : rows;
     return sortRows(filtered);
-  }, [result, positionFilter, filterText, sortRows, nameMap]);
+  }, [result, positionFilter, filterText, sortRows, nameMap, jobs, employeesByTitle]);
 
   // Totals for current view
   const totals = React.useMemo(() => {
-    const t = { baseSalary: 0, base: 0, allow: 0, food: 0, fuel: 0, comm: 0, adj: 0, salesQty: 0, salesTotal: 0, gold: 0, diamond: 0, totalLyd: 0, totalUsd: 0 };
+    const t = {
+      workingDays: 0,
+      deductionDays: 0,
+      holidayWorked: 0,
+      baseSalary: 0,
+      baseSalaryUsd: 0,
+      base: 0,
+      allow: 0,
+      food: 0,
+      fuel: 0,
+      comm: 0,
+      adj: 0,
+      salesQty: 0,
+      salesTotal: 0,
+      gold: 0,
+      diamond: 0,
+      pLyd: 0,
+      pUsd: 0,
+      phLyd: 0,
+      phUsd: 0,
+      phfLyd: 0,
+      phfUsd: 0,
+      grossLyd: 0,
+      grossUsd: 0,
+      totalLyd: 0,
+      totalUsd: 0,
+    };
     displayedRows.forEach(e => {
+      t.workingDays += Number(e.workingDays || 0);
+      const vr = (v2Rows||[]).find((x:any)=> Number(x.id_emp)===Number(e.id_emp)) || {} as any;
+      t.deductionDays += Number(vr.absence_lyd || 0);
+      t.holidayWorked += Number(e.holidayWorked || 0);
       t.baseSalary += Number(e.baseSalary || 0);
-      t.base += Number(e.components?.basePay||0);
-      t.allow += Number(e.components?.allowancePay||0);
+      t.baseSalaryUsd += Number((e as any).baseSalaryUsd || 0);
+      t.base += 0;
+      t.allow += 0;
       const W = Math.max(1, e.workingDays||1);
       const foodPer = Number((e as any).FOOD || (e as any).FOOD_ALLOWANCE || 0);
-      const vr = (v2Rows||[]).find((x:any)=> Number(x.id_emp)===Number(e.id_emp)) || {} as any;
       const fuelPer = Number(((e as any).FUEL ?? vr.FUEL) || 0);
       const commPer = Number(((e as any).COMMUNICATION ?? vr.COMMUNICATION) || 0);
       const pd = Number(presentDaysMap[e.id_emp] || 0);
@@ -834,16 +951,20 @@ export default function PayrollPage() {
       // vr defined above
       t.gold += Number(vr.gold_bonus_lyd||0);
       t.diamond += Number(vr.diamond_bonus_lyd||0);
-      { t.totalLyd += computeNetLYDFor(e.id_emp); }
-      // Approximate USD: use baseSalaryUsd/factor if available
-          const W2 = Math.max(1, e.workingDays||1);
-          const F = e.factorSum != null && e.factorSum > 0 ? e.factorSum : ((e.components?.basePay||0) / (Math.max(1, e.baseSalary||0)/W2));
-          const baseUsd = e.baseSalaryUsd ? (e.baseSalaryUsd/W2)*F : 0;
-          const commUsd = Number(vr?.diamond_bonus_usd||0) + Number(vr?.gold_bonus_usd||0);
-          t.totalUsd += baseUsd + commUsd;
-      });
-      return t;
-    }, [displayedRows, sales, v2Rows, advMap]);
+      t.grossLyd += Number(vr.total_salary_lyd ?? vr.totalLyd ?? 0);
+      t.grossUsd += Number(vr.total_salary_usd ?? vr.totalUsd ?? 0);
+      t.totalLyd += Number(vr.net_salary_lyd ?? vr.D16 ?? 0);
+      t.totalUsd += Number(vr.net_salary_usd ?? vr.C16 ?? 0);
+      const pp = computePPhPhf(e);
+      t.pLyd += pp.pLyd;
+      t.pUsd += pp.pUsd;
+      t.phLyd += pp.phLyd;
+      t.phUsd += pp.phUsd;
+      t.phfLyd += pp.phfLyd;
+      t.phfUsd += pp.phfUsd;
+    });
+    return t;
+  }, [displayedRows, sales, v2Rows, advMap, tsAgg]);
 
   const onRun = async () => {
     setError(null);
@@ -866,6 +987,7 @@ export default function PayrollPage() {
       try {
         const empList = await listEmployees();
         const nm: Record<number, string> = {};
+        const byTitle: Record<string, number[]> = {};
         if (Array.isArray(empList)) {
           for (const e of empList as any[]) {
             const id = Number(e?.ID_EMP ?? e?.id_emp);
@@ -876,9 +998,15 @@ export default function PayrollPage() {
             };
             const disp = chooseDisplayName(String(e?.NAME || ''), String(e?.NAME_ENGLISH || ''), id);
             if (disp) nm[id] = disp;
+            const title = String((e as any).TITLE || '').trim();
+            if (title) {
+              if (!byTitle[title]) byTitle[title] = [];
+              byTitle[title].push(id);
+            }
           }
         }
         setNameMap(nm);
+        setEmployeesByTitle(byTitle);
       } catch {}
       setViewOnly(!!v2.viewOnly);
       const employees: Payslip[] = (v2.rows || []).map((r: any) => {
@@ -889,7 +1017,6 @@ export default function PayrollPage() {
         const phLyd = Number(r.ph_lyd ?? r.phLyd ?? 0);
         const missingLyd = Number(r.missing_lyd ?? r.missingLyd ?? 0);
         const basePortion = Number((baseSalary - absenceLyd + phLyd - missingLyd).toFixed(2));
-        const allowancePay = wdFoodLyd;
         const total = Number(r.net_salary_lyd ?? r.D16 ?? r.total_salary_lyd ?? r.D7 ?? 0);
         const allowancePerDay = workingDays > 0 ? (wdFoodLyd / workingDays) : 0;
         const absenceDays = Number(r.absence_days ?? r.absenceDays ?? 0);
@@ -944,7 +1071,7 @@ export default function PayrollPage() {
           const hasComm = Number((empRow as any).COMMUNICATION || 0) > 0;
           if (!hasFuel || !hasComm) {
             try {
-              const res = await fetch(`http://192.168.3.60:9000/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+              const res = await fetch(`http://localhost:9000/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
               if (res.ok) {
                 const payload = await res.json();
                 const obj = payload?.data ?? payload;
@@ -963,7 +1090,7 @@ export default function PayrollPage() {
         const entries: Record<number, number> = {};
         await Promise.all(employees.map(async (e) => {
           try {
-            const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
+            const url = `http://localhost:9000/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -978,7 +1105,7 @@ export default function PayrollPage() {
 
       // Build per-employee timesheet aggregates used by UI to mirror PDF calculations
       try {
-        const agg: Record<number, { presentP: number; phUnits: number; fridayA: number; missRatio: number }> = {};
+        const agg: Record<number, { presentP: number; phUnits: number; fridayA: number; missRatio: number; phFullDays: number; phPartDays: number; absenceDays: number }> = {};
         await Promise.all(employees.map(async (e, idx) => {
           try {
             const days = await ensureTimesheetDays(e.id_emp);
@@ -988,13 +1115,16 @@ export default function PayrollPage() {
             };
             const s1 = pick((vr as any).T_START || (vr as any).t_start || (vr as any).SCHEDULE_START || (vr as any).shift_start);
             const s2 = pick((vr as any).T_END || (vr as any).t_end || (vr as any).SCHEDULE_END || (vr as any).shift_end);
-            let presentP = 0, phUnits = 0, fridayA = 0, missAll = 0, missNoPT = 0;
+            let presentP = 0, phUnits = 0, fridayA = 0, missAll = 0, missNoPT = 0, phFullDays = 0, phPartDays = 0, absenceDays = 0;
             for (let i = 0; i < days.length; i++) {
               const d = days[i];
               const c = codeBadge(d, s1, s2);
-              if (c === 'P') presentP += 1;
-              else if (c === 'PHF') phUnits += 2;
-              else if (c === 'PH') phUnits += 1;
+              // Treat P, PH, PHF as worked/present days for UI counts
+              if (c === 'P' || c === 'PH' || c === 'PHF') presentP += 1;
+              // Keep PH/PHF units and day breakdown for holiday pay
+              if (c === 'PHF') { phUnits += 2; phFullDays += 1; }
+              else if (c === 'PH') { phUnits += 1; phPartDays += 1; }
+              if (c === 'A') absenceDays += 1;
               const dayDate = dayjs(`${v2.year}-${String(v2.month).padStart(2,'0')}-01`).date(i+1);
               if (dayDate.day() === 5 && c === 'A') fridayA += 1;
               const dm = Number(d?.deltaMin || 0);
@@ -1005,9 +1135,18 @@ export default function PayrollPage() {
               }
             }
             const missRatio = missAll > 0 ? (missNoPT / missAll) : 0;
-            agg[e.id_emp] = { presentP, phUnits, fridayA, missRatio };
+            agg[e.id_emp] = { presentP, phUnits, fridayA, missRatio, phFullDays, phPartDays, absenceDays };
           } catch {}
         }));
+        // Override UI absence_days / presentWorkdays with manual punches
+        employees.forEach((emp) => {
+          const a = agg[emp.id_emp];
+          if (!a) return;
+          const working = Number(emp.workingDays || 0);
+          const abs = Number(a.absenceDays || 0);
+          emp.deductionDays = abs;
+          emp.presentWorkdays = Math.max(0, working - abs);
+        });
         setTsAgg(agg);
         // Keep presentDaysMap for any legacy uses (derived from presentP)
         const pd: Record<number, number> = {};
@@ -1117,35 +1256,14 @@ export default function PayrollPage() {
     } catch { return null; }
   };
 
-  const downscaleToJpeg = async (dataUrl: string, maxW: number = 800, quality: number = 0.7): Promise<string | null> => {
-    try {
-      const img = new Image();
-      const res: string = await new Promise((resolve, reject) => {
-        img.onload = () => {
-          const scale = Math.min(1, maxW / (img.naturalWidth || img.width || maxW));
-          const targetW = Math.max(1, Math.round((img.naturalWidth || img.width || maxW) * scale));
-          const targetH = Math.max(1, Math.round((img.naturalHeight || img.height || maxW) * scale));
-          const cnv = document.createElement('canvas');
-          cnv.width = targetW; cnv.height = targetH;
-          const ctx = cnv.getContext('2d');
-          if (!ctx) { resolve(dataUrl); return; }
-          ctx.drawImage(img, 0, 0, targetW, targetH);
-          const out = cnv.toDataURL('image/jpeg', quality);
-          resolve(out);
-        };
-        img.onerror = () => resolve(dataUrl);
-        img.src = dataUrl;
-      });
-      return res;
-    } catch { return dataUrl; }
-  };
-
   const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
   const dim = new Date(year, month, 0).getDate();
 
-  // Compute net values (we will override with a consistent recomputation below)
-  let netLyd = 0;
-  let netUsd = 0;
+  const v2 = (v2Rows || []).find((x:any) => Number(x.id_emp) === Number(emp.id_emp)) || {} as any;
+
+  // Net values: use backend/V2 net salaries so PDF matches UI grid "Total" exactly
+  let netLyd = Math.max(0, Number(((v2 as any).net_salary_lyd ?? (v2 as any).D16 ?? 0)));
+  let netUsd = Math.max(0, Number(((v2 as any).net_salary_usd ?? (v2 as any).C16 ?? 0)));
 
   // Slightly darker grey page background
   const pageH = doc.internal.pageSize.getHeight();
@@ -1162,9 +1280,8 @@ export default function PayrollPage() {
   } catch {}
   const headerH = 95;
   
-  const title = `${dispName}`;
   let roleStr = String(emp.designation || '').trim();
-  const logoH = 80; // slightly smaller logo height
+  const logoH = 90; // slightly larger logo height
   let logoX = -10, logoW = 0, logoY = 0;
   let paySlipCenterX = 0; // center x for PAYSLIP, drawn later
   const tryFetch = async (p: string) => {
@@ -1203,14 +1320,14 @@ export default function PayrollPage() {
           }
         } catch {}
         const scale = logoH / (img.naturalHeight || logoH);
-        const w = Math.max(logoH, (img.naturalWidth || logoH) * scale);
-        const w2 = Math.min(w * 1.1, pageW - margin * 2);
-        const x = pageW - margin - w2;
+        const w = Math.max(logoH * 1.1, (img.naturalWidth || logoH) * scale);
+        const w2 = Math.min(w * 1.15, pageW - margin * 2);
+        const x = margin; // logo on the left side
         logoX = x; logoW = w2; logoY = Math.max(2, margin - 16);
         doc.addImage(dataBlack, 'PNG', x, logoY, w2, logoH);
         try {
-          // Defer drawing PAYSLIP label until after left header block to align heights
-          paySlipCenterX = x + (w2 / 2);
+          // Defer drawing PAYSLIP label until after right header block to align heights
+          paySlipCenterX = pageW - margin - (w2 / 2);
         } catch {}
         resolve();
       };
@@ -1220,8 +1337,6 @@ export default function PayrollPage() {
   }
   
   // Resolve v2 row for this employee early (used by header values like PS)
-  const v2 = (v2Rows || []).find((x:any) => Number(x.id_emp) === Number(emp.id_emp)) || {} as any;
-  // Schedule mins for classification fallback
   const parseMin2 = (s:any): number | null => {
     if (!s) return null; const m = String(s).match(/(\d{1,2}):(\d{2})/); if (!m) return null; const hh=Number(m[1]); const mm=Number(m[2]); if (!Number.isFinite(hh)||!Number.isFinite(mm)) return null; return hh*60+mm;
   };
@@ -1233,13 +1348,9 @@ export default function PayrollPage() {
   doc.setTextColor(22, 22, 22);
   const payMonthStr = `${dayjs(periodStart).format('MMMM, YYYY')}`;
   const printedOnStr = `Printed on: ${dayjs().format('DD/MM/YYYY')}`;
-  const leftAnchorX = margin + 12; // left column anchor
-  const rightAnchorX = Math.max(margin + 140, (logoX || (pageW - margin)) - 180); // right-side texts to the left of the logo
-  const leftColX = margin + 12;
   const nameY = (logoY || (margin - 16)) + logoH / 2 - 14;
   const idY = nameY + 12;
   const posY = idY + 12;
-  const psY = posY + 12;
   const payMonthY = (logoY || (margin - 16)) + logoH / 2 - 14;
   const printedOnY = payMonthY + 12;
 
@@ -1247,7 +1358,7 @@ export default function PayrollPage() {
   try {
     // Resolve Position (TITLE) before drawing header
     try {
-      const resTitle = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resTitle = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resTitle.ok) {
         const payload = await resTitle.json();
         const obj = payload?.data ?? payload;
@@ -1285,70 +1396,85 @@ export default function PayrollPage() {
     const labW = Math.floor(colWPre * 0.34);
     const valW = Math.max(0, Math.floor(colWPre) - labW);
 
-    const leftRows: Array<[string, string]> = [
+    // Single rounded box for Name / ID (left) and Position / PS (right)
+    const boxW = areaPre;
+    const boxH = rowH * 2;
+    const boxX = tX;
+    const boxY = tY;
+    doc.setDrawColor('#999999');
+    (doc as any).setFillColor(235,235,235);
+    try {
+      (doc as any).roundedRect(boxX, boxY, boxW, boxH, 5, 5, 'F');
+      doc.rect(boxX, boxY, boxW, boxH);
+    } catch {
+      doc.rect(boxX, boxY, boxW, boxH, 'F');
+      doc.rect(boxX, boxY, boxW, boxH);
+    }
+    // Inner grid lines (2x2 layout)
+    try {
+      const innerV = boxX + boxW / 2;
+      const innerH = boxY + boxH / 2;
+      doc.setDrawColor('#bbbbbb');
+      doc.line(innerV, boxY, innerV, boxY + boxH);
+      doc.line(boxX, innerH, boxX + boxW, innerH);
+    } catch {}
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10);
+    const colW = boxW / 2;
+    const col1X = boxX + 10;
+    const col2X = boxX + colW + 10;
+    const lineGap = rowH;
+    const col1: Array<[string,string]> = [
       ['Name', String(dispName || '')],
       ['ID', String(emp.id_emp || '')],
     ];
-    const rightRows: Array<[string, string]> = [
+    const col2: Array<[string,string]> = [
       ['Position', roleStr || '-'],
       ['PS', String(psTxt || '-')],
     ];
-    doc.setFont('helvetica','normal');
-    doc.setFontSize(10);
-    for (let i=0;i<leftRows.length;i++){
-      const y0 = tY + i*rowH;
-      doc.setDrawColor('#999999');
-      (doc as any).setFillColor(240,240,240);
-      doc.rect(tX, y0, labW, rowH, 'F');
-      doc.rect(tX, y0, labW, rowH);
-      doc.rect(tX + labW, y0, valW, rowH, 'F');
-      doc.rect(tX + labW, y0, valW, rowH);
-      doc.text(leftRows[i][0], tX + 6, y0 + 12);
-      const val = leftRows[i][1] || '';
-      if (hasArabic(val)) {
-        const img = await drawArabicTextImage(val, 10);
-        if (img) doc.addImage(img.dataUrl, 'PNG', tX + labW + 6, y0 + 2, img.wPt, img.hPt);
-        else doc.text(val, tX + labW + 6, y0 + 12);
+    const drawHeaderLine = async (lab: string, val: string, baseX: number, idx: number) => {
+      const yLine = boxY + 12 + idx * lineGap;
+      doc.text(lab, baseX, yLine);
+      const v = val || '';
+      const valueX = baseX + 60;
+      if (hasArabic(v)) {
+        const img = await drawArabicTextImage(v, 10);
+        if (img) doc.addImage(img.dataUrl, 'PNG', valueX, yLine - 10, img.wPt, img.hPt);
+        else doc.text(v, valueX, yLine);
       } else {
-        doc.text(val, tX + labW + 6, y0 + 12);
+        doc.text(v, valueX, yLine);
       }
+    };
+    for (let i = 0; i < col1.length; i++) {
+      await drawHeaderLine(col1[i][0], col1[i][1], col1X, i);
     }
-    for (let i=0;i<rightRows.length;i++){
-      const y0 = tY + i*rowH;
-      doc.setDrawColor('#999999');
-      (doc as any).setFillColor(240,240,240);
-      doc.rect(rightX, y0, labW, rowH, 'F');
-      doc.rect(rightX, y0, labW, rowH);
-      doc.rect(rightX + labW, y0, valW, rowH, 'F');
-      doc.rect(rightX + labW, y0, valW, rowH);
-      doc.text(rightRows[i][0], rightX + 6, y0 + 12);
-      const val = rightRows[i][1] || '';
-      if (hasArabic(val)) {
-        const img = await drawArabicTextImage(val, 10);
-        if (img) doc.addImage(img.dataUrl, 'PNG', rightX + labW + 6, y0 + 2, img.wPt, img.hPt);
-        else doc.text(val, rightX + labW + 6, y0 + 12);
-      } else {
-        doc.text(val, rightX + labW + 6, y0 + 12);
-      }
+    for (let i = 0; i < col2.length; i++) {
+      await drawHeaderLine(col2[i][0], col2[i][1], col2X, i);
     }
-    const leftBottom = tY + leftRows.length * rowH;
-    const rightBottom = tY + rightRows.length * rowH;
-    infoBottomYCalc = Math.max(leftBottom, rightBottom);
-    // Top-left Branch label in bold, same style as PAYSLIP, aligned with logo row
+    const boxBottom = boxY + boxH;
+    infoBottomYCalc = boxBottom;
+    // Right-side Company/Branch/Month block (swapped with logo), right-aligned
     try {
       const bTxt = branchName || '';
       if (bTxt) {
+        const topY = (logoY || margin) + 32;
         doc.setFont('helvetica','bold');
         doc.setFontSize(14);
         doc.setTextColor(0,0,0);
-        const topLeftY = (logoY || margin) + 44;
-        // Company above branch with extra spacing
-        doc.text('Gaja Jewelry', margin, Math.max(10, topLeftY - 18));
-        doc.text(bTxt, margin, topLeftY);
-        // Pay month directly under branch name
+        const gj = 'Gaja Jewelry';
+        const gjW = doc.getTextWidth(gj);
+        const gjX = pageW - margin - gjW;
+        doc.text(gj, gjX, Math.max(10, topY));
+
+        const brW = doc.getTextWidth(bTxt);
+        const brX = pageW - margin - brW;
+        doc.text(bTxt, brX, topY + 18);
+
         doc.setFont('helvetica','normal');
         doc.setFontSize(10);
-        doc.text(payMonthStr, margin, topLeftY + 12);
+        const pmW = doc.getTextWidth(payMonthStr);
+        const pmX = pageW - margin - pmW;
+        doc.text(payMonthStr, pmX, topY + 32);
       }
     } catch {}
   } catch {}
@@ -1357,7 +1483,6 @@ export default function PayrollPage() {
   // (net recomputation moved below, after all variables are defined)
   const csStr = (v2 as any).T_START || (v2 as any).contract_start || (v2 as any).contractStart;
   const contractStart = csStr ? dayjs(csStr) : null;
-  const missMinAll = days.reduce((acc, d) => acc + ((d?.deltaMin ?? 0) < 0 ? Math.abs(d!.deltaMin!) : 0), 0);
   const missMinNoPT = days.reduce((acc, d) => acc + (((d?.deltaMin ?? 0) < 0 && codeBadge(d, schStartMinPDF, schEndMinPDF) !== 'PT') ? Math.abs(d!.deltaMin!) : 0), 0);
   const missH = Math.floor(missMinNoPT / 60);
   const missM = Math.floor(missMinNoPT % 60);
@@ -1367,45 +1492,39 @@ export default function PayrollPage() {
   // Food allowance present-days should NOT include PH/PHF; count only actual present 'P'
   const presentDaysCount = Array.isArray(days) ? days.filter(d => codeBadge(d as any, schStartMinPDF, schEndMinPDF) === 'P').length : 0;
   const wdFoodLydPDF = Number((v2 as any).wd_food_lyd || 0);
-  const wdFoodUsdPDF = Number((v2 as any).wd_food_usd || 0);
   const foodDaysV2PDF = Number((v2 as any).food_days || (v2 as any).workingDays || emp.workingDays || 0);
   const foodPerDayLydPDF = foodDaysV2PDF > 0 ? wdFoodLydPDF / foodDaysV2PDF : 0;
   const foodLydAdjPDF = Number((foodPerDayLydPDF * presentDaysCount).toFixed(2));
   // PH fallback: if v2 lacks ph amounts, compute daily pay: PHF=2x, PH=1x
   const workingDaysPref = Number(emp.workingDays || (v2 as any).workingDays || foodDaysV2PDF || 0);
-  // Travel/Communication allowances from Employee Profile (per working day)
-  let fuelPerDayPDF = Number(((emp as any).FUEL ?? (v2 as any).FUEL) || 0);
-  let commPerDayPDF = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
-  if (!fuelPerDayPDF && !commPerDayPDF) {
+  // Travel/Communication allowances from Employee Profile (flat monthly amounts)
+  let fuelMonthlyPDF = Number(((emp as any).FUEL ?? (v2 as any).FUEL) || 0);
+  let commMonthlyPDF = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
+  if (!fuelMonthlyPDF && !commMonthlyPDF) {
     try {
-      const resEmp = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resEmp = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resEmp.ok) {
         const payload = await resEmp.json();
         const obj = payload?.data ?? payload;
-        fuelPerDayPDF = Number(obj?.FUEL || 0);
-        commPerDayPDF = Number(obj?.COMMUNICATION || 0);
+        fuelMonthlyPDF = Number(obj?.FUEL || 0);
+        commMonthlyPDF = Number(obj?.COMMUNICATION || 0);
       }
     } catch {}
   }
-  const travelLydPDF = Number(((fuelPerDayPDF || 0) * (workingDaysPref || 0)).toFixed(2));
-  const commLydPDF = Number(((commPerDayPDF || 0) * (workingDaysPref || 0)).toFixed(2));
-  const phFullDays = Array.isArray(days) ? days.filter(d => codeBadge(d as any, schStartMinPDF, schEndMinPDF) === 'PHF').length : 0;
-  const phPartDays = Array.isArray(days) ? days.filter(d => codeBadge(d as any, schStartMinPDF, schEndMinPDF) === 'PH').length : 0;
-  const dailyLyd = workingDaysPref > 0 ? Number(((v2 as any).base_salary_lyd || emp.baseSalary || 0)) / workingDaysPref : 0;
-  const dailyUsd = workingDaysPref > 0 ? Number(((v2 as any).base_salary_usd || 0)) / workingDaysPref : 0;
-  const phUnits = (phFullDays * 2) + (phPartDays * 1);
-  const phLydFallback = phUnits > 0 && Number((v2 as any).ph_lyd || 0) <= 0 ? Number((dailyLyd * phUnits).toFixed(2)) : 0;
-  const phUsdFallback = phUnits > 0 && Number((v2 as any).ph_usd || 0) <= 0 ? Number((dailyUsd * phUnits).toFixed(2)) : 0;
-  // Fridays off: do not count Friday 'A' as absence
-  const fridayA = Array.isArray(days) ? days.reduce((cnt, d, idx) => {
+  const travelLydPDF = Number((fuelMonthlyPDF || 0).toFixed(2));
+  const commLydPDF = Number((commMonthlyPDF || 0).toFixed(2));
+  // Absence days for PDF: count only true 'A' codes, excluding Friday absences
+  const absenceDaysPDF = Array.isArray(days) ? days.reduce((cnt, d, idx) => {
+    const c = codeBadge(d as any, schStartMinPDF, schEndMinPDF);
     const dow = dayjs(periodStart).date(idx + 1).day();
-    return cnt + ((dow === 5 && codeBadge(d as any, schStartMinPDF, schEndMinPDF) === 'A') ? 1 : 0);
+    if (c === 'A' && dow !== 5) return cnt + 1;
+    return cnt;
   }, 0) : 0;
 
   // Fetch this month's Salary Advances total for this employee (to deduct from Net Pay)
   let advSumLYD = 0;
   try {
-    const adjUrlSum = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const adjUrlSum = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(adjUrlSum, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -1423,7 +1542,7 @@ export default function PayrollPage() {
   let commissionRole: string = '';
   let commissionPs: number[] = [];
   try {
-    const resEmp = await fetch(`http://192.168.3.60:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+    const resEmp = await fetch(`http://localhost:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
     if (resEmp.ok) {
       const payload = await resEmp.json();
       const obj = payload?.data ?? payload;
@@ -1461,7 +1580,7 @@ export default function PayrollPage() {
   if (sellerUserId != null) {
     try {
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-      const r = await fetch(`http://192.168.3.60:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+      const r = await fetch(`http://localhost:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
       if (r.ok) {
         const js = await r.json();
         const rowsAll: any[] = Array.isArray(js) ? js : [];
@@ -1565,49 +1684,11 @@ export default function PayrollPage() {
   const diamondBonusUSDComputed = Number(((diamondSelfUSD * diamondPct) / 100).toFixed(2));
   const adjComp = (emp.components?.adjustments || { bonus: 0, deduction: 0, advance: 0, loanPayment: 0 });
   
-  // Recompute NET from visible components (LYD) and USD candidate
-  {
-    const baseLyd2 = Math.max(0, Number((v2 as any).base_salary_lyd || emp.baseSalary || 0));
-    const phLyd2 = Math.max(0, Number((v2 as any).ph_lyd || phLydFallback || 0));
-    let absenceLyd2 = Math.max(0, Number((v2 as any).absence_lyd || 0));
-    if (fridayA > 0 && dailyLyd > 0) absenceLyd2 = Math.max(0, Number((absenceLyd2 - dailyLyd * fridayA).toFixed(2)));
-    const missingLydV2 = Math.max(0, Number((v2 as any).missing_lyd || 0));
-    const missingLyd2 = missMinAll > 0 ? Number(((missingLydV2 * (missMinNoPT / missMinAll))).toFixed(2)) : 0;
-    const goldLyd2 = Math.max(0, Number(goldBonusLYDComputed || (v2 as any).gold_bonus_lyd || 0));
-    const diaLyd2 = Math.max(0, Number(diamondBonusLYDComputed || (v2 as any).diamond_bonus_lyd || 0));
-    const othAddLyd2 = Math.max(0, Number((v2 as any).other_additions_lyd || 0));
-    const loanPayLyd2 = Math.max(0, Number((v2 as any).loan_credit_lyd || 0));
-    const otherDedExAdv2 = Math.max(0, Number((v2 as any).other_deductions_lyd || 0) - Math.max(0, Number(advSumLYD || 0)));
-    const foodLyd2 = Math.max(0, Number(foodLydAdjPDF || 0));
-    const travelLyd2 = Math.max(0, Number(travelLydPDF || 0));
-    const commLyd2 = Math.max(0, Number(commLydPDF || 0));
-    netLyd = Number((baseLyd2 + phLyd2 + foodLyd2 + travelLyd2 + commLyd2 + goldLyd2 + diaLyd2 + othAddLyd2 - absenceLyd2 - missingLyd2 - Math.max(0, Number(advSumLYD || 0)) - loanPayLyd2 - otherDedExAdv2).toFixed(2));
-    // Always recompute USD net from components and include diamond bonus USD
-    const baseUsd2 = Math.max(0, Number((v2 as any).base_salary_usd || 0));
-    const phUsd2 = Math.max(0, Number((v2 as any).ph_usd || phUsdFallback || 0));
-    let absenceUsd2 = Math.max(0, Number((v2 as any).absence_usd || 0));
-    if (fridayA > 0 && dailyUsd > 0) absenceUsd2 = Math.max(0, Number((absenceUsd2 - dailyUsd * fridayA).toFixed(2)));
-    const missingUsdV2 = Math.max(0, Number((v2 as any).missing_usd || 0));
-    const missingUsd2 = missMinAll > 0 ? Number(((missingUsdV2 * (missMinNoPT / missMinAll))).toFixed(2)) : 0;
-    const goldUsd2 = Math.max(0, Number((v2 as any).gold_bonus_usd || 0));
-    const diaUsd2 = Math.max(0, Number(diamondBonusUSDComputed || (v2 as any).diamond_bonus_usd || 0));
-    const othAddUsd2 = Math.max(0, Number((v2 as any).other_additions_usd || 0));
-    const loanPayUsd2 = Math.max(0, Number((v2 as any).loan_credit_usd || 0));
-    const otherDedUsd2 = Math.max(0, Number((v2 as any).other_deductions_usd || 0));
-    netUsd = Number((baseUsd2 + phUsd2 + goldUsd2 + diaUsd2 + othAddUsd2 - absenceUsd2 - missingUsd2 - loanPayUsd2 - otherDedUsd2).toFixed(2));
-  }
-  // Force LYD net to match UI net exactly
-  try {
-    const netFromUI = computeNetLYDFor(emp.id_emp);
-    if (netFromUI !== undefined && netFromUI !== null && !Number.isNaN(Number(netFromUI))) {
-      netLyd = Math.max(0, Number(Number(netFromUI).toFixed(2)));
-    }
-  } catch {}
-  // (moved below deductions rendering)
+  // Breakdown table driven directly from V2 fields (for the small summary box)
   const breakdown: Array<{label:string; lyd:number; usd:number; note?:string}> = [
     { label: 'Basic Salary', lyd: bv(v2.base_salary_lyd), usd: bv(v2.base_salary_usd) },
     { label: 'Food Allowance', lyd: foodLydAdjPDF, usd: 0, note: String(presentDaysCount || '') },
-    { label: 'Absent Days', lyd: bv(v2.absence_lyd), usd: bv(v2.absence_usd), note: String(v2.absence_days || '') },
+    { label: 'Absent Days', lyd: bv(v2.absence_lyd), usd: bv(v2.absence_usd), note: String(absenceDaysPDF || '') },
     { label: 'Paid Holiday', lyd: bv(v2.ph_lyd), usd: bv(v2.ph_usd), note: String(v2.ph_days || '') },
     { label: 'Missing Hours', lyd: bv(v2.missing_lyd), usd: bv(v2.missing_usd), note: missStr },
     { label: 'Total Salary', lyd: bv(v2.total_salary_lyd ?? v2.D7), usd: bv(v2.total_salary_usd ?? v2.C7) },
@@ -1660,10 +1741,10 @@ export default function PayrollPage() {
   const colW = blockW;
   
   // Determine amount columns to show
-  const showLydCol = true;
   const usdCandidates = ['base_salary_usd','wd_food_usd','gold_bonus_usd','diamond_bonus_usd','other_additions_usd','absence_usd','missing_usd','loan_credit_usd','other_deductions_usd','net_salary_usd','C16'];
-  const hasUsd = usdCandidates.some(k => (v2 as any)[k] !== undefined) || (diamondBonusUSDComputed > 0) || (goldBonusUSDComputed > 0);
-  const showUsdCol = true; // Always show USD column; blank when 0
+  const hasUsd = usdCandidates.some(k => (v2 as any)[k] !== undefined && Number((v2 as any)[k] || 0) !== 0) || (diamondBonusUSDComputed > 0) || (goldBonusUSDComputed > 0);
+  const showUsdCol = hasUsd;
+  const showLydCol = brShowLyd || !showUsdCol; // if there is no LYD but there is USD, still show USD-only; otherwise at least LYD
   
   // Earnings header (light grey background)
   doc.setDrawColor('#999999');
@@ -1672,9 +1753,20 @@ export default function PayrollPage() {
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.text("EARNINGS", margin + 6, tblY + 16);
-  // Show LYD and USD columns headers
-  if (showLydCol) doc.text("LYD", margin + colW - 160, tblY + 16);
-  if (showUsdCol) doc.text("USD", margin + colW - 80, tblY + 16);
+  // Show LYD and/or USD column headers depending on data presence
+  if (showUsdCol && showLydCol) {
+    doc.text("LYD", margin + colW - 160, tblY + 16);
+    doc.text("USD", margin + colW - 80, tblY + 16);
+  } else if (showUsdCol && !showLydCol) {
+    doc.text("USD", margin + colW - 80, tblY + 16);
+  } else if (showLydCol) {
+    doc.text("LYD", margin + colW - 80, tblY + 16);
+  }
+  // Vertical separators for LYD / USD columns
+  try {
+    if (showLydCol) doc.line(margin + colW - 170, tblY, margin + colW - 170, tblY + 26);
+    if (showUsdCol) doc.line(margin + colW - 90, tblY, margin + colW - 90, tblY + 26);
+  } catch {}
   doc.setFont('helvetica', 'normal');
   
   const row = (label: string, lyd: number, usd: number, yy: number) => {
@@ -1682,57 +1774,112 @@ export default function PayrollPage() {
     (doc as any).setFillColor(240, 240, 240);
     doc.rect(margin, yy, colW, 24, 'F');
     doc.rect(margin, yy, colW, 24);
+    // vertical separators for LYD / USD columns
+    try {
+      if (showLydCol) doc.line(margin + colW - 170, yy, margin + colW - 170, yy + 24);
+      if (showUsdCol) doc.line(margin + colW - 90, yy, margin + colW - 90, yy + 24);
+    } catch {}
+    doc.setFont('helvetica','normal');
     doc.text(label, margin + 6, yy + 15);
     const lydStr = Math.max(0, Number(lyd||0)) > 0.0001 ? `${Math.max(0, Number(lyd||0)).toLocaleString(undefined,{maximumFractionDigits:2})}` : '';
     const usdStr = Math.max(0, Number(usd||0)) > 0.0001 ? `${Math.max(0, Number(usd||0)).toLocaleString(undefined,{maximumFractionDigits:2})}` : '';
-    doc.setTextColor(34, 139, 34);
+    doc.setFont('helvetica','bold');
     if (showLydCol && lydStr) doc.text(lydStr, margin + colW - 160, yy + 15);
     if (showUsdCol && usdStr) doc.text(usdStr, margin + colW - 80, yy + 15);
-    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica','normal');
   };
   
   let ey = tblY + 28;
+  let earningsLydTotal = 0;
+  let earningsUsdTotal = 0;
   {
     // Show base salary only (from v2), and food allowance + split bonuses
     const baseLyd = Math.max(0, Number((v2 as any).base_salary_lyd || emp.baseSalary || 0));
     const baseUsd = Math.max(0, Number((v2 as any).base_salary_usd || 0));
-    if (baseLyd > 0.0001 || baseUsd > 0.0001) { row("Base Salary", baseLyd, baseUsd, ey); ey += 24; }
+    if (baseLyd > 0.0001 || baseUsd > 0.0001) {
+      row("Base", baseLyd, baseUsd, ey);
+      earningsLydTotal += baseLyd;
+      earningsUsdTotal += baseUsd;
+      ey += 24;
+    }
     const foodLyd = Math.max(0, Number(foodLydAdjPDF || 0));
     const foodUsd = 0;
     const foodLabel = `Food`;
-    if (foodLyd > 0.0001 || foodUsd > 0.0001) { row(foodLabel, foodLyd, foodUsd, ey); ey += 24; }
+    if (foodLyd > 0.0001 || foodUsd > 0.0001) {
+      row(foodLabel, foodLyd, foodUsd, ey);
+      earningsLydTotal += foodLyd;
+      earningsUsdTotal += foodUsd;
+      ey += 24;
+    }
     const travelLyd = Math.max(0, Number(travelLydPDF || 0));
-    if (travelLyd > 0.0001) { row('Transportation', travelLyd, 0, ey); ey += 24; }
+    if (travelLyd > 0.0001) {
+      row('Transportation', travelLyd, 0, ey);
+      earningsLydTotal += travelLyd;
+      ey += 24;
+    }
     const commLyd = Math.max(0, Number(commLydPDF || 0));
-    if (commLyd > 0.0001) { row('Communication', commLyd, 0, ey); ey += 24; }
+    if (commLyd > 0.0001) {
+      row('Communication', commLyd, 0, ey);
+      earningsLydTotal += commLyd;
+      ey += 24;
+    }
     const goldLyd = Math.max(0, Number(goldBonusLYDComputed || (v2 as any).gold_bonus_lyd || 0));
     const goldUsd = Math.max(0, Number((v2 as any).gold_bonus_usd || goldBonusUSDComputed || 0));
     const goldLabel = 'Gold Bonus **';
-    if (goldLyd > 0.0001 || goldUsd > 0.0001) { row(goldLabel, goldLyd, goldUsd, ey); ey += 24; }
+    if (goldLyd > 0.0001 || goldUsd > 0.0001) {
+      row(goldLabel, goldLyd, goldUsd, ey);
+      earningsLydTotal += goldLyd;
+      earningsUsdTotal += goldUsd;
+      ey += 24;
+    }
     const diaLyd = Math.max(0, Number(diamondBonusLYDComputed || (v2 as any).diamond_bonus_lyd || 0));
     const diaUsd = Math.max(0, Number(diamondBonusUSDComputed || (v2 as any).diamond_bonus_usd || 0));
     const diaLabel = 'Diamond Bonus *';
-    if (diaLyd > 0.0001 || diaUsd > 0.0001) { row(diaLabel, diaLyd, diaUsd, ey); ey += 24; }
+    if (diaLyd > 0.0001 || diaUsd > 0.0001) {
+      row(diaLabel, diaLyd, diaUsd, ey);
+      earningsLydTotal += diaLyd;
+      earningsUsdTotal += diaUsd;
+      ey += 24;
+    }
     const othLyd = Math.max(0, Number((v2 as any).other_additions_lyd || 0));
     const othUsd = Math.max(0, Number((v2 as any).other_additions_usd || 0));
-    if (othLyd > 0.0001 || othUsd > 0.0001) { row("Other Bonus", othLyd, othUsd, ey); ey += 24; }
+    if (othLyd > 0.0001 || othUsd > 0.0001) {
+      row("Other Bonus", othLyd, othUsd, ey);
+      earningsLydTotal += othLyd;
+      earningsUsdTotal += othUsd;
+      ey += 24;
+    }
     // Net Salary row removed per request (only shown in footer boxes)
   }
+
+  // Earnings totals row (position aligned later with Total Deductions)
+  let earningsTotalY: number | null = null;
+  if (earningsLydTotal > 0.0001 || earningsUsdTotal > 0.0001) {
+    earningsTotalY = ey + 4;
+  }
   
-  // Deductions header (light grey background)
+  // Deductions header (same style as Earnings header)
   const dx = rx; const dy = tblY;
-  doc.setDrawColor('#787575ff');
+  doc.setDrawColor('#999999');
   (doc as any).setFillColor(240, 240, 240);
   doc.rect(dx, dy, colW, 26, 'F');
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.text("DEDUCTIONS", dx + 6, dy + 16);
-  if (showUsdCol) {
+  // Show LYD and/or USD column headers depending on data presence (mirroring Earnings)
+  if (showUsdCol && showLydCol) {
+    doc.text("LYD", dx + colW - 160, dy + 16);
     doc.text("USD", dx + colW - 80, dy + 16);
-    if (showLydCol) doc.text("LYD", dx + colW - 160, dy + 16);
-  } else {
+  } else if (showUsdCol && !showLydCol) {
+    doc.text("USD", dx + colW - 80, dy + 16);
+  } else if (showLydCol) {
     doc.text("LYD", dx + colW - 80, dy + 16);
   }
+  // Vertical separators for LYD / USD columns (same as Earnings header)
+  try {
+    if (showLydCol) doc.line(dx + colW - 170, dy, dx + colW - 170, dy + 26);
+    if (showUsdCol) doc.line(dx + colW - 90, dy, dx + colW - 90, dy + 26);
+  } catch {}
   doc.setFont('helvetica', 'normal');
   
   const wd2 = Math.max(1, emp.workingDays || 1);
@@ -1770,6 +1917,8 @@ export default function PayrollPage() {
   if (otherDedLyd > 0.0001 || otherDedUsd > 0.0001) dRowsDual.push({ label: 'Other Deductions', lyd: otherDedLyd, usd: otherDedUsd });
   
   const maxDedRows = 8;
+  const dedTotalLyd = dRowsDual.reduce((s, r) => s + Math.max(0, Number(r.lyd||0)), 0);
+  const dedTotalUsd = dRowsDual.reduce((s, r) => s + Math.max(0, Number(r.usd||0)), 0);
   const dedRendered = Math.min(maxDedRows, Math.max(dRowsDual.length, 0));
   for (let i = 0; i < dedRendered; i++) {
     const yy2 = dy + 28 + i * 24;
@@ -1777,27 +1926,108 @@ export default function PayrollPage() {
     (doc as any).setFillColor(240, 240, 240);
     doc.rect(dx, yy2, colW, 24, 'F');
     doc.rect(dx, yy2, colW, 24);
+    // vertical separators for LYD / USD columns
+    try {
+      if (showLydCol) doc.line(dx + colW - 170, yy2, dx + colW - 170, yy2 + 24);
+      if (showUsdCol) doc.line(dx + colW - 90, yy2, dx + colW - 90, yy2 + 24);
+    } catch {}
     const rr = dRowsDual[i];
     if (rr) {
       doc.setFontSize(8);
       doc.text(rr.label, dx + 6, yy2 + 15);
       const lydStr = Math.max(0, Number(rr.lyd||0)) > 0.0001 ? `${Math.max(0, Number(rr.lyd||0)).toLocaleString(undefined,{maximumFractionDigits:2})} LYD` : '';
       const usdStr = Math.max(0, Number(rr.usd||0)) > 0.0001 ? `${Math.max(0, Number(rr.usd||0)).toLocaleString(undefined,{maximumFractionDigits:2})} USD` : '';
+      doc.setFont('helvetica','bold');
       if (showUsdCol) {
-        doc.setTextColor(220, 53, 69);
         if (showLydCol && lydStr) doc.text(lydStr, dx + colW - 160, yy2 + 15);
         if (usdStr) doc.text(usdStr, dx + colW - 80, yy2 + 15);
-        doc.setTextColor(0, 0, 0);
       } else {
         const one = lydStr || usdStr;
-        doc.setTextColor(220, 53, 69);
         if (one) doc.text(one, dx + colW - 80, yy2 + 15);
-        doc.setTextColor(0, 0, 0);
       }
+      doc.setFont('helvetica','normal');
+    }
+  }
+  let dedBottomY = dy + 28 + dedRendered * 24;
+  // Deductions totals row (Y will be aligned with Earnings total if both exist)
+  let dedTotalY: number | null = null;
+  if (dedTotalLyd > 0.0001 || dedTotalUsd > 0.0001) {
+    dedTotalY = dedBottomY + 4;
+  }
+
+  // Align Total Earnings and Total Deductions on the same line
+  const hasEarnTotal = earningsTotalY != null;
+  const hasDedTotal = dedTotalY != null;
+  const unifiedTy = hasEarnTotal || hasDedTotal
+    ? Math.max(earningsTotalY ?? (dedTotalY as number), dedTotalY ?? (earningsTotalY as number))
+    : null;
+
+  if (unifiedTy != null) {
+    // Cross out any blank space between last data row and totals to prevent tampering
+    try {
+      if (hasEarnTotal) {
+        const crossTop = ey;
+        const crossBottom = (earningsTotalY as number) - 2;
+        if (crossBottom > crossTop + 2) {
+          doc.setDrawColor('#cccccc');
+          doc.setLineWidth(0.5);
+          doc.line(margin, crossTop, margin + colW, crossBottom);
+        }
+      }
+      if (hasDedTotal) {
+        const crossTopD = dedBottomY;
+        const crossBottomD = (dedTotalY as number) - 2;
+        if (crossBottomD > crossTopD + 2) {
+          doc.setDrawColor('#cccccc');
+          doc.setLineWidth(0.5);
+          doc.line(dx, crossTopD, dx + colW, crossBottomD);
+        }
+      }
+    } catch {}
+
+    // Draw Total Earnings (left) if any
+    if (hasEarnTotal) {
+      const ty = unifiedTy;
+      doc.setDrawColor('#555555');
+      (doc as any).setFillColor(230, 230, 230);
+      doc.rect(margin, ty, colW, 20, 'F');
+      doc.rect(margin, ty, colW, 20);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('Total Earnings', margin + 6, ty + 13);
+      const tLydStr = showLydCol && earningsLydTotal > 0.0001 ? earningsLydTotal.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
+      const tUsdStr = showUsdCol && earningsUsdTotal > 0.0001 ? earningsUsdTotal.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
+      if (showLydCol && tLydStr) doc.text(tLydStr, margin + colW - 160, ty + 13);
+      if (showUsdCol && tUsdStr) doc.text(tUsdStr, margin + colW - 80, ty + 13);
+      doc.setFont('helvetica', 'normal');
+      ey = ty + 20;
+    }
+
+    // Draw Total Deductions (right) if any
+    if (hasDedTotal) {
+      const ty = unifiedTy;
+      doc.setDrawColor('#555555');
+      (doc as any).setFillColor(230, 230, 230);
+      doc.rect(dx, ty, colW, 20, 'F');
+      doc.rect(dx, ty, colW, 20);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('Total Deductions', dx + 6, ty + 13);
+      const tLydStr = dedTotalLyd > 0.0001 ? dedTotalLyd.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
+      const tUsdStr = dedTotalUsd > 0.0001 ? dedTotalUsd.toLocaleString(undefined,{maximumFractionDigits:2}) : '';
+      if (showLydCol && tLydStr) doc.text(tLydStr, dx + colW - 160, ty + 13);
+      if (showUsdCol && tUsdStr) doc.text(tUsdStr, dx + colW - 80, ty + 13);
+      if (!showUsdCol && !showLydCol) {
+        const one = tUsdStr || tLydStr;
+        if (one) doc.text(one, dx + colW - 80, ty + 13);
+      }
+      doc.setFont('helvetica', 'normal');
+      dedBottomY = ty + 20;
     }
   }
 
-  const dedBlockBottom = dy + 28 + dedRendered * 24 + 8;
+  let dedBlockBottom = dedBottomY + 8;
+  let netBandBottomY = dedBlockBottom;
   
   const commissionHasValue = false;
   let twoColBottom = 0;
@@ -1861,7 +2091,7 @@ export default function PayrollPage() {
   // Fetch and render Financial Log (adjustments) if any exist
   let adjRowsPdf: Array<{ type: string; amount: number; currency: string; note?: string; ts?: string }> = [];
   try {
-    const url = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url = `http://localhost:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -1869,8 +2099,8 @@ export default function PayrollPage() {
     }
   } catch {}
   
-  // Filter out zero-amount adjustments and suppress Financial Log output entirely
-  adjRowsPdf = [];
+  // Filter out zero-amount adjustments
+  adjRowsPdf = (adjRowsPdf || []).filter((r) => Number(r.amount || 0) !== 0);
   // Include monthly loan repayment from v2 if present (disabled)
   const loanRepMonth = 0;
   if (loanRepMonth > 0.0001) {
@@ -1878,7 +2108,7 @@ export default function PayrollPage() {
     adjRowsPdf.push({ type: 'loan repayment', amount: loanRepMonth, currency: 'LYD', ts } as any);
   }
   
-  if (adjRowsPdf.length > 0) {
+  if (false && adjRowsPdf.length > 0) {
     if (commissionHasValue) {
       // Right column (side-by-side with Commission Summary)
       const fullW = pageW - margin * 2;
@@ -1968,13 +2198,80 @@ export default function PayrollPage() {
       twoColBottom = Math.max(twoColBottom, ly);
     }
   }
+
+  // Add outer borders around Earnings and Deductions blocks
+  try {
+    const earnTop = tblY;
+    const earnBottom = ey;
+    if (earnBottom > earnTop) {
+      doc.setDrawColor('#555555');
+      doc.rect(margin, earnTop, colW, earnBottom - earnTop);
+    }
+    const dedTop = dy;
+    const dedBottom = dedBottomY;
+    if (dedBottom > dedTop) {
+      doc.setDrawColor('#555555');
+      doc.rect(dx, dedTop, colW, dedBottom - dedTop);
+    }
+  } catch {}
+
+  // Net Pay band just below Earnings/Deductions, above calendar grid
+  const netLydFinal = Math.max(0, Number(netLyd.toFixed(2)));
+  const netUsdFinal = Math.max(0, Number(netUsd.toFixed(2)));
+  const showUsdNet = netUsdFinal > 0.0001;
+  {
+    const bandTop = Math.max(ey, dedBlockBottom, twoColBottom) + 14;
+    const bandW = pageW - margin * 2;
+    const rowH = 26;
+    let yBand = bandTop;
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(11);
+    (doc as any).setFillColor(205,205,205);
+
+    if (showUsdNet) {
+      const halfW = (bandW - 8) / 2;
+      // LYD box (left)
+      doc.rect(margin, yBand, halfW, rowH, 'F');
+      doc.setDrawColor(0,0,0);
+      doc.rect(margin, yBand, halfW, rowH);
+      doc.text('Net Pay LYD', margin + 8, yBand + 14);
+      doc.setFontSize(14);
+      const lydTxt = netLydFinal.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+      const lydW = doc.getTextWidth(lydTxt);
+      doc.text(lydTxt, margin + halfW - lydW - 8, yBand + 14);
+
+      // USD box (right)
+      doc.setFontSize(11);
+      (doc as any).setFillColor(205,205,205);
+      const usdX = margin + halfW + 8;
+      doc.rect(usdX, yBand, halfW, rowH, 'F');
+      doc.setDrawColor(0,0,0);
+      doc.rect(usdX, yBand, halfW, rowH);
+      doc.text('Net Pay USD', usdX + 8, yBand + 14);
+      doc.setFontSize(14);
+      const usdTxt = netUsdFinal.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+      const usdW = doc.getTextWidth(usdTxt);
+      doc.text(usdTxt, usdX + halfW - usdW - 8, yBand + 14);
+      yBand += rowH;
+    } else {
+      // Only LYD full-width
+      doc.rect(margin, yBand, bandW, rowH, 'F');
+      doc.setDrawColor(0,0,0);
+      doc.rect(margin, yBand, bandW, rowH);
+      doc.text('Net Pay LYD', margin + 8, yBand + 14);
+      doc.setFontSize(14);
+      const lydTxt = netLydFinal.toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2});
+      const lydW = doc.getTextWidth(lydTxt);
+      doc.text(lydTxt, margin + bandW - lydW - 8, yBand + 14);
+      yBand += rowH;
+    }
+    netBandBottomY = yBand;
+  }
   
-  const gridTop = Math.max(ey + 8, dedBlockBottom, twoColBottom + 8);
+  const gridTop = Math.max(ey + 8, dedBlockBottom, twoColBottom + 8, netBandBottomY + 8);
   const firstDate = dayjs(periodStart);
   
   // Uniform calendar heights
-  const rowsNeeded = dim > 15 ? 2 : 1;
-  const desiredGap = dim > 15 ? 6 : 0;
   const hWeek = 16;
   const hDayNum = 16;
   const hCell = 40;
@@ -1982,56 +2279,67 @@ export default function PayrollPage() {
   const drawRow = (start: number, end: number, topY: number) => {
     const count = Math.max(1, end - start + 1);
     const usableW = pageW - margin * 2;
-    const cw = Math.floor(usableW / count);
-    const rem = usableW - cw * count;
+    const cw = usableW / count; // exact equal width for all cells
     
-    // Week header - uniform size
+    // Week header - uniform size (grayscale)
     for (let idx = 0; idx < count; idx++) {
       const d = start + idx;
       const x = margin + idx * cw;
-      const wAdj = idx === count - 1 ? (cw + rem) : cw;
-      const wd = firstDate.date(d).format('ddd');
+      const wAdj = cw;
+      const dayIdx = firstDate.date(d).day();
+      const wd = (() => {
+        switch (dayIdx) {
+          case 1: return 'M';   // Monday
+          case 2: return 'Tu';  // Tuesday
+          case 3: return 'W';   // Wednesday
+          case 4: return 'Th';  // Thursday
+          case 5: return 'F';   // Friday
+          case 6: return 'S';   // Saturday
+          case 0: return 'Su';  // Sunday
+          default: return '';
+        }
+      })();
       (doc as any).setFillColor(240,240,240);
       doc.rect(x, topY, wAdj, hWeek, 'F');
-      doc.setDrawColor('#dcdcdc');
+      doc.setDrawColor(180,180,180);
       doc.rect(x, topY, wAdj, hWeek);
       doc.setFontSize(8);
       const w = doc.getTextWidth(wd);
       doc.text(wd, x + ((wAdj) - w)/2, topY + hWeek - 3);
     }
     
-    // Day numbers - uniform size
+    // Day numbers - uniform size (grayscale)
     for (let idx = 0; idx < count; idx++) {
       const d = start + idx;
       const x = margin + idx * cw;
-      const wAdj = idx === count - 1 ? (cw + rem) : cw;
+      const wAdj = cw;
       doc.setDrawColor('#dcdcdc');
       doc.rect(x, topY + hWeek, wAdj, hDayNum);
       doc.setFontSize(8);
       doc.text(String(d), x + 4, topY + hWeek + hDayNum - 5);
     }
     
-    // Cells
+    // Cells (grayscale backgrounds)
     const cellY = topY + hWeek + hDayNum;
     for (let idx = 0; idx < count; idx++) {
       const d = start + idx;
       const x = margin + idx * cw;
-      const wAdj = idx === count - 1 ? (cw + rem) : cw;
+      const wAdj = cw;
       const day = days[d-1] || null;
       const badge = codeBadge(day || undefined, schStartMinPDF, schEndMinPDF);
       const isFri = firstDate.date(d).day() === 5;
       const present = !!day?.present;
       let bg: [number,number,number] | null = null;
-      
-      if (isFri && !present) { bg = [200, 200, 200]; }
+
+      if (isFri && !present) { bg = [215, 215, 215]; }
       else {
         switch (badge) {
-          case 'P': bg = [235, 250, 235]; break;
+          case 'P':  bg = [235, 250, 235]; break; // Present - green tint
+          case 'A':  bg = [253, 236, 234]; break; // Absent - red tint
           case 'PHF': bg = [230,255,230]; break;
           case 'PH':  bg = [255,243,205]; break;
           case 'PT':  bg = [224,247,250]; break;
           case 'PL':  bg = [255,235,238]; break;
-          case 'A':   bg = [253,236,234]; break;
           case 'AL':  bg = [220,240,220]; break;
           case 'SL':  bg = [230,230,255]; break;
           case 'EL':  bg = [255,245,230]; break;
@@ -2044,8 +2352,14 @@ export default function PayrollPage() {
         }
       }
       if (bg) { (doc as any).setFillColor(bg[0], bg[1], bg[2]); doc.rect(x, cellY, wAdj, hCell, 'F'); }
-      doc.setDrawColor('#b7a27d');
+      doc.setDrawColor(140,140,140);
       doc.rect(x, cellY, wAdj, hCell);
+      // Cross out Fridays with no presence
+      if (isFri && !present) {
+        doc.setDrawColor(120,120,120);
+        doc.setLineWidth(0.6);
+        doc.line(x + 2, cellY + 2, x + wAdj - 2, cellY + hCell - 2);
+      }
       doc.setTextColor(0);
       doc.setFontSize(8);
       
@@ -2070,13 +2384,13 @@ export default function PayrollPage() {
       // Missing hours indicator at top-right of cell
       {
         const dm = Number((day as any)?.deltaMin ?? 0);
-        const show = Math.abs(dm) >= 45;
+        const show = (dm < 0 && Math.abs(dm) >= 1) || (dm > 0 && Math.abs(dm) >= 30);
         const sgn = dm > 0 ? '+' : (dm < 0 ? '-' : '');
         const abs = Math.abs(dm);
         const hh = Math.floor(abs / 60);
         const mm = Math.floor(abs % 60);
         const txt = show ? `${sgn}${String(hh)}:${String(mm).padStart(2,'0')}` : '';
-        doc.setFontSize(7);
+        doc.setFontSize(5);
         if (show) {
           if (dm < 0) doc.setTextColor(220, 53, 69); else if (dm > 0) doc.setTextColor(34, 139, 34); else doc.setTextColor(0,0,0);
           const tw = doc.getTextWidth(txt);
@@ -2084,21 +2398,11 @@ export default function PayrollPage() {
           doc.setTextColor(0,0,0);
         }
       }
-      
-      if (badge === 'P' && present) {
-        const es = String((day as any)?.entry || '').slice(11,16);
-        const ss = String((day as any)?.exit || '').slice(11,16);
-        doc.setFontSize(6);
-        const base = cellY + hCell - 10;
-        if (es) doc.text(`${es}`, x + 3, base);
-        if (ss) doc.text(`${ss}`, x + 3, base + 7);
-      }
     }
     return topY + hWeek + hDayNum + hCell;
   };
   
-  let bottomY = drawRow(1, Math.min(15, dim), gridTop);
-  if (dim > 15) bottomY = drawRow(16, dim, bottomY + Math.round(6));
+  let bottomY = drawRow(1, dim, gridTop);
 
   // Reserve after-grid Y
   let afterGridY = bottomY + 12;
@@ -2106,7 +2410,7 @@ export default function PayrollPage() {
 
   // Salary/Allowance change logs
   try {
-    const url2 = `http://192.168.3.60:9000/hr/payroll/change-logs?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url2 = `http://localhost:9000/hr/payroll/change-logs?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res2 = await fetch(url2, { headers: authHeader() as unknown as HeadersInit });
     if (res2.ok) {
       const js2 = await res2.json();
@@ -2148,7 +2452,7 @@ export default function PayrollPage() {
   const tblTop = afterGridY + 8;
   const fullW = pageW - margin*2;
 
-  // Attendance (full-width)
+  // Attendance (full-width, grayscale)
   const allCodes = ['P','A','PT','PHF','PH','PL'] as const;
   const codes = allCodes.filter((c) => Number((counts as any)[c] || 0) > 0);
   const leftW = 80;
@@ -2160,17 +2464,17 @@ export default function PayrollPage() {
   doc.text(attTitle, margin + (fullW - attTitleW)/2, tblTop + 6);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
-  doc.setDrawColor('#b7a27d');
+  doc.setDrawColor('black');
   let ay = tblTop + 14;
   
   const headerBg = (code: string): [number,number,number] | null => {
     switch (code) {
-      case 'PHF': return [230,255,230];
-      case 'PH':  return [255,243,205];
-      case 'PT':  return [224,247,250];
-      case 'PL':  return [255,235,238];
-      case 'A':   return [253,236,234];
-      case 'P':   return [235, 250, 235];
+      case 'PHF': return [235,235,235];
+      case 'PH':  return [230,230,230];
+      case 'PT':  return [240,240,240];
+      case 'PL':  return [225,225,225];
+      case 'A':   return [215,215,215];
+      case 'P':   return [245,245,245];
       default:    return null;
     }
   };
@@ -2185,12 +2489,29 @@ export default function PayrollPage() {
     doc.rect(x, ay, wAdj, 24);
   });
   doc.text('Code', margin + 8, ay + 16);
+  const codeLabel: Record<string,string> = {
+    P: 'Present',
+    A: 'Absent',
+    PT: 'Short',
+    PHF: 'PH Full',
+    PH: 'PH',
+    PL: 'Late',
+  };
   codes.forEach((c, i) => {
     const x = margin + leftW + i*cellW;
     const isLast = i === codes.length - 1;
     const wAdj = isLast ? ((fullW - leftW) - (cellW * (codes.length - 1))) : cellW;
     const tw = doc.getTextWidth(c);
-    doc.text(c, x + (wAdj - tw)/2, ay + 16);
+    // main code
+    doc.text(c, x + (wAdj - tw)/2, ay + 13);
+    // small descriptor beneath
+    const desc = codeLabel[c];
+    if (desc) {
+      doc.setFontSize(7);
+      const dw = doc.getTextWidth(desc);
+      doc.text(desc, x + (wAdj - dw)/2, ay + 21);
+      doc.setFontSize(10);
+    }
   });
   ay += 24;
   
@@ -2213,9 +2534,6 @@ export default function PayrollPage() {
   });
   ay += 24;
 
-  // Missing Hours section removed
-  ay = ay;
-
   // Adjustments table under attendance removed (already shown next to Commission Summary)
   let adjY = ay;
 
@@ -2233,7 +2551,7 @@ export default function PayrollPage() {
   const leaveDaysByCode: Record<string, number> = {};
   
   try {
-    const resLeaves = await fetch(`http://192.168.3.60:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
+    const resLeaves = await fetch(`http://localhost:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
     if (resLeaves.ok) {
       const rows = await resLeaves.json() as LeaveRow[];
       const my = rows.filter(r => Number(r.id_emp) === Number(emp.id_emp) && String(r.state||'').toLowerCase() !== 'rejected');
@@ -2266,7 +2584,7 @@ export default function PayrollPage() {
     doc.text(leavesTitle, margin + (fullW - leavesTitleW)/2, leavesTitleY + 6);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    doc.setDrawColor('#b7a27d');
+    doc.setDrawColor('black');
     
     doc.rect(leavesX, ly2, leavesCols[0], 24);
     doc.rect(leavesX + leavesCols[0], ly2, leavesCols[1], 24);
@@ -2293,83 +2611,44 @@ export default function PayrollPage() {
     leavesBottomY = ly2;
   }
 
-  // Net Salary at absolute bottom (after attendance summary)
-  // Adjust nets to include computed commissions (replace any v2 gold/diamond entries with computed ones)
-  const netLydFinal = Math.max(0, Number(netLyd.toFixed(2)));
-  const netUsdFinal = Math.max(0, Number(netUsd.toFixed(2)));
-  // Always show USD box alongside LYD to avoid hiding when source is 0 or missing
-  const showUsd = true;
-  const boxWBoth = Math.floor((pageW - margin * 2 - 12) / 2);
-  const boxWSolo = pageW - margin * 2;
-  const boxH = 40;
-  const neededHeight = boxH + 70; // boxes + signature area
-  let finalY = pageH - margin - neededHeight; // anchor to bottom of current page
-  const contentBottom = Math.max(ay, adjY, leavesBottomY) + 20;
-  if (contentBottom + neededHeight > pageH - margin) {
-    // Start a new page for the footer to avoid overlap
-    doc.addPage();
-    try { (doc as any).setFillColor(245,245,245); (doc as any).rect(0,0,pageW, doc.internal.pageSize.getHeight(), 'F'); } catch {}
-    finalY = doc.internal.pageSize.getHeight() - margin - neededHeight;
-  }
+  // Compact attendance summary row right above the signature
+  let attCompactBottom = Math.max(ay, leavesBottomY);
+  try {
+    const pTxt = `P (Present)`;
+    const aTxt = `A (Absent)`;
+    const line = `${pTxt} | ${aTxt}`;
+    doc.setFontSize(9);
+    attCompactBottom += 16;
+    doc.text(line, margin, attCompactBottom);
+  } catch {}
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(0, 0, 0);
-
-  if (showUsd) {
-    // LYD box (left)
-    (doc as any).setFillColor(205, 205, 205); // header grey
-    doc.rect(margin, finalY, boxWBoth, boxH, 'F');
-    (doc as any).setDrawColor(0, 0, 0);
-    doc.rect(margin, finalY, boxWBoth, boxH);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Net Pay (LYD)', margin + 8, finalY + 16);
-    doc.setFontSize(14);
-    const lydValLeft = netLydFinal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    doc.setTextColor(0, 0, 0);
-    doc.text(lydValLeft, margin + boxWBoth - doc.getTextWidth(lydValLeft) - 8, finalY + 28);
-    
-    // USD box (right)
-    doc.setFontSize(11);
-    (doc as any).setFillColor(205, 205, 205); // header grey
-    doc.rect(margin + boxWBoth + 12, finalY, boxWBoth, boxH, 'F');
-    (doc as any).setDrawColor(0, 0, 0);
-    doc.rect(margin + boxWBoth + 12, finalY, boxWBoth, boxH);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Net Pay (USD)', margin + boxWBoth + 12 + 8, finalY + 16);
-    doc.setFontSize(14);
-    const usdValRight = netUsdFinal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    doc.setTextColor(0, 0, 0);
-    doc.text(usdValRight, margin + boxWBoth + 12 + boxWBoth - doc.getTextWidth(usdValRight) - 8, finalY + 28);
-  } else {
-    // Only LYD
-    (doc as any).setFillColor(205, 205, 205);
-    doc.rect(margin, finalY, boxWSolo, boxH, 'F');
-    (doc as any).setDrawColor(0, 0, 0);
-    doc.rect(margin, finalY, boxWSolo, boxH);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Net Pay (LYD)', margin + 8, finalY + 16);
-    doc.setFontSize(14);
-    const lydVal = netLyd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    doc.setTextColor(0,0,0);
-    doc.text(lydVal, margin + boxWSolo - doc.getTextWidth(lydVal) - 8, finalY + 28);
-  }
+  // Net Salary at absolute bottom (after compact attendance summary)
+  // (Net Pay values are now shown in the band above the calendar; footer only contains notes/signature.)
+  const footerTop = Math.max(netBandBottomY + 24, attCompactBottom + 24);
 
   // Footnotes for commissions just above the signature
+  let sigBaseY = footerTop;
   try {
     doc.setFont('helvetica','normal');
     doc.setFontSize(9);
     doc.setTextColor(0,0,0);
     const goldWeightUsed = (commissionRole === 'sales_lead' || commissionRole === 'sales_manager') ? goldGramsScope : goldGramsSelf;
-    const foot1 = `* Diamond items sold: ${Number(diamondItems||0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-    const foot2 = `** Gold grams sold: ${Number(goldWeightUsed||0).toLocaleString('en-US', { maximumFractionDigits: 2 })} g`;
-    const footY = finalY + boxH + 20;
-    doc.text(foot1, margin, footY);
-    doc.text(foot2, margin, footY + 12);
+    let footY = footerTop;
+    if (diamondItems > 0) {
+      const foot1 = `* Diamond items sold: ${Number(diamondItems||0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+      doc.text(foot1, margin, footY);
+      footY += 12;
+    }
+    if (goldWeightUsed > 0) {
+      const foot2 = `** Gold grams sold: ${Number(goldWeightUsed||0).toLocaleString('en-US', { maximumFractionDigits: 2 })} g`;
+      doc.text(foot2, margin, footY);
+      footY += 12;
+    }
+    sigBaseY = footY + 8;
   } catch {}
 
-  // Employee Signature field lower near the absolute bottom (label only)
-  const sigY = Math.min(doc.internal.pageSize.getHeight() - margin - 22, finalY + boxH + 40);
+  // Employee Signature field at the absolute bottom (label only)
+  const sigY = doc.internal.pageSize.getHeight() - margin - 22;
   const sigWidth = 360;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(12);
@@ -2408,118 +2687,42 @@ export default function PayrollPage() {
   const exportPdfClient = async (emp: Payslip) => {
     try {
       const { dataUrl, blobUrl, filename } = await buildPayslipPdf(emp);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = blobUrl || dataUrl;
       a.download = filename;
       a.click();
     } catch (e) {
-      alert((e as any)?.message || 'Failed to build PDF');
+      alert((e as any)?.message || "Failed to build PDF");
     }
+  };
+
+  const buildPayslipPdfBase64 = async (emp: Payslip) => {
+    const { dataUrl, blobUrl, filename } = await buildPayslipPdf(emp);
+    // Strip the data URL prefix if present
+    const base64 = dataUrl.includes(",")
+      ? dataUrl.split(",")[1]
+      : dataUrl;
+    return { base64, blobUrl, filename };
   };
 
   const sendPayslipEmailClient = async (emp: Payslip) => {
     try {
-      const days = await ensureTimesheetDays(emp.id_emp);
-      const { dataUrl, filename } = await buildPayslipPdf(emp);
-      const prettyMonth = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).format('MMMM YYYY');
-      const subject = `Payslip — ${prettyMonth}`;
-      const disp = String(nameMap[emp.id_emp] ?? emp.name ?? emp.id_emp);
-      // Recompute with overrides for email summary
-      const baseLyd = Number(emp.components?.basePay || 0);
-      const allowLyd = Number(emp.components?.allowancePay || 0);
-      const netLyd = Number(emp.total || 0);
-      const netUsd = usdToLyd > 0 ? Number((netLyd / usdToLyd).toFixed(2)) : 0;
-      // Counts and missing hours
-      const totalMissingMin = days.reduce((acc, d) => acc + ((d?.deltaMin ?? 0) < 0 ? Math.abs(d!.deltaMin!) : 0), 0);
-      const mh = Math.floor(totalMissingMin / 60); const mm = Math.floor(totalMissingMin % 60);
-      const counts: Record<string, number> = { P:0, A:0, PHF:0, PH:0, PT:0, PL:0 };
-      days.forEach(d => { const c = (codeBadge(d) || ''); if (c in counts) counts[c]++; });
-      // Fetch adjustments and leaves for email (DD/MM/YYYY; leaves use working days only)
-      const adjUrl = `http://192.168.3.60:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
-      let adjRows: Array<{ ts?:string; type:string; amount:number; currency:string; note?:string }> = [];
-      try {
-        const r = await fetch(adjUrl, { headers: authHeader() as unknown as HeadersInit });
-        if (r.ok) { const js = await r.json(); adjRows = (js?.data?.[String(emp.id_emp)] || []) as any[]; }
-      } catch {}
-      const monthStart = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).format('YYYY-MM-DD');
-      const monthEnd = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).endOf('month').format('YYYY-MM-DD');
-      type LeaveRow2 = { id_emp:number; type:string|null; date_depart:string; date_end:string; state?:string|null; nbr_jour?:number };
-      const leaveName: Record<string,string> = { AL:'Annual Leave', SL:'Sick Leave', EL:'Emergency Leave', ML:'Maternity Leave', XL:'Exam Leave', BM:'Bereavement', UL:'Unpaid Leave', HL:'Half-day Leave' };
-      const leaveRanges: Record<string, Array<{ start:string; end:string }>> = {};
-      const leaveDaysByCode: Record<string, number> = {};
-      try {
-        const r = await fetch(`http://192.168.3.60:9000/leave/vacations-range?from=${monthStart}&to=${monthEnd}`, { headers: authHeader() as unknown as HeadersInit });
-        if (r.ok) {
-          const rows = await r.json() as LeaveRow2[];
-          const my = rows.filter(v => Number(v.id_emp) === Number(emp.id_emp) && String(v.state||'').toLowerCase() !== 'rejected');
-          my.forEach(v => {
-            const code = (v.type||'').toUpperCase(); if (!code || !(code in leaveName)) return;
-            const s = dayjs(v.date_depart); const e = dayjs(v.date_end);
-            const ms = dayjs(monthStart); const me = dayjs(monthEnd);
-            const sClamp = s.isAfter(ms)?s:ms; const eClamp = e.isBefore(me)?e:me;
-            (leaveRanges[code] ||= []).push({ start: sClamp.format('DD/MM/YYYY'), end: eClamp.format('DD/MM/YYYY') });
-            leaveDaysByCode[code] = (leaveDaysByCode[code]||0) + Number(v.nbr_jour||0);
-          });
-        }
-      } catch {}
+      const { base64, filename } = await buildPayslipPdfBase64(emp);
 
-      const b = '#b7a27d';
-      const th = 'style="font-weight:700;text-align:center;border:1px solid '+b+';padding:6px;"';
-      const td = 'style="border:1px solid '+b+';padding:6px;"';
-      const tdC = 'style="border:1px solid '+b+';padding:6px;text-align:center;"';
-      const section = (title: string, header: string[], rows: string[][]) => `
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0;">
-          <tr><td colspan="${header.length}" style="text-align:center;font-weight:700;padding:4px 0;">${title}</td></tr>
-          <tr>${header.map(h=>`<td ${th}>${h}</td>`).join('')}</tr>
-          ${rows.map(r=>`<tr>${r.map((c,i)=>`<td ${i===1?tdC:td}>${c}</td>`).join('')}</tr>`).join('')}
-        </table>`;
+      await sendPayslipClient({
+        employeeId: emp.id_emp,
+        year,
+        month,
+        pdfBase64: base64,
+        filename,
+        to:
+          (emp as any).EMAIL ||
+          (emp as any).email ||
+          (emp as any).work_email ||
+          (emp as any).personal_email ||
+          "", // if this ends up empty, backend will fall back to employee EMAIL or hr@
+      });
 
-      const attRowsEmail: string[][] = [
-        ['Present (P)', String(counts.P)],
-        ['Absent (A)', String(counts.A)],
-        ['Present (Friday) (PT)', String(counts.PT)],
-        ['Public Holiday (Worked) (PHF)', String(counts.PHF)],
-        ['Public Holiday (PH)', String(counts.PH)],
-        ['Partial/Late (PL)', String(counts.PL)],
-      ];
-      const adjRowsEmail: string[][] = (adjRows||[]).map(r=>[
-        r.ts ? dayjs(r.ts).format('DD/MM/YYYY') : '',
-        `${r.currency} ${Number(r.amount||0).toFixed(2)}`,
-        r.note ? String(r.note) : ''
-      ]);
-      const leaveRowsEmail: string[][] = Object.keys(leaveName)
-        .filter(k=>leaveRanges[k]?.length)
-        .map(k=>[
-          `${leaveName[k]} (${k})`,
-          String(leaveDaysByCode[k]||0),
-          leaveRanges[k].map(r=>`${r.start} — ${r.end}`).join(', ')
-        ]);
-
-      const grid = `
-        <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:10px 0;width:100%;">
-          <tr>
-            <td valign="top" style="padding-right:12px;">${section('Attendance Summary',['Code','Count'], attRowsEmail)}</td>
-            <td valign="top" style="padding:0 12px;">${section('Adjustments Log',['Date','Amount','Note'], adjRowsEmail)}</td>
-            <td valign="top" style="padding-left:12px;">${section('Leaves This Month',['Leave','Days','Dates'], leaveRowsEmail)}</td>
-          </tr>
-        </table>`;
-
-      const html = `
-        <div style="font-family:Inter,Arial,sans-serif;">
-          <h2 style="margin:0 0 8px;">${disp}'s Payslip — ${prettyMonth}</h2>
-          <p style="margin:0 0 8px;">Dear ${disp} (ID: ${emp.id_emp}),</p>
-          <p style="margin:0 0 8px;">Please find attached your payslip. Summary below:</p>
-          ${grid}
-          <table cellpadding="6" cellspacing="0" style="border-collapse:collapse;border:1px solid ${b};min-width:520px;margin-top:8px;">
-            <tr><td><b>Working days</b></td><td>${emp.workingDays}</td><td><b>Missing Hours</b></td><td>${String(mh).padStart(2,'0')}:${String(mm).padStart(2,'0')}</td></tr>
-            <tr><td><b>Base salary (used)</b></td><td>${emp.baseSalary.toFixed(2)} LYD</td><td><b>Allowance/day (used)</b></td><td>${emp.allowancePerDay.toFixed(2)} LYD</td></tr>
-            <tr><td><b>Base Pay</b></td><td>${baseLyd.toFixed(2)} LYD</td><td><b>Allowance Pay</b></td><td>${allowLyd.toFixed(2)} LYD</td></tr>
-            <tr><td><b>Net Pay (USD)</b></td><td>${netUsd.toFixed(2)}</td><td><b>Net Pay (LYD)</b></td><td>${netLyd.toFixed(2)}</td></tr>
-            <tr><td><b>Total</b></td><td colspan="3"><b>${netLyd.toFixed(2)} LYD</b></td></tr>
-          </table>
-          <p style="margin:8px 0 0;">If anything looks incorrect, please contact HR.</p>
-        </div>`;
-      await sendPayslipClient({ employeeId: emp.id_emp, year, month, pdfBase64: dataUrl, filename, subject, html });
       alert("Payslip sent");
     } catch (e: any) {
       alert(e?.message || "Failed to send payslip");
@@ -2531,11 +2734,12 @@ export default function PayrollPage() {
       <Card sx={{ mb: 2 }}>
   <CardContent>
     <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 1 }} TabIndicatorProps={{ sx: { display: 'none' } }}>
-      <Tab label={t("Payroll") || "Payroll"} value="payroll" />
-      <Tab label={t("Salary Advance") || "Salary Advance"} value="advances" />
-      <Tab label={t("Loans") || "Loans"} value="loans" />
-      {isAdmin && (<Tab label={t("Settings") || "Settings"} value="settings" />)}
-    </Tabs>
+        <Tab label={t("Payroll") || "Payroll"} value="payroll" />
+        <Tab label={t("Salary Advance") || "Salary Advance"} value="advances" />
+        <Tab label={t("Loans") || "Loans"} value="loans" />
+        <Tab label={t("Adjustments") || "Adjustments"} value="adjustments" />
+        {isAdmin && (<Tab label={t("Settings") || "Settings"} value="settings" />)}
+      </Tabs>
 
     {tab === "payroll" && (
       <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>
@@ -2599,9 +2803,13 @@ export default function PayrollPage() {
             value={positionFilter}
             onChange={(e) => setPositionFilter(e.target.value)}
           >
-            <MenuItem value="all">{t("All Positions") || "All Positions"}</MenuItem>
+            <MenuItem value="all">
+              {t("All Positions") || "All Positions"}
+            </MenuItem>
             {positionOptions.map((pos) => (
-              <MenuItem key={pos} value={pos}>{pos}</MenuItem>
+              <MenuItem key={pos.id} value={String(pos.id)}>
+                {pos.label}
+              </MenuItem>
             ))}
           </TextField>
         </Box>
@@ -2615,7 +2823,7 @@ export default function PayrollPage() {
           />
         </Box>
 
-        {/* Actions: export CSV, export PDF, save, close month */}
+        {/* Actions: export CSV, export PDF, save, close month, bulk send */}
         <Box display="flex" flexWrap="wrap" alignItems="center" gap={1.5}>
           <Button
             variant="outlined"
@@ -2627,7 +2835,7 @@ export default function PayrollPage() {
                 "Deduction Days",
                 "Present Days",
                 "Holidays Worked",
-                "Base Salary",
+                "Base",
                 "Food",
                 "Transportation",
                 "Communication",
@@ -2738,8 +2946,11 @@ export default function PayrollPage() {
                 36,
                 32
               );
+
               let y0 = 48;
-              const header = [
+
+              // Base header
+              const header: string[] = [
                 "Employee",
                 "WD",
                 "DD",
@@ -2749,24 +2960,37 @@ export default function PayrollPage() {
                 "Allow",
               ];
               const colX: number[] = [36, 220, 260, 300, 340, 380, 450];
-              if (cols.advances) { header.push("Adv"); colX.push(520); }
-              if (cols.loans)    { header.push("Loan"); colX.push(560); }
+
+              // Extra columns – make sure X positions never overlap
+              if (cols.advances) {
+                header.push("Adv");
+                colX.push(520);
+              }
+              if (cols.loans) {
+                header.push("Loan");
+                colX.push(560);
+              }
               if (cols.salesQty) {
                 header.push("Qty");
-                colX.push(560);
+                colX.push(600);
               }
               if (cols.salesTotal) {
                 header.push("Sales");
-                colX.push(600);
+                colX.push(640);
               }
+
               header.push("Total");
-              colX.push(620);
+              colX.push(680);
+
               if (cols.totalUsd) {
                 header.push("USD");
-                colX.push(720);
+                colX.push(740);
               }
+
+              // Header row
               header.forEach((h, i) => doc.text(h, colX[i], y0));
               y0 += 16;
+
               displayedRows.forEach((e) => {
                 const s = sales[String(e.id_emp)] || {
                   qty: 0,
@@ -2778,22 +3002,26 @@ export default function PayrollPage() {
                   advance: 0,
                   loanPayment: 0,
                 };
-                const netAdj =
-                  (adj.bonus || 0) -
-                  ((adj.deduction || 0) +
-                    (adj.advance || 0) +
-                    (adj.loanPayment || 0));
+
                 const W = Math.max(1, e.workingDays || 1);
                 const F =
                   e.factorSum != null && e.factorSum > 0
                     ? e.factorSum
                     : (e.components?.basePay || 0) /
                       (Math.max(1, e.baseSalary || 0) / W);
+
                 const baseUsd = e.baseSalaryUsd
                   ? (e.baseSalaryUsd / W) * F
                   : 0;
-                const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
-                const commUsd = Number((vr as any).diamond_bonus_usd || 0) + Number((vr as any).gold_bonus_usd || 0);
+
+                const vr =
+                  (v2Rows || []).find(
+                    (x: any) => Number(x.id_emp) === Number(e.id_emp)
+                  ) || {};
+                const commUsd =
+                  Number((vr as any).diamond_bonus_usd || 0) +
+                  Number((vr as any).gold_bonus_usd || 0);
+
                 const vals: any[] = [
                   e.name,
                   e.workingDays,
@@ -2803,13 +3031,19 @@ export default function PayrollPage() {
                   (e.components?.basePay || 0).toFixed(0),
                   (e.components?.allowancePay || 0).toFixed(0),
                 ];
-                if (cols.advances) vals.push((Number(adj.advance||0)*-1).toFixed(2));
-                if (cols.loans)    vals.push((Number(adj.loanPayment||0)*-1).toFixed(2));
+
+                if (cols.advances)
+                  vals.push((Number(adj.advance || 0) * -1).toFixed(2));
+                if (cols.loans)
+                  vals.push((Number(adj.loanPayment || 0) * -1).toFixed(2));
                 if (cols.salesQty) vals.push((s.qty || 0).toFixed(0));
                 if (cols.salesTotal)
                   vals.push((s.total_lyd || 0).toFixed(2));
+
                 vals.push(computeNetLYDFor(e.id_emp).toFixed(2));
-                if (cols.totalUsd) vals.push((baseUsd + commUsd).toFixed(0));
+                if (cols.totalUsd)
+                  vals.push((baseUsd + commUsd).toFixed(0));
+
                 vals.forEach((v, i) => doc.text(String(v), colX[i], y0));
                 y0 += 14;
                 if (y0 > 560) {
@@ -2817,6 +3051,7 @@ export default function PayrollPage() {
                   y0 = 36;
                 }
               });
+
               doc.save(
                 `payroll_${year}_${String(month).padStart(2, "0")}.pdf`
               );
@@ -2825,36 +3060,48 @@ export default function PayrollPage() {
             {t("Export PDF") || "Export PDF"}
           </Button>
 
-          {!viewOnly && (
-            <Button
-              variant="contained"
-              onClick={async () => {
-                const bankAcc = window.prompt("Bank/Cash Account No", "");
-                if (!bankAcc) return;
-                const salaryExpenseAcc = window.prompt(
-                  "Salary Expense Account No",
-                  ""
-                );
-                if (!salaryExpenseAcc) return;
-                const note = window.prompt("Note", "");
-                try {
-                  await closePayrollV2({
-                    year,
-                    month,
-                    bankAcc,
-                    salaryExpenseAcc,
-                    note: note || undefined,
-                  });
-                  alert("Month closed");
-                  setViewOnly(true);
-                } catch (e: any) {
-                  alert(e?.message || "Failed to close");
-                }
-              }}
-            >
-              {t("Close Month") || "Close Month"}
-            </Button>
-          )}
+          <Button
+            variant="outlined"
+            onClick={() => {
+              const sel: Record<number, boolean> = {};
+              (displayedRows || []).forEach(e => { sel[e.id_emp] = true; });
+              setSendSelection(sel);
+              setSendDialogOpen(true);
+            }}
+          >
+            {t("Send Payslips") || "Send Payslips"}
+          </Button>
+
+          <Button
+            variant="contained"
+            disabled={viewOnly}
+            onClick={async () => {
+              if (viewOnly) return;
+              const bankAcc = window.prompt("Bank/Cash Account No", "");
+              if (!bankAcc) return;
+              const salaryExpenseAcc = window.prompt(
+                "Salary Expense Account No",
+                ""
+              );
+              if (!salaryExpenseAcc) return;
+              const note = window.prompt("Note", "");
+              try {
+                await closePayrollV2({
+                  year,
+                  month,
+                  bankAcc,
+                  salaryExpenseAcc,
+                  note: note || undefined,
+                });
+                alert("Month closed");
+                setViewOnly(true);
+              } catch (e: any) {
+                alert(e?.message || "Failed to close");
+              }
+            }}
+          >
+            {t("Close Month") || "Close Month"}
+          </Button>
         </Box>
       </Box>
     )}
@@ -2880,7 +3127,7 @@ export default function PayrollPage() {
                 const emp = (result?.employees || []).find((x) => x.id_emp === adjEmpId);
                 if (!emp) return null;
                 const salary = Number(emp.baseSalary || 0);
-                const maxAdvance = salary * 0.5;
+                const maxAdvance = salary * (advanceMaxPercent / 100);
                 const availableAdvance = Math.max(0, maxAdvance - existingAdvances);
                 return (
                   <Box display="grid" gap={1.5} maxWidth={400}>
@@ -2898,7 +3145,7 @@ export default function PayrollPage() {
                         setAdjForm((f) => ({ ...f, amount: String(clamped) }));
                       }}
                       inputProps={{ step: "0.01", min: 0, max: availableAdvance }}
-                      helperText={`Available: ${availableAdvance.toFixed(2)} LYD (50% - existing advances)`}
+                      helperText={`Available: ${availableAdvance.toFixed(2)} LYD (${advanceMaxPercent}% - existing advances)`}
                     />
                     <Button
                       variant="contained"
@@ -2913,7 +3160,7 @@ export default function PayrollPage() {
                             return;
                           }
                           if (amt + existingAdvances > maxAdvance) {
-                            alert(`Total advances cannot exceed 50% of salary (${maxAdvance.toFixed(2)} LYD)`);
+                            alert(`Total advances cannot exceed ${advanceMaxPercent}% of salary (${maxAdvance.toFixed(2)} LYD)`);
                             setAdjLoading(false);
                             return;
                           }
@@ -2926,7 +3173,7 @@ export default function PayrollPage() {
                             currency: "LYD",
                             note: "salary advance",
                           };
-                          const res = await fetch(`http://192.168.3.60:9000/hr/payroll/adjustments`, {
+                          const res = await fetch(`http://localhost:9000/hr/payroll/adjustments`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json", ...authHeader() } as unknown as HeadersInit,
                             body: JSON.stringify(payload),
@@ -2970,10 +3217,12 @@ export default function PayrollPage() {
                 {(() => {
                   const emp = (result?.employees || []).find((x) => x.id_emp === adjEmpId);
                   if (!emp) return null;
+                  const salary = Number(emp.baseSalary || 0);
+                  const maxPrincipal = salary * loanMaxMultiple;
                   return (
                     <Box display="grid" gap={1.5} maxWidth={400}>
                       <Typography variant="caption">
-                        Salary: {emp.baseSalary.toFixed(2)} LYD
+                        Salary: {salary.toFixed(2)} LYD — Max Principal: {(maxPrincipal || 0).toFixed(2)} LYD ({loanMaxMultiple}×)
                       </Typography>
                       {(() => {
                         const csStr = contractStartMap[adjEmpId!] || null;
@@ -3013,6 +3262,14 @@ export default function PayrollPage() {
                               setAdjLoading(false);
                               return;
                             }
+                            const emp = (result?.employees || []).find((x) => x.id_emp === adjEmpId);
+                            const baseSalary = Number(emp?.baseSalary || 0);
+                            const maxPrincipal = baseSalary * loanMaxMultiple;
+                            if (baseSalary > 0 && principal > maxPrincipal) {
+                              alert(`Loan exceeds maximum allowed (${loanMaxMultiple}× salary). Max: ${maxPrincipal.toFixed(2)} LYD`);
+                              setAdjLoading(false);
+                              return;
+                            }
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(adjEmpId)) || {} as any;
                             const csRaw = contractStartMap[adjEmpId!] || (vr as any).CONTRACT_START || (vr as any).contract_start || (vr as any).contractStart || (vr as any).T_START;
                             if (!csRaw) {
@@ -3031,8 +3288,8 @@ export default function PayrollPage() {
                               principal,
                               startYear: year,
                               startMonth: month,
-                              monthlyPercent: 0.25,
-                              capMultiple: 3,
+                              monthlyPercent: loanMonthlyPercent / 100,
+                              capMultiple: loanMaxMultiple,
                             });
                             try {
                               const empName = (result?.employees || []).find((x)=>x.id_emp===adjEmpId)?.name || String(adjEmpId);
@@ -3048,10 +3305,10 @@ export default function PayrollPage() {
                                 doc2.text(`Employee: ${empName} (ID: ${adjEmpId})`, 36, 56);
                                 doc2.text(`Principal: ${principal.toFixed(2)} LYD`, 36, 72);
                                 doc2.text(`Start: ${String(year)}-${String(month).padStart(2,'0')}`, 36, 88);
-                                doc2.text(`Monthly Deduction: 25%`, 36, 104);
+                                doc2.text(`Monthly Deduction: ${loanMonthlyPercent.toFixed(2)}%`, 36, 104);
                                 const dataUrl2 = doc2.output('datauristring');
                                 const subject = `Loan Issued — ${empName} (${adjEmpId})`;
-                                const html = `<div><p>Loan issued for employee <b>${empName}</b> (ID: ${adjEmpId}).</p><p>Principal: ${principal.toFixed(2)} LYD<br/>Start: ${String(year)}-${String(month).padStart(2,'0')}<br/>Monthly Deduction: 25%</p></div>`;
+                                const html = `<div><p>Loan issued for employee <b>${empName}</b> (ID: ${adjEmpId}).</p><p>Principal: ${principal.toFixed(2)} LYD<br/>Start: ${String(year)}-${String(month).padStart(2,'0')}<br/>Monthly Deduction: ${loanMonthlyPercent.toFixed(2)}%</p></div>`;
                                 await sendPayslipClient({ to: toList, subject, html, pdfBase64: dataUrl2, filename: `loan_${adjEmpId}_${year}${String(month).padStart(2,'0')}.pdf` });
                               }
                             } catch {}
@@ -3139,6 +3396,166 @@ export default function PayrollPage() {
             </Box>
           )}
 
+          {tab === "adjustments" && (
+            <Box display="grid" gap={2}>
+              <Typography variant="subtitle1">
+                {t("Adjustments") || "Adjustments"}
+              </Typography>
+
+              <TextField
+                select
+                size="small"
+                label={t("Employee") || "Employee"}
+                value={adjEmpId || ""}
+                onChange={(e) => setAdjEmpId(Number(e.target.value) || null)}
+                sx={{ maxWidth: 400 }}
+              >
+                {(result?.employees || []).map((emp) => (
+                  <MenuItem key={emp.id_emp} value={emp.id_emp}>
+                    {emp.name} (ID: {emp.id_emp})
+                  </MenuItem>
+                ))}
+              </TextField>
+
+              {adjEmpId && (
+                <Box display="grid" gap={2} sx={{ maxWidth: 900 }}>
+                  <Box>
+                    {(adjRows || []).length === 0 && (
+                      <Typography variant="body2" color="text.secondary">
+                        {t("No adjustments yet") || "No adjustments yet"}
+                      </Typography>
+                    )}
+                    {(adjRows || []).map((r, idx) => {
+                      const opt = adjTypeOptions.find((o) => o.value === r.type);
+                      const label = opt?.label || r.type;
+                      const amt = Number(r.amount || 0).toFixed(2);
+                      const dateStr = r.ts ? dayjs(r.ts).format("YYYY-MM-DD HH:mm") : "";
+                      return (
+                        <Box
+                          key={idx}
+                          display="flex"
+                          justifyContent="space-between"
+                          alignItems="flex-start"
+                          sx={{ py: 0.5, borderBottom: '1px dashed', borderColor: 'divider' }}
+                        >
+                          <Box>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              {label}
+                            </Typography>
+                            {r.note && (
+                              <Typography variant="body2" color="text.secondary">
+                                {r.note}
+                              </Typography>
+                            )}
+                            {dateStr && (
+                              <Typography variant="caption" color="text.secondary">
+                                {dateStr}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {r.currency} {amt}
+                          </Typography>
+                        </Box>
+                      );
+                    })}
+                    {Object.keys(adjTypeTotals).length > 0 && (
+                      <Box mt={1.5} p={1} sx={{ borderRadius: 1, border: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          {t('Totals this month') || 'Totals this month'}
+                        </Typography>
+                        {Object.entries(adjTypeTotals).map(([type, totals]) => {
+                          const opt = adjTypeOptions.find((o) => o.value === type);
+                          const label = opt?.label || type;
+                          const parts: string[] = [];
+                          if (totals.lyd) parts.push(`${totals.lyd.toFixed(2)} LYD`);
+                          if (totals.usd) parts.push(`${totals.usd.toFixed(2)} USD`);
+                          if (parts.length === 0) return null;
+                          return (
+                            <Box key={type} display="flex" justifyContent="space-between" sx={{ py: 0.25 }}>
+                              <Typography variant="body2">{label}</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                {parts.join('  |  ')}
+                              </Typography>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    )}
+                  </Box>
+
+                  <Divider sx={{ my: 1.5 }} />
+
+                  <Box display="grid" gridTemplateColumns="repeat(4, 1fr)" gap={1}>
+                    <TextField
+                      select
+                      size="small"
+                      label={t("Type") || "Type"}
+                      value={adjForm.type}
+                      onChange={(e) => {
+                        const nextType = e.target.value;
+                        setAdjForm((f) => ({
+                          ...f,
+                          type: nextType,
+                          currency: adjLydOnlyTypes.has(nextType) ? 'LYD' : f.currency,
+                        }));
+                      }}
+                    >
+                      {adjTypeOptions.map((opt) => (
+                        <MenuItem key={opt.value} value={opt.value}>
+                          {t(opt.label) || opt.label}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField
+                      size="small"
+                      type="number"
+                      label={t("Amount") || "Amount"}
+                      value={adjForm.amount}
+                      onChange={(e) =>
+                        setAdjForm((f) => ({ ...f, amount: e.target.value }))
+                      }
+                      inputProps={{ step: "0.01" }}
+                    />
+                    <TextField
+                      select
+                      size="small"
+                      label={t("Currency") || "Currency"}
+                      value={adjForm.currency}
+                      onChange={(e) =>
+                        setAdjForm((f) => ({ ...f, currency: e.target.value }))
+                      }
+                      disabled={adjLydOnlyTypes.has(adjForm.type)}
+                    >
+                      {["LYD", "USD"].map((x) => (
+                        <MenuItem key={x} value={x}>
+                          {x}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField
+                      size="small"
+                      label={t("Note") || "Note"}
+                      value={adjForm.note}
+                      onChange={(e) =>
+                        setAdjForm((f) => ({ ...f, note: e.target.value }))
+                      }
+                    />
+                  </Box>
+                  <Box mt={1} display="flex" justifyContent="flex-end">
+                    <Button
+                      onClick={addAdjustment}
+                      variant="contained"
+                      disabled={adjLoading}
+                    >
+                      {t("common.add") || "Add"}
+                    </Button>
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          )}
+
     {tab === "settings" && (() => {
       if (!isAdmin) return <Typography color="error">{t('Access denied') || 'Access denied'}</Typography>;
       return (
@@ -3182,7 +3599,7 @@ export default function PayrollPage() {
                           <Typography variant="caption" color="text.secondary">{t('PS') || 'PS'}: {Array.isArray(row.ps) && row.ps.length ? row.ps.join(', ') : '-'}</Typography>
                         </Box>
                         <Box sx={{ display:'flex', alignItems:'center', gap: 1, flexWrap:'wrap', mt: 1 }}>
-                          <TextField select size="small" sx={{ minWidth: 180 }} label={t('Gold Commission') || 'Gold Commission'} value={val('GOLD_COMM') || ''} onChange={(e)=> setDirty({ GOLD_COMM: e.target.value || '' })}>
+                          <TextField select size="small" sx={{ minWidth: 180 }} label={t('Gold Commission') || 'Gold Comm'} value={val('GOLD_COMM') || ''} onChange={(e)=> setDirty({ GOLD_COMM: e.target.value || '' })}>
                             <MenuItem value="">{t('None') || 'None'}</MenuItem>
                             <MenuItem value="percent">Percent</MenuItem>
                             <MenuItem value="fixed">Fixed</MenuItem>
@@ -3190,7 +3607,7 @@ export default function PayrollPage() {
                           {((val('GOLD_COMM') === 'percent') || (val('GOLD_COMM') === 'fixed')) && (
                             <TextField size="small" type="number" sx={{ width: 180 }} label={(val('GOLD_COMM') === 'percent') ? (t('Gold %') || 'Gold %') : (t('Gold Fixed (LYD)') || 'Gold Fixed (LYD)')} value={(val('GOLD_COMM_VALUE') ?? '')} onChange={(e)=> setDirty({ GOLD_COMM_VALUE: e.target.value === '' ? null : Number(e.target.value) })} inputProps={{ step: (val('GOLD_COMM') === 'percent') ? 0.1 : 1 }} />
                           )}
-                          <TextField select size="small" sx={{ minWidth: 200 }} label={t('Diamond Commission') || 'Diamond Commission'} value={val('DIAMOND_COMM_TYPE') || ''} onChange={(e)=> setDirty({ DIAMOND_COMM_TYPE: e.target.value || '' })}>
+                          <TextField select size="small" sx={{ minWidth: 200 }} label={t('Diamond Comm') || 'Diamond Comm'} value={val('DIAMOND_COMM_TYPE') || ''} onChange={(e)=> setDirty({ DIAMOND_COMM_TYPE: e.target.value || '' })}>
                             <MenuItem value="">{t('None') || 'None'}</MenuItem>
                             <MenuItem value="percent">Percent</MenuItem>
                             <MenuItem value="fixed">Fixed</MenuItem>
@@ -3216,7 +3633,7 @@ export default function PayrollPage() {
                 type="number"
                 size="small"
                 sx={{ width: 160 }}
-                label={t('Max Loan Multiple of Salary') || 'Max Loan Multiple of Salary'}
+                label={t('Max Multiple of Salary') || 'Max Multiple of Salary'}
                 value={loanMaxMultiple}
                 onChange={(e) => {
                   const v = Number(e.target.value);
@@ -3230,7 +3647,7 @@ export default function PayrollPage() {
                 type="number"
                 size="small"
                 sx={{ width: 160 }}
-                label={t('Loan Monthly Deduction %') || 'Loan Monthly Deduction %'}
+                label={t('Monthly Deduction %') || 'Monthly Deduction %'}
                 value={loanMonthlyPercent}
                 onChange={(e) => {
                   const v = Number(e.target.value);
@@ -3248,7 +3665,7 @@ export default function PayrollPage() {
                 type="number"
                 size="small"
                 sx={{ width: 200 }}
-                label={t('Max Advance % of Monthly Salary') || 'Max Advance % of Monthly Salary'}
+                label={t('Max % of Monthly Salary') || 'Max % of Monthly Salary'}
                 value={advanceMaxPercent}
                 onChange={(e) => {
                   const v = Number(e.target.value);
@@ -3259,22 +3676,6 @@ export default function PayrollPage() {
                 inputProps={{ step: 0.5, min: 0, max: 100 }}
               />
             </Box>
-            <TextField
-              size="small"
-              fullWidth
-              label={t('HR Emails (comma separated)') || 'HR Emails (comma separated)'}
-              placeholder="hr@example.com, hr2@example.com"
-              value={hrEmails}
-              onChange={(e)=>{ setHrEmails(e.target.value); try{ localStorage.setItem('payroll_settings_hr_emails', e.target.value);}catch{} }}
-            />
-            <TextField
-              size="small"
-              fullWidth
-              label={t('Finance Emails (comma separated)') || 'Finance Emails (comma separated)'}
-              placeholder="finance@example.com, fin2@example.com"
-              value={financeEmails}
-              onChange={(e)=>{ setFinanceEmails(e.target.value); try{ localStorage.setItem('payroll_settings_finance_emails', e.target.value);}catch{} }}
-            />
             <Box sx={{ p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
               <Typography variant="caption" color="info.contrastText">
                 {t('Note: These limits are enforced at the application level. Contact system administrator to modify core parameters.') || 'Note: These limits are enforced at the application level. Contact system administrator to modify core parameters.'}
@@ -3315,30 +3716,31 @@ export default function PayrollPage() {
                   "& td, & th": { borderBottom: '1px solid', borderColor: 'divider' },
                 }}
               >
-                <TableHead
-              sx={{
-                backgroundColor: "grey.50",
-                "& .MuiTableCell-head": {
-                  fontSize: 8,
-                  fontWeight: 600,
-                  color: "text.secondary",
-                  whiteSpace: "nowrap",
-                  lineHeight: 1.2,
-                  px: 1,
-                },
-                "& .MuiTableSortLabel-root": {
-                  fontSize: 8,
-                  maxWidth: "100%",
-                  "& .MuiTableSortLabel-label": {
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+               <TableHead
+                sx={{
+                  backgroundColor: "grey.50",
+                  "& .MuiTableCell-head": {
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "text.secondary",
                     whiteSpace: "nowrap",
+                    lineHeight: 1.3,
+                    px: 1,
                   },
-                },
-                // Hide per-column eye icons; use gear menu instead
-                "& .MuiTableCell-head .MuiIconButton-root": { display: "none" },
-              }}
-            >
+                  "& .MuiTableSortLabel-root": {
+                    fontSize: 11,
+                    "& .MuiTableSortLabel-icon": {
+                      opacity: 0.6,
+                    },
+                    "& .MuiTableSortLabel-label": {
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  "& .MuiTableCell-head .MuiIconButton-root": { display: "none" },
+                }}
+              >
                   <TableRow>
                     {/* Employee column header narrowed */}
                     <TableCell
@@ -3355,105 +3757,26 @@ export default function PayrollPage() {
                         {t("hr.timesheets.employee") || "Employee"}
                       </TableSortLabel>
                     </TableCell>
-                    {/* PS column */}
-                    <TableCell
-                      align="left"
-                      sortDirection={
-                        sortKey === "ps" ? sortDir : (false as any)
-                      }
-                      sx={{ width: 64 }}
-                    >
-                      <TableSortLabel
-                        active={sortKey === "ps"}
-                        direction={sortKey === "ps" ? sortDir : "asc"}
-                        onClick={(e: any) => handleSort("ps")}
-                      >
-                        {t("hr.timesheets.psPoint") || "PS"}
-                      </TableSortLabel>
-                    </TableCell>
-                    <TableCell
-                      align="right"
-                      sortDirection={
-                        sortKey === "workingDays" ? sortDir : (false as any)
-                      }
-                      sx={{ width: 64 }}
-                    >
-                      <TableSortLabel
-                        active={sortKey === "workingDays"}
-                        direction={sortKey === "workingDays" ? sortDir : "asc"}
-                        onClick={(e: any) => handleSort("workingDays")}
-                      >
-                        {t("Working Days") || "Working Days"}
-                      </TableSortLabel>
-                    </TableCell>
                     <TableCell
                       align="right"
                       sortDirection={
                         sortKey === "deductionDays" ? sortDir : (false as any)
                       }
-                      sx={{ width: 64 }}
+                      sx={{ width: 110 }}
                     >
-                      <TableSortLabel
-                        active={sortKey === "deductionDays"}
-                        direction={
-                          sortKey === "deductionDays" ? sortDir : "asc"
-                        }
-                        onClick={(e: any) => handleSort("deductionDays")}
-                      >
-                        {t("Deduction Days") || "Deduction Days"}
-                      </TableSortLabel>
-                    </TableCell>
-                    {cols.presentWorkdays && (
-                      <TableCell
-                        align="right"
-                        sortDirection={
-                          sortKey === "presentWorkdays"
-                            ? sortDir
-                            : (false as any)
-                        }
-                        sx={{ width: 64 }}
-                      >
-                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
+                      <Box display="flex" flexDirection="column" alignItems="flex-end">
                         <TableSortLabel
-                          active={sortKey === "presentWorkdays"}
+                          active={sortKey === "deductionDays"}
                           direction={
-                            sortKey === "presentWorkdays" ? sortDir : "asc"
+                            sortKey === "deductionDays" ? sortDir : "asc"
                           }
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCols((c) => ({ ...c, presentWorkdays: !c.presentWorkdays }));
-                            } else handleSort("presentWorkdays");
-                          }}
-                          onDoubleClick={() => setCols((c) => ({
-                            ...c,
-                            presentWorkdays: true,
-                            holidayWorked: true,
-                            baseSalary: true,
-                            food: true,
-                            fuel: true,
-                            comm: true,
-                            basePay: true,
-                            allowancePay: true,
-                            advances: true,
-                            loans: true,
-                            salesQty: true,
-                            salesTotal: true,
-                            gold: true,
-                            diamond: true,
-                            totalUsd: true,
-                          }))}
+                          onClick={(e: any) => handleSort("deductionDays")}
                         >
-                          {t("Present Days") || "Present Days"}
+                          {t("Absence") || "Absence"}
                         </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, presentWorkdays: !c.presentWorkdays })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
-                        </Box>
-                      </TableCell>
-                    )}
+                        <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
+                      </Box>
+                    </TableCell>
                     {cols.holidayWorked && (
                       <TableCell
                         align="right"
@@ -3463,42 +3786,69 @@ export default function PayrollPage() {
                         sx={{ width: 64 }}
                       >
                         <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                        <TableSortLabel
-                          active={sortKey === "holidayWorked"}
-                          direction={
-                            sortKey === "holidayWorked" ? sortDir : "asc"
-                          }
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCols((c) => ({ ...c, holidayWorked: !c.holidayWorked }));
-                            } else handleSort("holidayWorked");
-                          }}
-                          onDoubleClick={() => setCols((c) => ({
-                            ...c,
-                            presentWorkdays: true,
-                            holidayWorked: true,
-                            baseSalary: true,
-                            food: true,
-                            fuel: true,
-                            comm: true,
-                            basePay: true,
-                            allowancePay: true,
-                            adjustments: true,
-                            salesQty: true,
-                            salesTotal: true,
-                            gold: true,
-                            diamond: true,
-                            totalUsd: true,
-                          }))}
-                        >
-                          {t("Holidays Worked") || "Holidays Worked"}
-                        </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, holidayWorked: !c.holidayWorked })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
+                          <TableSortLabel
+                            active={sortKey === "holidayWorked"}
+                            direction={
+                              sortKey === "holidayWorked" ? sortDir : "asc"
+                            }
+                            onClick={(e: any) => {
+                              if (e.altKey) {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setCols((c) => ({ ...c, holidayWorked: !c.holidayWorked }));
+                              } else handleSort("holidayWorked");
+                            }}
+                            onDoubleClick={() => setCols((c) => ({
+                              ...c,
+                              presentWorkdays: true,
+                              holidayWorked: true,
+                              p: true,
+                              ph: true,
+                              phf: true,
+                              baseSalary: true,
+                              food: true,
+                              fuel: true,
+                              comm: true,
+                              advances: true,
+                              loans: true,
+                              salesQty: true,
+                              salesTotal: true,
+                              gold: true,
+                              diamond: true,
+                              watchComm: true,
+                              totalUsd: true,
+                            }))}
+                          >
+                            {t("Holidays Worked") || "Holidays Worked"}
+                          </TableSortLabel>
+                          <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
+                            onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, holidayWorked: !c.holidayWorked })); }}>
+                            <VisibilityOffIcon fontSize="inherit" />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    )}
+                    {cols.p && (
+                      <TableCell align="right" sx={{ width: 110 }}>
+                        <Box display="flex" flexDirection="column" alignItems="flex-end">
+                          <span>{t("P") || "P"}</span>
+                          <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
+                        </Box>
+                      </TableCell>
+                    )}
+                    {cols.ph && (
+                      <TableCell align="right" sx={{ width: 110 }}>
+                        <Box display="flex" flexDirection="column" alignItems="flex-end">
+                          <span>{t("PH") || "PH"}</span>
+                          <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
+                        </Box>
+                      </TableCell>
+                    )}
+                    {cols.phf && (
+                      <TableCell align="right" sx={{ width: 110 }}>
+                        <Box display="flex" flexDirection="column" alignItems="flex-end">
+                          <span>{t("PHF") || "PHF"}</span>
+                          <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
                         </Box>
                       </TableCell>
                     )}
@@ -3539,7 +3889,7 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Base Salary") || "Base Salary"}
+                          {t("Base") || "Base"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, baseSalary: !c.baseSalary })); }}>
@@ -3585,7 +3935,7 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Food Allowance") || "Food Allowance"}
+                          {t("Food Allow.") || "Food Allow."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, food: !c.food })); }}>
@@ -3631,7 +3981,7 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Transportation") || "Transportation"}
+                          {t("Transport.") || "Transport."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, fuel: !c.fuel })); }}>
@@ -3677,8 +4027,8 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Communication") ||
-                            "Communication"}
+                          {t("Comm.") ||
+                            "Comm."}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, comm: !c.comm })); }}>
@@ -3687,104 +4037,10 @@ export default function PayrollPage() {
                         </Box>
                       </TableCell>
                     )}
-                    {cols.basePay && (
-                      <TableCell
-                        align="right"
-                        sortDirection={
-                          sortKey === "basePay" ? sortDir : (false as any)
-                        }
-                        sx={{ width: 84 }}
-                      >
-                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                        <TableSortLabel
-                          active={sortKey === "basePay"}
-                          direction={sortKey === "basePay" ? sortDir : "asc"}
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCols((c) => ({ ...c, basePay: !c.basePay }));
-                            } else handleSort("basePay");
-                          }}
-                          onDoubleClick={() => setCols((c) => ({
-                            ...c,
-                            presentWorkdays: true,
-                            holidayWorked: true,
-                            baseSalary: true,
-                            food: true,
-                            fuel: true,
-                            comm: true,
-                            basePay: true,
-                            allowancePay: true,
-                            adjustments: true,
-                            salesQty: true,
-                            salesTotal: true,
-                            gold: true,
-                            diamond: true,
-                            totalUsd: true,
-                          }))}
-                        >
-                          {t("Base Pay") || "Base Pay"}
-                        </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, basePay: !c.basePay })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
-                        </Box>
-                      </TableCell>
-                    )}
-                    {cols.allowancePay && (
-                      <TableCell
-                        align="right"
-                        sortDirection={
-                          sortKey === "allowancePay" ? sortDir : (false as any)
-                        }
-                        sx={{ width: 84 }}
-                      >
-                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                        <TableSortLabel
-                          active={sortKey === "allowancePay"}
-                          direction={
-                            sortKey === "allowancePay" ? sortDir : "asc"
-                          }
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setCols((c) => ({ ...c, allowancePay: !c.allowancePay }));
-                            } else handleSort("allowancePay");
-                          }}
-                          onDoubleClick={() => setCols((c) => ({
-                            ...c,
-                            presentWorkdays: true,
-                            holidayWorked: true,
-                            baseSalary: true,
-                            food: true,
-                            fuel: true,
-                            comm: true,
-                            basePay: true,
-                            allowancePay: true,
-                            adjustments: true,
-                            salesQty: true,
-                            salesTotal: true,
-                            gold: true,
-                            diamond: true,
-                            totalUsd: true,
-                          }))}
-                        >
-                          {t("Allowance Pay") || "Allowance Pay"}
-                        </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, allowancePay: !c.allowancePay })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
-                        </Box>
-                      </TableCell>
-                    )}
                     {cols.advances && (
                       <TableCell align="right" sx={{ width: 78 }}>
                         <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                          <span>{t("Advance") || "Advance"}</span>
+                          <span>{t("S. Adv") || "S. Adv"}</span>
                           <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                             onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, advances: !c.advances })); }}>
                             <VisibilityOffIcon fontSize="inherit" />
@@ -3901,7 +4157,7 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Gold Commission") || "Gold Commission"}
+                          {t("Gold Comm") || "Gold Comm"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, gold: !c.gold })); }}>
@@ -3947,7 +4203,7 @@ export default function PayrollPage() {
                             totalUsd: true,
                           }))}
                         >
-                          {t("Diamond Commission") || "Diamond Commission"}
+                          {t("Diamond Comm") || "Diamond Comm"}
                         </TableSortLabel>
                         <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
                           onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, diamond: !c.diamond })); }}>
@@ -3956,50 +4212,44 @@ export default function PayrollPage() {
                         </Box>
                       </TableCell>
                     )}
+                    {cols.watchComm && (
+                      <TableCell align="right" sx={{ width: 84 }}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
+                          <span>{t("Watch Comm") || "Watch Comm"}</span>
+                          <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
+                            onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, watchComm: !c.watchComm })); }}>
+                            <VisibilityOffIcon fontSize="inherit" />
+                          </IconButton>
+                        </Box>
+                      </TableCell>
+                    )}
+                    <TableCell
+                      align="right"
+                      sx={{ width: 120 }}
+                    >
+                      <Box display="flex" flexDirection="column" alignItems="flex-end">
+                        <span>{t("Gross") || "Gross"}</span>
+                        <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
+                      </Box>
+                    </TableCell>
                     <TableCell
                       align="right"
                       sortDirection={
                         sortKey === "total" ? sortDir : (false as any)
                       }
-                      sx={{ width: 96 }}
+                      sx={{ width: 120 }}
                     >
                       <TableSortLabel
                         active={sortKey === "total"}
                         direction={sortKey === "total" ? sortDir : "asc"}
                         onClick={(e: any) => handleSort("total")}
                       >
-                        {t("Total (LYD)") || "Total (LYD)"}
+                        <Box display="flex" flexDirection="column" alignItems="flex-end">
+                          <span>{t("Total") || "Total"}</span>
+                          <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
+                        </Box>
                       </TableSortLabel>
                     </TableCell>
-                    {cols.totalUsd && (
-                      <TableCell
-                        align="right"
-                        sortDirection={
-                          sortKey === "totalUsd" ? sortDir : (false as any)
-                        }
-                        sx={{ width: 84 }}
-                      >
-                        <Box display="flex" alignItems="center" justifyContent="space-between" sx={{ width: '100%' }}>
-                        <TableSortLabel
-                          active={sortKey === "totalUsd"}
-                          direction={sortKey === "totalUsd" ? sortDir : "asc"}
-                          onClick={(e: any) => {
-                            if (e.altKey) {
-                              setCols((c) => ({ ...c, totalUsd: !c.totalUsd }));
-                              e.preventDefault();
-                              e.stopPropagation();
-                            } else handleSort("totalUsd");
-                          }}
-                        >
-                          {t("Total (USD)") || "Total (USD)"}
-                        </TableSortLabel>
-                        <IconButton size="small" sx={{ ml: 0.5, p: 0.25 }} aria-label="hide column"
-                          onClick={(e) => { e.stopPropagation(); setCols(c => ({ ...c, totalUsd: !c.totalUsd })); }}>
-                          <VisibilityOffIcon fontSize="inherit" />
-                        </IconButton>
-                        </Box>
-                      </TableCell>
-                    )}
                     <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 6, bgcolor: 'background.paper' }}>
                       <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
                         <span>{t("Actions") || "Actions"}</span>
@@ -4019,7 +4269,7 @@ export default function PayrollPage() {
                     >
                       <TableCell sx={{ width: 180, maxWidth: 180, position: 'sticky', left: 0, zIndex: 2, bgcolor: 'background.paper' }}>
                         <Box display="flex" alignItems="center" gap={1.25}>
-                          <Avatar src={`http://192.168.3.60:9000/employees/${e.id_emp}/picture`} sx={{ width: 28, height: 28 }} />
+                          <Avatar src={`http://localhost:9000/employees/${e.id_emp}/picture`} sx={{ width: 28, height: 28 }} />
                           <Box
                             display="flex"
                             flexDirection="column"
@@ -4054,31 +4304,113 @@ export default function PayrollPage() {
                           </Box>
                         </Box>
                       </TableCell>
-                      {/* PS column cell */}
-                      <TableCell sx={{ width: 64 }}>
-                        {e.PS != null ? formatPs(e.PS) : "-"}
+                      <TableCell align="right" sx={{ width: 110 }}>
+                        {(() => {
+                          const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
+                          const lyd = Number((vr as any).absence_lyd || 0) || 0;
+                          const usd = Number((vr as any).absence_usd || 0) || 0;
+                          if (!lyd && !usd) return "";
+                          return (
+                            <Box component="span">
+                              <Box component="span" sx={{ color: '#65a8bf' }}>
+                                {formatMoney(lyd)}
+                              </Box>
+                              {usd ? (
+                                <>
+                                  {" | "}
+                                  <Box component="span" sx={{ color: '#b7a27d' }}>
+                                    {formatMoney(usd)}
+                                  </Box>
+                                </>
+                              ) : null}
+                            </Box>
+                          );
+                        })()}
                       </TableCell>
-                      <TableCell align="right" sx={{ width: 64 }}>{e.workingDays || ""}</TableCell>
-                      <TableCell align="right" sx={{ width: 64 }}>
-                        {e.deductionDays
-                          ? Number(e.deductionDays).toFixed(2)
-                          : ""}
-                      </TableCell>
-                      {cols.presentWorkdays && (
-                        <TableCell align="right" sx={{ width: 64 }}>
-                          {e.presentWorkdays || ""}
-                        </TableCell>
-                      )}
                       {cols.holidayWorked && (
                         <TableCell align="right" sx={{ width: 64 }}>
                           {e.holidayWorked || ""}
                         </TableCell>
                       )}
+                      {cols.p && (
+                        <TableCell align="right" sx={{ width: 110 }}>
+                          {(() => {
+                            const vals = computePPhPhf(e);
+                            if (!vals.pLyd && !vals.pUsd) return "";
+                            return (
+                              <Box component="span">
+                                <Box component="span" sx={{ color: '#65a8bf' }}>{formatMoney(vals.pLyd)}</Box>
+                                {vals.pUsd ? (
+                                  <>
+                                    {" | "}
+                                    <Box component="span" sx={{ color: '#b7a27d' }}>{formatMoney(vals.pUsd)}</Box>
+                                  </>
+                                ) : null}
+                              </Box>
+                            );
+                          })()}
+                        </TableCell>
+                      )}
+                      {cols.ph && (
+                        <TableCell align="right" sx={{ width: 110 }}>
+                          {(() => {
+                            const vals = computePPhPhf(e);
+                            if (!vals.phLyd && !vals.phUsd) return "";
+                            return (
+                              <Box component="span">
+                                <Box component="span" sx={{ color: '#65a8bf' }}>{formatMoney(vals.phLyd)}</Box>
+                                {vals.phUsd ? (
+                                  <>
+                                    {" | "}
+                                    <Box component="span" sx={{ color: '#b7a27d' }}>{formatMoney(vals.phUsd)}</Box>
+                                  </>
+                                ) : null}
+                              </Box>
+                            );
+                          })()}
+                        </TableCell>
+                      )}
+                      {cols.phf && (
+                        <TableCell align="right" sx={{ width: 110 }}>
+                          {(() => {
+                            const vals = computePPhPhf(e);
+                            if (!vals.phfLyd && !vals.phfUsd) return "";
+                            return (
+                              <Box component="span">
+                                <Box component="span" sx={{ color: '#65a8bf' }}>{formatMoney(vals.phfLyd)}</Box>
+                                {vals.phfUsd ? (
+                                  <>
+                                    {" | "}
+                                    <Box component="span" sx={{ color: '#b7a27d' }}>{formatMoney(vals.phfUsd)}</Box>
+                                  </>
+                                ) : null}
+                              </Box>
+                            );
+                          })()}
+                        </TableCell>
+                      )}
                       {cols.baseSalary && (
                         <TableCell align="right" sx={{ width: 80 }}>
-                          {e.baseSalary || 0
-                            ? formatMoney(Number(e.baseSalary || 0))
-                            : ""}
+                          {(() => {
+                            const lyd = Number(e.baseSalary || 0) || 0;
+                            const usd = Number((e as any).baseSalaryUsd || 0) || 0;
+                            if (!lyd && !usd) return "";
+                            return (
+                              <Box component="span">
+                                <Box component="span" sx={{ color: '#65a8bf' }}>
+                                  {formatMoney(lyd)}
+                                </Box>
+                                {usd ? (
+                                  <>
+                                    {" | "}
+                                    <Box component="span" sx={{ color: '#b7a27d' }}>
+                                      {formatMoney(usd)}
+                                    </Box>
+                                  </>
+                                ) : null}
+                              </Box>
+                            );
+                          })()}
                         </TableCell>
                       )}
                       {cols.food && (
@@ -4101,10 +4433,8 @@ export default function PayrollPage() {
                       {cols.fuel && (
                         <TableCell align="right" sx={{ width: 72 }}>
                           {(() => {
-                            const W = Math.max(1, e.workingDays || 1);
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
-                            const per = Number(((e as any).FUEL ?? (vr as any).FUEL) || 0);
-                            const v = per * W;
+                            const v = Number(((e as any).FUEL ?? (vr as any).FUEL) || 0);
                             return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
@@ -4112,33 +4442,20 @@ export default function PayrollPage() {
                       {cols.comm && (
                         <TableCell align="right" sx={{ width: 72 }}>
                           {(() => {
-                            const W = Math.max(1, e.workingDays || 1);
                             const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
-                            const per = Number(((e as any).COMMUNICATION ?? (vr as any).COMMUNICATION) || 0);
-                            const v = per * W;
+                            const v = Number(((e as any).COMMUNICATION ?? (vr as any).COMMUNICATION) || 0);
                             return v ? formatMoney(v) : "";
                           })()}
                         </TableCell>
                       )}
-                      {cols.basePay && (
-                        <TableCell align="right" sx={{ width: 84 }}>
-                          {e.components?.basePay || 0
-                            ? formatMoney(e.components?.basePay || 0)
-                            : ""}
-                        </TableCell>
-                      )}
-                      {cols.allowancePay && (
-                        <TableCell align="right" sx={{ width: 84 }}>
-                          {e.components?.allowancePay || 0
-                            ? formatMoney(e.components?.allowancePay || 0)
-                            : ""}
-                        </TableCell>
-                      )}
+                      {/* Base Pay / Allowance Pay columns removed per new layout */}
                       {cols.advances && (
                         <TableCell align="right" sx={{ width: 78 }}>
                           {(() => {
                             const a = e.components?.adjustments || ({} as any);
-                            const adv = Number(a.advance || 0);
+                            const advFromState = Number(advMap[e.id_emp] || 0);
+                            const advLocal = Number(a.advance || 0);
+                            const adv = advFromState || advLocal;
                             const v = adv ? -Math.abs(adv) : 0;
                             return v ? (
                               <Box component="span" sx={{ color: 'error.main' }}>{formatMoney(v)}</Box>
@@ -4149,12 +4466,39 @@ export default function PayrollPage() {
                       {cols.loans && (
                         <TableCell align="right" sx={{ width: 78 }}>
                           {(() => {
-                            const a = e.components?.adjustments || ({} as any);
-                            const loan = Number(a.loanPayment || 0);
-                            const v = loan ? -Math.abs(loan) : 0;
-                            return v ? (
-                              <Box component="span" sx={{ color: 'error.main' }}>{formatMoney(v)}</Box>
-                            ) : "";
+                            const vr =
+                              (v2Rows || []).find(
+                                (x: any) => Number(x.id_emp) === Number(e.id_emp)
+                              ) || ({} as any);
+
+                            const remaining = Number(
+                              (vr as any).remaining || (vr as any).principal || 0
+                            );
+                            const thisMonth = Number((vr as any).loan_credit_lyd || 0);
+                            const thisMonthNeg = thisMonth ? -Math.abs(thisMonth) : 0;
+
+                            if (!remaining && !thisMonthNeg) return "";
+
+                            return (
+                              <Box
+                                display="flex"
+                                flexDirection="column"
+                                alignItems="flex-end"
+                              >
+                                {/* This month deduction on top */}
+                                {thisMonthNeg ? (
+                                  <Box component="span" sx={{ color: 'error.main' }}>
+                                    {formatMoney(thisMonthNeg)}
+                                  </Box>
+                                ) : null}
+                                {/* Remaining balance under it */}
+                                {remaining ? (
+                                  <Box component="span">
+                                    {formatMoney(remaining)}
+                                  </Box>
+                                ) : null}
+                              </Box>
+                            );
                           })()}
                         </TableCell>
                       )}
@@ -4202,35 +4546,77 @@ export default function PayrollPage() {
                           })()}
                         </TableCell>
                       )}
-                      <TableCell align="right" sx={{ width: 96 }}>
-                        <strong>{(() => {
-                          const val = computeNetLYDFor(e.id_emp);
-                          return val ? formatMoney(val) : "";
-                        })()}</strong>
-                      </TableCell>
-                      {cols.totalUsd && (
+                      {cols.watchComm && (
                         <TableCell align="right" sx={{ width: 84 }}>
-                          {(() => {
-                            const W = Math.max(1, e.workingDays || 1);
-                            const F =
-                              e.factorSum != null && e.factorSum > 0
-                                ? e.factorSum
-                                : (e.components?.basePay || 0) /
-                                  (Math.max(1, e.baseSalary || 0) / W);
-                            const baseUsd = e.baseSalaryUsd
-                              ? (e.baseSalaryUsd / W) * F
-                              : 0;
-                            const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
-                            const commUsd = Number((vr as any).diamond_bonus_usd || 0) + Number((vr as any).gold_bonus_usd || 0);
-                            const totalUsdVal = baseUsd + commUsd;
-                            return totalUsdVal ? formatMoney(totalUsdVal) : "";
-                          })()}
+                          {/* Watch commission placeholder */}
                         </TableCell>
                       )}
+                      <TableCell align="right" sx={{ width: 120 }}>
+                        {(() => {
+                          const vr =
+                            (v2Rows || []).find(
+                              (x: any) =>
+                                Number(x.id_emp) === Number(e.id_emp)
+                            ) || ({} as any);
+                          const grossLyd = Number(
+                            (vr as any).total_salary_lyd ?? (vr as any).totalLyd ?? 0
+                          );
+                          const grossUsd = Number(
+                            (vr as any).total_salary_usd ?? (vr as any).totalUsd ?? 0
+                          );
+                          if (!grossLyd && !grossUsd) return "";
+                          return (
+                            <Box component="span">
+                              <Box component="span" sx={{ color: '#65a8bf' }}>
+                                {formatMoney(grossLyd)}
+                              </Box>
+                              {grossUsd ? (
+                                <>
+                                  {" | "}
+                                  <Box component="span" sx={{ color: '#b7a27d' }}>
+                                    {formatMoney(grossUsd)}
+                                  </Box>
+                                </>
+                              ) : null}
+                            </Box>
+                          );
+                        })()}
+                      </TableCell>
+                      <TableCell align="right" sx={{ width: 120 }}>
+                        {(() => {
+                          const vr =
+                            (v2Rows || []).find(
+                              (x: any) =>
+                                Number(x.id_emp) === Number(e.id_emp)
+                            ) || ({} as any);
+                          const lyd = Number(
+                            (vr as any).net_salary_lyd ?? (vr as any).D16 ?? 0
+                          );
+                          const usd = Number(
+                            (vr as any).net_salary_usd ?? (vr as any).C16 ?? 0
+                          );
+                          if (!lyd && !usd) return "";
+                          return (
+                            <Box component="span">
+                              <Box component="span" sx={{ color: '#65a8bf' }}>
+                                {formatMoney(lyd)}
+                              </Box>
+                              {usd ? (
+                                <>
+                                  {" | "}
+                                  <Box component="span" sx={{ color: '#b7a27d' }}>
+                                    {formatMoney(usd)}
+                                  </Box>
+                                </>
+                              ) : null}
+                            </Box>
+                          );
+                        })()}
+                      </TableCell>
                       <TableCell align="right" sx={{ width: 220, position: 'sticky', right: 0, zIndex: 2, bgcolor: 'background.paper' }}>
                         <Box display="flex" flexDirection="column" gap={0.5} alignItems="stretch">
                           {savingRows[e.id_emp] && <CircularProgress size={14} />}
-                          <Button
+                          {/* <Button
                             size="small"
                             variant="text"
                             startIcon={<EditIcon fontSize="small" />}
@@ -4238,13 +4624,13 @@ export default function PayrollPage() {
                             onClick={() => openRowEditor(e.id_emp)}
                           >
                             {t('Edit') || 'Edit'}
-                          </Button>
+                          </Button> */}
                           <Button
                             size="small"
                             variant="outlined"
                             onClick={() => exportPdfClient(e)}
                           >
-                            PDF
+                            Payslip
                           </Button>
                           <Button
                             size="small"
@@ -4259,19 +4645,91 @@ export default function PayrollPage() {
                   ))}
                   {/* Totals row */}
                   <TableRow>
-                    <TableCell colSpan={3}>
-                      <strong>{t("Totals") || "Totals"}</strong>
+                    <TableCell>
+                      <strong style={{ fontSize: 16 }}>{t("Totals") || "Totals"}</strong>
                     </TableCell>
-                    <TableCell align="right">—</TableCell>
-                    {cols.presentWorkdays && (
-                      <TableCell align="right">—</TableCell>
-                    )}
+                    <TableCell align="right">
+                      <strong>{formatMoney(totals.deductionDays)}</strong>
+                    </TableCell>
                     {cols.holidayWorked && (
-                      <TableCell align="right">—</TableCell>
+                      <TableCell align="right">
+                        <strong>{formatInt(totals.holidayWorked)}</strong>
+                      </TableCell>
+                    )}
+                    {cols.p && (
+                      <TableCell align="right">
+                        <strong>
+                          <Box component="span">
+                            <Box component="span" sx={{ color: '#65a8bf' }}>
+                              {formatMoney(totals.pLyd)}
+                            </Box>
+                            {totals.pUsd ? (
+                              <>
+                                {" | "}
+                                <Box component="span" sx={{ color: '#b7a27d' }}>
+                                  {formatMoney(totals.pUsd)}
+                                </Box>
+                              </>
+                            ) : null}
+                          </Box>
+                        </strong>
+                      </TableCell>
+                    )}
+                    {cols.ph && (
+                      <TableCell align="right">
+                        <strong>
+                          <Box component="span">
+                            <Box component="span" sx={{ color: '#65a8bf' }}>
+                              {formatMoney(totals.phLyd)}
+                            </Box>
+                            {totals.phUsd ? (
+                              <>
+                                {" | "}
+                                <Box component="span" sx={{ color: '#b7a27d' }}>
+                                  {formatMoney(totals.phUsd)}
+                                </Box>
+                              </>
+                            ) : null}
+                          </Box>
+                        </strong>
+                      </TableCell>
+                    )}
+                    {cols.phf && (
+                      <TableCell align="right">
+                        <strong>
+                          <Box component="span">
+                            <Box component="span" sx={{ color: '#65a8bf' }}>
+                              {formatMoney(totals.phfLyd)}
+                            </Box>
+                            {totals.phfUsd ? (
+                              <>
+                                {" | "}
+                                <Box component="span" sx={{ color: '#b7a27d' }}>
+                                  {formatMoney(totals.phfUsd)}
+                                </Box>
+                              </>
+                            ) : null}
+                          </Box>
+                        </strong>
+                      </TableCell>
                     )}
                     {cols.baseSalary && (
                       <TableCell align="right">
-                        <strong>{formatMoney(totals.baseSalary)}</strong>
+                        <strong>
+                          <Box component="span">
+                            <Box component="span" sx={{ color: '#65a8bf' }}>
+                              {formatMoney(totals.baseSalary)}
+                            </Box>
+                            {totals.baseSalaryUsd ? (
+                              <>
+                                {" | "}
+                                <Box component="span" sx={{ color: '#b7a27d' }}>
+                                  {formatMoney(totals.baseSalaryUsd)}
+                                </Box>
+                              </>
+                            ) : null}
+                          </Box>
+                        </strong>
                       </TableCell>
                     )}
                     {cols.food && (
@@ -4289,29 +4747,72 @@ export default function PayrollPage() {
                         <strong>{formatMoney(totals.comm)}</strong>
                       </TableCell>
                     )}
-                    {cols.basePay && (
-                      <TableCell align="right">
-                        <strong>{formatMoney(totals.base)}</strong>
-                      </TableCell>
-                    )}
-                    {cols.allowancePay && (
-                      <TableCell align="right">
-                        <strong>{formatMoney(totals.allow)}</strong>
-                      </TableCell>
-                    )}
+                    {/* Base Pay / Allowance Pay totals removed per new layout */}
                     {cols.advances && (
                       <TableCell align="right">
                         {(() => {
-                          const sum = displayedRows.reduce((acc, e) => acc + (Number(e.components?.adjustments?.advance||0)*-1), 0);
-                          return <Box component="strong" sx={{ color: sum < 0 ? 'error.main' : undefined }}>{formatMoney(sum)}</Box>;
+                          const sum = displayedRows.reduce((acc, e) => {
+                            const a = e.components?.adjustments || ({} as any);
+                            const advFromState = Number(advMap[e.id_emp] || 0);
+                            const advLocal = Number(a.advance || 0);
+                            const adv = advFromState || advLocal;
+                            const v = adv ? -Math.abs(adv) : 0;
+                            return acc + v;
+                          }, 0);
+                          return (
+                            <Box
+                              component="strong"
+                              sx={{ color: sum < 0 ? 'error.main' : undefined }}
+                            >
+                              {formatMoney(sum)}
+                            </Box>
+                          );
                         })()}
                       </TableCell>
                     )}
                     {cols.loans && (
                       <TableCell align="right">
                         {(() => {
-                          const sum = displayedRows.reduce((acc, e) => acc + (Number(e.components?.adjustments?.loanPayment||0)*-1), 0);
-                          return <Box component="strong" sx={{ color: sum < 0 ? 'error.main' : undefined }}>{formatMoney(sum)}</Box>;
+                          let totalRemaining = 0;
+                          let totalThisMonth = 0;
+
+                          (displayedRows || []).forEach((e) => {
+                            const vr =
+                              (v2Rows || []).find(
+                                (x: any) => Number(x.id_emp) === Number(e.id_emp)
+                              ) || ({} as any);
+                            totalRemaining += Number(
+                              (vr as any).remaining || (vr as any).principal || 0
+                            );
+                            totalThisMonth += Number((vr as any).loan_credit_lyd || 0);
+                          });
+
+                          const totalThisMonthNeg = totalThisMonth
+                            ? -Math.abs(totalThisMonth)
+                            : 0;
+
+                          return (
+                            <Box
+                              display="flex"
+                              flexDirection="column"
+                              alignItems="flex-end"
+                              component="strong"
+                            >
+                              {/* This month deduction at top */}
+                              <Box
+                                component="span"
+                                sx={{
+                                  color: totalThisMonthNeg < 0 ? 'error.main' : undefined,
+                                }}
+                              >
+                                {formatMoney(totalThisMonthNeg)}
+                              </Box>
+                              {/* Remaining total under it */}
+                              <Box component="span">
+                                {formatMoney(totalRemaining)}
+                              </Box>
+                            </Box>
+                          );
                         })()}
                       </TableCell>
                     )}
@@ -4335,14 +4836,45 @@ export default function PayrollPage() {
                         <strong>{formatMoney(totals.diamond)}</strong>
                       </TableCell>
                     )}
-                    <TableCell align="right">
-                      <strong>{formatMoney(totals.totalLyd)}</strong>
-                    </TableCell>
-                    {cols.totalUsd && (
+                    {cols.watchComm && (
                       <TableCell align="right">
-                        <strong>{formatMoney(totals.totalUsd)}</strong>
+                        {/* Watch commission total placeholder */}
                       </TableCell>
                     )}
+                    <TableCell align="right">
+                      <strong>
+                        <Box component="span">
+                          <Box component="span" sx={{ color: '#65a8bf' }}>
+                            {formatMoney(totals.grossLyd)}
+                          </Box>
+                          {totals.grossUsd ? (
+                            <>
+                              {" | "}
+                              <Box component="span" sx={{ color: '#b7a27d' }}>
+                                {formatMoney(totals.grossUsd)}
+                              </Box>
+                            </>
+                          ) : null}
+                        </Box>
+                      </strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>
+                        <Box component="span">
+                          <Box component="span" sx={{ color: '#65a8bf' }}>
+                            {formatMoney(totals.totalLyd)}
+                          </Box>
+                          {totals.totalUsd ? (
+                            <>
+                              {" | "}
+                              <Box component="span" sx={{ color: '#b7a27d' }}>
+                                {formatMoney(totals.totalUsd)}
+                              </Box>
+                            </>
+                          ) : null}
+                        </Box>
+                      </strong>
+                    </TableCell>
                     <TableCell align="right">—</TableCell>
                   </TableRow>
                 </TableBody>
@@ -4363,20 +4895,21 @@ export default function PayrollPage() {
         <Box px={1} py={0.5} display="grid" gridTemplateColumns="repeat(2, 1fr)" gap={0.5}>
           {(
             [
-              ['presentWorkdays', 'Present WD'],
               ['holidayWorked', 'Holiday Worked'],
-              ['baseSalary', 'Base Salary'],
+              ['p', 'P (LYD|USD)'],
+              ['ph', 'PH (LYD|USD)'],
+              ['phf', 'PHF (LYD|USD)'],
+              ['baseSalary', 'Base'],
               ['food', 'Food'],
               ['fuel', 'Fuel'],
               ['comm', 'Communication'],
-              ['basePay', 'Base Pay'],
-              ['allowancePay', 'Allowance Pay'],
-              ['advances', 'Advance'],
+              ['advances', 'S. Adv'],
               ['loans', 'Loans'],
               ['salesQty', 'Sales Qty'],
               ['salesTotal', 'Sales Total'],
               ['gold', 'Gold Bonus'],
               ['diamond', 'Diamond Bonus'],
+              ['watchComm', 'Watch Comm'],
               ['totalUsd', 'Total USD'],
             ] as Array<[keyof typeof cols, string]>
           ).map(([k, label]) => (
@@ -4497,6 +5030,66 @@ export default function PayrollPage() {
         <DialogActions>
           <Button onClick={() => setCalOpen(false)}>
             {t("common.close") || "Close"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Send Payslips dialog */}
+      <Dialog
+        open={sendDialogOpen}
+        onClose={() => setSendDialogOpen(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>{t('Send Payslips') || 'Send Payslips'}</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            {t('Select employees to send payslips to for this period.') || 'Select employees to send payslips to for this period.'}
+          </Typography>
+          <Box sx={{ maxHeight: 360, overflow: 'auto' }}>
+            {(displayedRows || []).map(emp => (
+              <FormControlLabel
+                key={emp.id_emp}
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={!!sendSelection[emp.id_emp]}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setSendSelection(prev => ({ ...prev, [emp.id_emp]: checked }));
+                    }}
+                  />
+                }
+                label={`${nameMap[emp.id_emp] ?? emp.name} (ID: ${emp.id_emp})`}
+              />
+            ))}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSendDialogOpen(false)}>
+            {t('Cancel') || 'Cancel'}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              const list = (displayedRows || []).filter(e => sendSelection[e.id_emp]);
+              if (!list.length) {
+                alert(t('No employees selected') || 'No employees selected');
+                return;
+              }
+              try {
+                for (const emp of list) {
+                  await sendPayslipEmailClient(emp);
+                }
+                alert(t('Payslips sent') || 'Payslips sent');
+              } catch (e: any) {
+                alert(e?.message || 'Failed to send some payslips');
+              } finally {
+                setSendDialogOpen(false);
+              }
+            }}
+          >
+            {t('Send') || 'Send'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -4676,21 +5269,63 @@ export default function PayrollPage() {
                     {t("No adjustments yet") || "No adjustments yet"}
                   </Typography>
                 )}
-                {(adjRows || []).map((r, idx) => (
-                  <Box
-                    key={idx}
-                    display="flex"
-                    justifyContent="space-between"
-                    sx={{ py: 0.5 }}
-                  >
-                    <Typography variant="body2">
-                      {r.type} — {r.currency} {Number(r.amount || 0).toFixed(2)}
+                {(adjRows || []).map((r, idx) => {
+                  const opt = adjTypeOptions.find((o) => o.value === r.type);
+                  const label = opt?.label || r.type;
+                  const amt = Number(r.amount || 0).toFixed(2);
+                  const dateStr = r.ts ? dayjs(r.ts).format("YYYY-MM-DD HH:mm") : "";
+                  return (
+                    <Box
+                      key={idx}
+                      display="flex"
+                      justifyContent="space-between"
+                      alignItems="flex-start"
+                      sx={{ py: 0.5, borderBottom: '1px dashed', borderColor: 'divider' }}
+                    >
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {label}
+                        </Typography>
+                        {r.note && (
+                          <Typography variant="body2" color="text.secondary">
+                            {r.note}
+                          </Typography>
+                        )}
+                        {dateStr && (
+                          <Typography variant="caption" color="text.secondary">
+                            {dateStr}
+                          </Typography>
+                        )}
+                      </Box>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {r.currency} {amt}
+                      </Typography>
+                    </Box>
+                  );
+                })}
+                {Object.keys(adjTypeTotals).length > 0 && (
+                  <Box mt={1.5} p={1} sx={{ borderRadius: 1, border: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      {t('Totals this month') || 'Totals this month'}
                     </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {r.ts ? dayjs(r.ts).format("YYYY-MM-DD HH:mm") : ""}
-                    </Typography>
+                    {Object.entries(adjTypeTotals).map(([type, totals]) => {
+                      const opt = adjTypeOptions.find((o) => o.value === type);
+                      const label = opt?.label || type;
+                      const parts: string[] = [];
+                      if (totals.lyd) parts.push(`${totals.lyd.toFixed(2)} LYD`);
+                      if (totals.usd) parts.push(`${totals.usd.toFixed(2)} USD`);
+                      if (parts.length === 0) return null;
+                      return (
+                        <Box key={type} display="flex" justifyContent="space-between" sx={{ py: 0.25 }}>
+                          <Typography variant="body2">{label}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {parts.join('  |  ')}
+                          </Typography>
+                        </Box>
+                      );
+                    })}
                   </Box>
-                ))}
+                )}
               </Box>
               <Divider sx={{ my: 1.5 }} />
               <Box display="grid" gridTemplateColumns="repeat(4, 1fr)" gap={1}>
@@ -4699,13 +5334,18 @@ export default function PayrollPage() {
                   size="small"
                   label={t("Type") || "Type"}
                   value={adjForm.type}
-                  onChange={(e) =>
-                    setAdjForm((f) => ({ ...f, type: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    setAdjForm((f) => ({
+                      ...f,
+                      type: nextType,
+                      currency: adjLydOnlyTypes.has(nextType) ? 'LYD' : f.currency,
+                    }));
+                  }}
                 >
-                  {["bonus", "deduction", "advance", "loanPayment"].map((x) => (
-                    <MenuItem key={x} value={x}>
-                      {x}
+                  {adjTypeOptions.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {t(opt.label) || opt.label}
                     </MenuItem>
                   ))}
                 </TextField>
@@ -4727,6 +5367,7 @@ export default function PayrollPage() {
                   onChange={(e) =>
                     setAdjForm((f) => ({ ...f, currency: e.target.value }))
                   }
+                  disabled={adjLydOnlyTypes.has(adjForm.type)}
                 >
                   {["LYD", "USD"].map((x) => (
                     <MenuItem key={x} value={x}>

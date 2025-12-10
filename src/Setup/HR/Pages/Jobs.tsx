@@ -24,6 +24,8 @@ import {
   Typography,
   Paper,
   Stack,
+  Checkbox,
+  FormControlLabel,
 } from "@mui/material";
 
 import EditIcon from "@mui/icons-material/Edit";
@@ -43,9 +45,56 @@ type Job = {
   Job_code: string;
   job_categories: string;
   NBR_YEAR_FOR_JOB: number;
+
+  // Extended fields for new requirements
+  department?: string;
+  commissionGold?: number;
+  commissionDiamond?: number;
+  commissionWatches?: number;
+  assignedEmployeeId?: number | null;
+  managerId?: number | null;
+};
+
+type JobTemplate = {
+  id: number;
+  job_name: string;
+  Job_title: string;
+  Job_code?: string;
 };
 
 const theme = createTheme();
+
+const jobTemplates: JobTemplate[] = [
+  { id: 1, job_name: "Sales Manager", Job_title: "Sales Manager" },
+  { id: 2, job_name: "Sales Rep", Job_title: "Sales Rep" },
+  { id: 3, job_name: "Sales Lead", Job_title: "Sales Lead" },
+  { id: 4, job_name: "Jr.Sales Rep", Job_title: "Jr.Sales Rep" },
+  { id: 5, job_name: "Accountant", Job_title: "Accountant" },
+  { id: 6, job_name: "Sr.Accountant", Job_title: "Sr.Accountant" },
+  { id: 7, job_name: "Marketing Manager", Job_title: "Marketing Manager" },
+  { id: 8, job_name: "Marketing Assistant", Job_title: "Marketing Assistant" },
+  { id: 9, job_name: "Operation Manager", Job_title: "Operation Manager" },
+  { id: 10, job_name: "HR Manager", Job_title: "HR Manager" },
+  { id: 11, job_name: "CEO", Job_title: "CEO" },
+  { id: 12, job_name: "Chairman", Job_title: "Chairman" },
+  { id: 13, job_name: "IT Support", Job_title: "IT Support" },
+  { id: 14, job_name: "Cleaner", Job_title: "Cleaner" },
+  { id: 15, job_name: "Marketing Specialist", Job_title: "Marketing Specialist" },
+  { id: 16, job_name: "Marketing Officer", Job_title: "Marketing Officer" },
+  { id: 17, job_name: "photographer", Job_title: "photographer" },
+  {
+    id: 18,
+    job_name: "Customer Support Representative and Warehouse Coordinator",
+    Job_title: "Customer Support Representative and Warehouse Coordinator",
+  },
+  { id: 19, job_name: "Accounting Manager", Job_title: "Accounting Manager" },
+  { id: 20, job_name: "Liaison Officer", Job_title: "Liaison Officer" },
+  { id: 21, job_name: "Graphic Designer", Job_title: "Graphic Designer" },
+  { id: 22, job_name: "Cleaner", Job_title: "Cleaner", Job_code: "101" },
+  { id: 23, job_name: "Cleaner", Job_title: "Cleaner" },
+  { id: 24, job_name: "Cleaner", Job_title: "Cleaner", Job_code: "101" },
+  { id: 25, job_name: "Accountant", Job_title: "Accountant", Job_code: "120" },
+];
 
 const initialJobState: Job = {
   id_job: 0,
@@ -54,9 +103,29 @@ const initialJobState: Job = {
   Job_code: "",
   job_categories: "",
   NBR_YEAR_FOR_JOB: 65,
+  department: "",
+  commissionGold: 0,
+  commissionDiamond: 0,
+  commissionWatches: 0,
+  assignedEmployeeId: null,
+  managerId: null,
 };
 
 const jobCategories = ["إدارية", "إشرافية", "حرفية و خدمية", "فنية"];
+
+const departmentOptions = [
+  "Sales",
+  "Marketing",
+  "Operations",
+  "HR",
+  "Accounting",
+  "Management",
+  "IT",
+  "Warehouse",
+  "Customer Support",
+  "Cleaning",
+  "Other",
+];
 
 type EmployeeLite = { ID_EMP?: number; NAME?: string; TITLE?: string | null };
 
@@ -82,6 +151,7 @@ const Jobs = () => {
   const [empDialogOpen, setEmpDialogOpen] = useState(false);
   const [empDialogTitle, setEmpDialogTitle] = useState<string>("");
   const [empDialogList, setEmpDialogList] = useState<EmployeeLite[]>([]);
+  const [autoAssignManager, setAutoAssignManager] = useState(true);
 
   const fetchData = async () => {
     const token = localStorage.getItem("token");
@@ -125,6 +195,42 @@ const Jobs = () => {
     fetchData();
   }, [navigate]);
 
+  const allEmployees: EmployeeLite[] = useMemo(
+    () => Object.values(employeesByTitle).flat(),
+    [employeesByTitle]
+  );
+
+  const isSalesRole = useMemo(() => {
+    const title = (editJob?.Job_title || "").trim();
+    return (
+      title === "Sales Rep" ||
+      title === "Sales Lead" ||
+      title === "Sales Manager"
+    );
+  }, [editJob?.Job_title]);
+
+  const managerCandidate = useMemo(() => {
+    if (!autoAssignManager || !editJob?.department) return null;
+
+    const titleMap: Record<string, string> = {
+      Sales: "Sales Manager",
+      Marketing: "Marketing Manager",
+      Operations: "Operation Manager",
+      HR: "HR Manager",
+      Accounting: "Accounting Manager",
+      IT: "IT Support",
+      Cleaning: "Cleaner",
+      Warehouse: "Operation Manager",
+      "Customer Support":
+        "Customer Support Representative and Warehouse Coordinator",
+    };
+
+    const managerTitle = titleMap[editJob.department];
+    if (!managerTitle) return null;
+    const list = employeesByTitle[managerTitle] || [];
+    return list[0] || null;
+  }, [autoAssignManager, editJob?.department, employeesByTitle]);
+
   const handleEdit = (row: Job) => {
     setEmpDialogTitle(`${row.Job_title} — ${row.job_name}`);
     setEmpDialogList(employeesByTitle[row.Job_title] || []);
@@ -134,6 +240,7 @@ const Jobs = () => {
   const handleAddNew = () => {
     setEditJob(initialJobState);
     setIsEditMode(false);
+    setErrors({});
     setOpenDialog(true);
   };
 
@@ -171,6 +278,21 @@ const Jobs = () => {
         "Years required"
       );
 
+    if (isSalesRole) {
+      if (!editJob?.department) {
+        newErrors.department = t(
+          "hr.jobs.required.department",
+          "Department is required"
+        );
+      }
+      if (editJob?.assignedEmployeeId == null) {
+        newErrors.assignedEmployeeId = t(
+          "hr.jobs.required.assignedEmployeeId",
+          "Please choose an employee to assign this position to"
+        );
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -180,20 +302,30 @@ const Jobs = () => {
     const token = localStorage.getItem("token");
 
     try {
+      const basePayload: any = {
+        job_name: editJob.job_name,
+        year_job: editJob.NBR_YEAR_FOR_JOB,
+        job_degree: 1,
+        job_level: "1",
+        job_title: editJob.Job_title,
+        job_code: editJob.Job_code,
+        job_categories: editJob.job_categories,
+      };
+
+      if (isSalesRole) {
+        basePayload.department = editJob.department || null;
+        basePayload.commission_gold = editJob.commissionGold ?? 0;
+        basePayload.commission_diamond = editJob.commissionDiamond ?? 0;
+        basePayload.commission_watches = editJob.commissionWatches ?? 0;
+        basePayload.employee_id = editJob.assignedEmployeeId ?? null;
+        basePayload.manager_id = managerCandidate?.ID_EMP ?? null;
+      }
+
       if (isEditMode) {
         alert("Edit not supported yet");
         return;
       } else {
-        const payload = {
-          job_name: editJob.job_name,
-          year_job: editJob.NBR_YEAR_FOR_JOB,
-          job_degree: 1,
-          job_level: "1",
-          job_title: editJob.Job_title,
-          job_code: editJob.Job_code,
-          job_categories: editJob.job_categories,
-        };
-        await axios.post(`${apiUrl}/job`, payload, {
+        await axios.post(`${apiUrl}/job`, basePayload, {
           headers: { Authorization: `Bearer ${token}` },
         });
       }
@@ -213,6 +345,18 @@ const Jobs = () => {
     setEmpDialogTitle(`${job.Job_title} — ${job.job_name}`);
     setEmpDialogList(list);
     setEmpDialogOpen(true);
+  };
+
+  const handleJobTemplateChange = (value: string) => {
+    const template = jobTemplates.find(
+      (j) => j.Job_title === value || j.job_name === value
+    );
+    setEditJob((prev) => ({
+      ...(prev || initialJobState),
+      job_name: template?.job_name || value,
+      Job_title: template?.Job_title || value,
+      Job_code: template?.Job_code || prev?.Job_code || "",
+    }));
   };
 
   return (
@@ -558,6 +702,7 @@ const Jobs = () => {
           </Box>
         </Paper>
 
+        {/* Add/Edit Job / Position Dialog */}
         <Dialog
           open={openDialog}
           onClose={handleCloseDialog}
@@ -567,19 +712,46 @@ const Jobs = () => {
           <DialogTitle sx={{ fontWeight: 900, color: accent }}>
             {isEditMode
               ? t("hr.jobs.edit", "Edit Job")
-              : t("hr.jobs.add", "Add Job")}
+              : t("hr.jobs.add", "Add Job / Position")}
           </DialogTitle>
           <Divider
             sx={{ mb: 0, borderColor: "divider", borderBottomWidth: 2 }}
           />
           <DialogContent>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, mt: 2 }}>
+              {/* Job dropdown (all jobs you provided) */}
+              <FormControl fullWidth>
+                <InputLabel>
+                  {t("hr.jobs.job_template", "Job")}
+                </InputLabel>
+                <Select
+                  value={editJob?.Job_title || ""}
+                  label={t("hr.jobs.job_template", "Job")}
+                  onChange={(e) => handleJobTemplateChange(e.target.value as string)}
+                >
+                  {jobTemplates.map((j) => (
+                    <MenuItem
+                      key={j.id}
+                      value={j.Job_title || j.job_name}
+                    >
+                      {j.id}. {j.Job_title || j.job_name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <FormHelperText>
+                  {t(
+                    "hr.jobs.job_template_hint",
+                    "Choose a job from the existing list"
+                  )}
+                </FormHelperText>
+              </FormControl>
+
               <TextField
                 label={t("hr.jobs.job_name", "Job Name")}
                 fullWidth
                 value={editJob?.job_name || ""}
                 onChange={(e) =>
-                  setEditJob({ ...editJob!, job_name: e.target.value })
+                  setEditJob({ ...(editJob || initialJobState), job_name: e.target.value })
                 }
                 error={!!errors.job_name}
                 helperText={errors.job_name}
@@ -589,7 +761,7 @@ const Jobs = () => {
                 fullWidth
                 value={editJob?.Job_title || ""}
                 onChange={(e) =>
-                  setEditJob({ ...editJob!, Job_title: e.target.value })
+                  setEditJob({ ...(editJob || initialJobState), Job_title: e.target.value })
                 }
                 error={!!errors.Job_title}
                 helperText={errors.Job_title}
@@ -599,7 +771,7 @@ const Jobs = () => {
                 fullWidth
                 value={editJob?.Job_code || ""}
                 onChange={(e) =>
-                  setEditJob({ ...editJob!, Job_code: e.target.value })
+                  setEditJob({ ...(editJob || initialJobState), Job_code: e.target.value })
                 }
                 error={!!errors.Job_code}
                 helperText={errors.Job_code}
@@ -613,7 +785,7 @@ const Jobs = () => {
                   label={t("hr.jobs.job_categories", "Category")}
                   onChange={(e) =>
                     setEditJob({
-                      ...editJob!,
+                      ...(editJob || initialJobState),
                       job_categories: e.target.value as string,
                     })
                   }
@@ -630,15 +802,167 @@ const Jobs = () => {
                 label={t("hr.jobs.NBR_YEAR_FOR_JOB", "Nbr Years")}
                 type="number"
                 fullWidth
-                value={editJob?.NBR_YEAR_FOR_JOB || ""}
+                value={editJob?.NBR_YEAR_FOR_JOB ?? ""}
                 onChange={(e) =>
                   setEditJob({
-                    ...editJob!,
+                    ...(editJob || initialJobState),
                     NBR_YEAR_FOR_JOB: Number(e.target.value),
                   })
                 }
+                error={!!errors.NBR_YEAR_FOR_JOB}
+                helperText={errors.NBR_YEAR_FOR_JOB}
               />
             </Box>
+
+            {/* Extra fields only for Sales Rep / Sales Lead / Sales Manager */}
+            {isSalesRole && (
+              <>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>
+                  {t(
+                    "hr.jobs.salesSettings",
+                    "Sales Commissions & Assignment"
+                  )}
+                </Typography>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                  <TextField
+                    label={t(
+                      "hr.jobs.commissionGold",
+                      "Gold Commission %"
+                    )}
+                    type="number"
+                    fullWidth
+                    value={editJob?.commissionGold ?? ""}
+                    onChange={(e) =>
+                      setEditJob({
+                        ...(editJob || initialJobState),
+                        commissionGold: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <TextField
+                    label={t(
+                      "hr.jobs.commissionDiamond",
+                      "Diamond Commission %"
+                    )}
+                    type="number"
+                    fullWidth
+                    value={editJob?.commissionDiamond ?? ""}
+                    onChange={(e) =>
+                      setEditJob({
+                        ...(editJob || initialJobState),
+                        commissionDiamond: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <TextField
+                    label={t(
+                      "hr.jobs.commissionWatches",
+                      "Watches Commission %"
+                    )}
+                    type="number"
+                    fullWidth
+                    value={editJob?.commissionWatches ?? ""}
+                    onChange={(e) =>
+                      setEditJob({
+                        ...(editJob || initialJobState),
+                        commissionWatches: Number(e.target.value),
+                      })
+                    }
+                  />
+
+                  {/* Department field */}
+                  <FormControl
+                    fullWidth
+                    error={!!errors.department}
+                  >
+                    <InputLabel>
+                      {t("hr.jobs.department", "Department")}
+                    </InputLabel>
+                    <Select
+                      value={editJob?.department || ""}
+                      label={t("hr.jobs.department", "Department")}
+                      onChange={(e) =>
+                        setEditJob({
+                          ...(editJob || initialJobState),
+                          department: e.target.value as string,
+                        })
+                      }
+                    >
+                      {departmentOptions.map((dept) => (
+                        <MenuItem key={dept} value={dept}>
+                          {dept}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText>{errors.department}</FormHelperText>
+                  </FormControl>
+
+                  {/* Auto assign manager of department */}
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1, flex: 1 }}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={autoAssignManager}
+                          onChange={(e) => setAutoAssignManager(e.target.checked)}
+                        />
+                      }
+                      label={t(
+                        "hr.jobs.autoAssignManager",
+                        "Auto-assign manager of this department"
+                      )}
+                    />
+                    <TextField
+                      label={t("hr.jobs.manager", "Manager")}
+                      fullWidth
+                      value={
+                        managerCandidate?.NAME ||
+                        t(
+                          "hr.jobs.noManagerFound",
+                          "No manager found for this department"
+                        )
+                      }
+                      InputProps={{ readOnly: true }}
+                    />
+                  </Box>
+
+                  {/* Assign this position to an employee */}
+                  <FormControl
+                    fullWidth
+                    error={!!errors.assignedEmployeeId}
+                  >
+                    <InputLabel>
+                      {t(
+                        "hr.jobs.assignEmployee",
+                        "Assign To Employee"
+                      )}
+                    </InputLabel>
+                    <Select
+                      value={editJob?.assignedEmployeeId ?? ""}
+                      label={t(
+                        "hr.jobs.assignEmployee",
+                        "Assign To Employee"
+                      )}
+                      onChange={(e) =>
+                        setEditJob({
+                          ...(editJob || initialJobState),
+                          assignedEmployeeId: Number(e.target.value),
+                        })
+                      }
+                    >
+                      {allEmployees.map((e) => (
+                        <MenuItem key={e.ID_EMP} value={e.ID_EMP}>
+                          {e.NAME} {e.TITLE ? `— ${e.TITLE}` : ""}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText>
+                      {errors.assignedEmployeeId}
+                    </FormHelperText>
+                  </FormControl>
+                </Box>
+              </>
+            )}
           </DialogContent>
           <DialogActions>
             <Button onClick={handleCloseDialog}>

@@ -529,15 +529,12 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
       await ensureArabicFont();
 
       // ---------- DATASET: APPROVED LEAVES IN WORKING YEAR ----------
-      // Use the SAME logic as the rest of the screen: getWorkingYearWindow + historyNorm
+      // Use calendar-year window for data (Jan 1 -> Dec 31), but header can still show up to today
       const win = getWorkingYearWindow();
       const today = new Date();
 
-      // if no working year window, just use full history
-      const windowStart = win?.start ?? new Date(1970, 0, 1);
-      const windowEnd =
-        win?.end ??
-        new Date(today.getFullYear() + 1, today.getMonth(), today.getDate());
+      const windowStart = win.start;
+      const windowEnd = win.end; // do NOT clip to today; keep full working year for leave periods
 
       type RowNorm = ReturnType<typeof mapRow>;
 
@@ -589,11 +586,7 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           month: "short",
           year: "numeric",
         });
-      const periodStr = win
-        ? `Working year: ${fmtHdr(win.start)} TO ${fmtHdr(
-            new Date(win.end.getTime() - 86400000)
-          )}`
-        : `Up to: ${fmtHdr(today)}`;
+      const periodStr = `Working year: ${fmtHdr(windowStart)} TO ${fmtHdr(today)}`;
       const printedAt = format(new Date(), "yyyy-MM-dd HH:mm:ss");
 
       try {
@@ -681,7 +674,7 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
       y += empCard.h + sectionGap;
 
-      // ---------- SUMMARY & WORKING DAYS PRESENT ----------
+      // ---------- SUMMARY (no total working days) ----------
       newPageIfNeeded(110);
       const balCard = drawCard(110, {
         stroke: [200, 200, 200],
@@ -689,38 +682,6 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
       });
 
       const entitlementVal = computedEntitlement ?? balance?.entitlement ?? 30;
-
-      let totalWorkingSinceContract = 0;
-      let totalLeaveWorking = 0;
-      if (contractStartDate) {
-        const s = new Date(contractStartDate);
-        s.setHours(0, 0, 0, 0);
-        const e = new Date(today);
-        e.setHours(0, 0, 0, 0);
-
-        const d = new Date(s);
-        while (d <= e) {
-          if (d.getDay() !== 5 && !holidaySetState.has(yyyy_mm_dd(d))) {
-            totalWorkingSinceContract++;
-          }
-          d.setDate(d.getDate() + 1);
-        }
-
-        allHist.forEach((h) => {
-          if (!isApprovedLike(h.status || "")) return;
-          if (!h.startDate || !h.endDate) return;
-          const st = new Date(h.startDate);
-          const en = new Date(h.endDate);
-          const from = st < s ? s : st;
-          const to = en > e ? e : en;
-          if (to < from) return;
-          totalLeaveWorking += countWorkingDaysStrict(from, to);
-        });
-      }
-      const workingDaysPresent = Math.max(
-        0,
-        totalWorkingSinceContract - totalLeaveWorking
-      );
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
@@ -746,21 +707,9 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
       doc.setFont("helvetica", "bold");
       doc.text("Remaining Balance (YTD)", c1, by);
-      doc.text("Working Days Present", c2, by);
       by += 18;
       doc.setFont("helvetica", "normal");
       doc.text(`${remainingDaysRounded.toFixed(2)} days`, c1, by);
-      if (contractStartDate) {
-        doc.text(
-          `${workingDaysPresent.toFixed(0)} days since ${fmtHdr(
-            contractStartDate
-          )}`,
-          c2,
-          by
-        );
-      } else {
-        doc.text("—", c2, by);
-      }
 
       y += balCard.h + sectionGap;
 
@@ -978,28 +927,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
     return tokens.some((tk) => s.includes(tk));
   };
 
-  // --- helpers: working-year window (based on contractStartDate) ---
+  // --- helpers: working-year window (calendar year: Jan 1 -> today) ---
   const getWorkingYearWindow = () => {
-    if (!contractStartDate) return null;
     const now = new Date();
-    const annivThisYear = new Date(
-      now.getFullYear(),
-      contractStartDate.getMonth(),
-      contractStartDate.getDate()
-    );
-    const start =
-      annivThisYear <= now
-        ? annivThisYear
-        : new Date(
-            now.getFullYear() - 1,
-            contractStartDate.getMonth(),
-            contractStartDate.getDate()
-          );
-    const end = new Date(
-      start.getFullYear() + 1,
-      start.getMonth(),
-      start.getDate()
-    );
+    const start = new Date(now.getFullYear(), 0, 1); // Jan 1 of current year
+    const end = new Date(now.getFullYear(), 11, 31); // Dec 31 of current year
     return { start, end };
   };
 
@@ -2167,13 +2099,13 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
                 <Typography variant="caption" sx={{ opacity: 0.8 }}>
                   {(() => {
                     const wy = getWorkingYearWindow();
-                    return wy
-                      ? `${t("leave.balance.workingYear", "Working Year")}: ${format(wy.start, "MMM d")} → ${format(new Date(wy.end.getTime() - 86400000), "MMM d, yyyy")}`
-                      : "";
+                    if (!wy) return "";
+                    const today = new Date();
+                    return `${t("leave.balance.workingYear", "Working Year")}: ${format(wy.start, "MMM d")} → ${format(today, "MMM d, yyyy")}`;
                   })()}
                 </Typography>
 
-                {/* ✅ NEW: Export under Remaining Days */}
+                {/* Export to PDF (opens options dialog) */}
                 <Stack
                   direction="row"
                   spacing={1}
@@ -2184,26 +2116,13 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
                   <Button
                     size="small"
                     variant="contained"
-                    onClick={async () => {
-                      // One-click: current working year PDF
-                      setExportKind("pdf");
-                      setExportMode("current");
-                      await handleExportPDF();
-                    }}
-                  >
-                    {t("leave.balance.exportPdf", "Export to PDF")}
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="outlined"
                     onClick={() => {
-                      // Full options dialog (custom range, etc.)
                       setExportKind("pdf");
                       setExportMode("current");
                       setExportOpen(true);
                     }}
                   >
-                    {t("leave.balance.moreOptions", "More options")}
+                    {t("leave.balance.exportPdf", "Export to PDF")}
                   </Button>
                 </Stack>
               </CardContent>

@@ -262,6 +262,26 @@ export type Employee = {
   ACCOUNT_NUMBER?: string | null;
 };
 
+// Central helper: determine whether an employee is considered "active".
+// Treat STATE === false as inactive. NULL/undefined means active by default.
+// Additionally, if CONTRACT_END is in the past, consider them inactive.
+const isActiveEmployee = (e: Employee): boolean => {
+  const stateFlag = e.STATE;
+  const baseActive = stateFlag === false ? false : true;
+  if (!baseActive) return false;
+  if (!e.CONTRACT_END) return true;
+  try {
+    const end = new Date(e.CONTRACT_END as string);
+    if (!Number.isFinite(end.getTime())) return true;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return end.getTime() >= today.getTime();
+  } catch {
+    return true;
+  }
+};
+
 export type ScheduleSlot = {
   day:
     | "Monday"
@@ -600,7 +620,7 @@ const OrgCard: React.FC<{ e: Employee; posName?: string }> = ({
           src={
             (e.PICTURE_URL ||
               (e.ID_EMP
-                ? `http://192.168.3.60:9000/employees/${e.ID_EMP}/picture`
+                ? `http://localhost:9000/employees/${e.ID_EMP}/picture`
                 : undefined)) as string | undefined
           }
           sx={{
@@ -1166,8 +1186,6 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     try {
       const params: Record<string, string> = {};
       if (search) params.search = search;
-      if (stateFilter !== "all")
-        params.state = stateFilter === "active" ? "true" : "false";
       if (form.PS) params.PS = String(form.PS);
       const res = await api.get("/employees", {
         params,
@@ -1881,7 +1899,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     // Apply state filter
     if (stateFilter !== "all") {
       result = result.filter((employee) =>
-        stateFilter === "active" ? employee.STATE : !employee.STATE
+        stateFilter === "active" ? isActiveEmployee(employee) : !isActiveEmployee(employee)
       );
     }
 
@@ -1895,6 +1913,13 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     // Apply sorting
     result.sort((a, b) => {
       let comparison = 0;
+
+      const aActive = isActiveEmployee(a);
+      const bActive = isActiveEmployee(b);
+      if (stateFilter === "all" && aActive !== bActive) {
+        // Active employees always appear before inactive when viewing all
+        return aActive ? -1 : 1;
+      }
 
       switch (sortField) {
         case "name":
@@ -2288,7 +2313,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                   src={
                     (selected.PICTURE_URL ||
                       (selected.ID_EMP
-                        ? `http://192.168.3.60:9000/employees/${selected.ID_EMP}/picture`
+                        ? `http://localhost:9000/employees/${selected.ID_EMP}/picture`
                         : undefined)) as string | undefined
                   }
                   sx={{
@@ -2344,7 +2369,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                       src={
                         (c.PICTURE_URL ||
                           (c.ID_EMP
-                            ? `http://192.168.3.60:9000/employees/${c.ID_EMP}/picture`
+                            ? `http://localhost:9000/employees/${c.ID_EMP}/picture`
                             : undefined)) as string | undefined
                       }
                       sx={{ width: 40, height: 40 }}

@@ -26,7 +26,7 @@ export default function Dashboard() {
   const gaja = (theme.palette as any)?.gaja as Record<string, string> | undefined;
   const accent = theme.palette.mode === 'dark'
     ? (gaja?.[100] ?? '#b7a27d')
-    : (gaja?.[50] ?? '#334d68');
+    : (gaja?.[50] ?? '#374151');
 
   const [balances, setBalances] = useState<BalanceItem[]>([]);
   const acc_no = '110101';

@@ -47,7 +47,7 @@ export default function ContractTypes() {
   const accent: string = (muiTheme.palette as any)?.gaja?.[100] || muiTheme.palette.primary.main;
   const accent2: string = (muiTheme.palette as any)?.gaja?.[200] || muiTheme.palette.primary.light;
 
-  const apiUrl = "http://192.168.3.60:9000/contract-types";
+  const apiUrl = "http://localhost:9000/contract-types";
 
   const [data, setData] = useState<ContractType[]>([]);
   const [loading, setLoading] = useState(true);

@@ -1,7 +1,7 @@
 import React, { useId } from "react";
 import styled from "styled-components";
-import { Brightness5 } from "@mui/icons-material";
-import { DarkMode } from "@mui/icons-material";
+import LightModeOutlinedIcon from "@mui/icons-material/LightModeOutlined";
+import DarkModeOutlinedIcon from "@mui/icons-material/DarkModeOutlined";
 
 interface SwitchProps {
   checked: boolean;
@@ -23,8 +23,8 @@ const Switch: React.FC<SwitchProps> = ({ checked, onChange }) => {
         />
         <label className="switch" htmlFor={id}>
           <span className="slider" />
-          <span className="icon icon--sun"><Brightness5 fontSize="inherit" /></span>
-          <span className="icon icon--moon"><DarkMode fontSize="inherit" /></span>
+          <span className="icon icon--sun"><LightModeOutlinedIcon fontSize="inherit" /></span>
+          <span className="icon icon--moon"><DarkModeOutlinedIcon fontSize="inherit" /></span>
         </label>
       </div>
     </StyledWrapper>

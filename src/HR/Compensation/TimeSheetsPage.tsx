@@ -2975,6 +2975,7 @@ useEffect(() => {
     const sign = min >= 0 ? "+" : "-";
     const a = Math.abs(min);
     const hours = Math.floor(a / 60) + (a % 60 > 30 ? 1 : 0);
+    if (!hours) return "";
     return `${sign}${hours}h`;
   }
 

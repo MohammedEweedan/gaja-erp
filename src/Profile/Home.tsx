@@ -75,11 +75,9 @@ import {
   ShoppingBagOutlined,
 } from "@mui/icons-material";
 import { MoneyOffCsred } from "@mui/icons-material";
-import ChatIcon from "@mui/icons-material/Chat";
 
 import Logo from "../ui-component/Logo2";
 import LanguageSwitcher from "../components/LanguageSwitcher";
-import ChatbotWidget from "../components/ChatbotWidget";
 import { hasRole } from "../Setup/getUserInfo";
 import { useAuth } from "../contexts/AuthContext";
 import axios from "../api";
@@ -224,7 +222,7 @@ declare module "@mui/material/styles" {
 
 type _ProfileWithId = React.ComponentType<{ id?: number }>;
 
-const PANTONE_BLUE = "#0057B8" as const;
+const PANTONE_BLUE = "#374151" as const; // match dock grey
 const PANTONE_TAN = "#B7A27D" as const;
 
 const getDesignTokens = (mode: "light" | "dark") => ({
@@ -233,15 +231,15 @@ const getDesignTokens = (mode: "light" | "dark") => ({
     gaja: (() => {
       const accent = mode === "light" ? "#4b5563" : "#9e9e9e";
       return {
-        50: "#334d68",
+        50: "#374151",
         100: accent,
-        200: "#334d68",
+        200: "#374151",
         300: accent,
         400: accent,
         500: accent,
-        600: "#334d68",
+        600: "#374151",
         700: accent,
-        800: "#334d68",
+        800: "#374151",
         900: accent,
       } as any;
     })(),
@@ -1861,17 +1859,33 @@ export default function Home(props: any) {
                       alignItems: "center",
                       justifyContent: "flex-end",
                       minHeight: 56,
-                      pr: 1,
-                      gap: 1,
+                      pr: 1.5,
+                      gap: 1.5,
                     }}
                   >
                     {roleLabel && (
-                      <>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 1,
+                          px: 1.25,
+                          py: 0.5,
+                          borderRadius: "999px",
+                          bgcolor:
+                            mode === "dark"
+                              ? "rgba(15,23,42,0.9)"
+                              : "rgba(249,250,251,0.9)",
+                          borderColor:
+                            mode === "dark"
+                              ? "rgba(148,163,184,0.5)"
+                              : "rgba(148,163,184,0.6)",
+                        }}
+                      >
                         <Chip
                           label={roleLabel}
-                          color={
-                            roleLabel === "Admin" ? "primary" : "default"
-                          }
+                          color={roleLabel === "Admin" ? "primary" : "default"}
                           size="small"
                           sx={{
                             fontWeight: 800,
@@ -1879,19 +1893,12 @@ export default function Home(props: any) {
                           }}
                         />
                         <ChangePos />
-                      </>
+                      </Paper>
                     )}
 
-                    <Tooltip title={t("tooltip.logout")}>
-                      <IconButton
-                        onClick={handleLogout}
-                        aria-label={t("aria.logout")}
-                        sx={{ color: "red" }}
-                      >
-                        <Logout />
-                      </IconButton>
-                    </Tooltip>
+                    <LanguageSwitcher />
 
+                    {/* premium theme toggle */}
                     <Tooltip
                       title={
                         mode === "dark"
@@ -1912,19 +1919,15 @@ export default function Home(props: any) {
                       </Box>
                     </Tooltip>
 
-                    <LanguageSwitcher />
-
-                    <IconButton
-                      onClick={() => setAiOpen(true)}
-                      sx={{
-                        fontWeight: 900,
-                        letterSpacing: 0.4,
-                        color: PANTONE_TAN,
-                        "& .MuiChip-icon": { color: PANTONE_TAN },
-                      }}
-                    >
-                      <ChatIcon />
-                    </IconButton>
+                    <Tooltip title={t("tooltip.logout")}>
+                      <IconButton
+                        onClick={handleLogout}
+                        aria-label={t("aria.logout")}
+                        sx={{ color: "red" }}
+                      >
+                        <Logout />
+                      </IconButton>
+                    </Tooltip>
                   </Box>
                 ),
               }}
@@ -1941,8 +1944,6 @@ export default function Home(props: any) {
                 {getPageComponent(router.pathname)}
               </Box>
             </DashboardLayout>
-
-            <ChatbotWidget open={aiOpen} onClose={() => setAiOpen(false)} />
 
             <Snackbar
               open={snackbarOpen}
