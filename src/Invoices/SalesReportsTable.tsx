@@ -1,5 +1,5 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { useEffect, useState } from "react";
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Box,
   Typography,
@@ -30,6 +30,17 @@ import PrintInvoiceDialog from "../Invoices/ListCardInvoice/Gold Invoices/PrintI
 import ChiraReturnPage from "./ChiraReturnPage";
 import { FileDownload } from "@mui/icons-material";
 // privilege is read directly from localStorage.user
+
+const stripInternalMetaTags = (raw: any): string => {
+  let s = String(raw ?? "");
+  const cut = (marker: string) => {
+    const idx = s.lastIndexOf(marker);
+    if (idx >= 0) s = s.slice(0, idx);
+  };
+  cut("__DSMETA__");
+  cut("__META__");
+  return s.replace(/\s*\|?\s*$/g, "").trim();
+};
 
 // Standard thumbnail size in on-screen table is 80px. For export we use smaller + caps to keep file size manageable.
 const EXPORT_IMG_SIZE = 55; // px size for exported thumbnails (HTML + Excel)
@@ -202,6 +213,17 @@ const SalesReportsTable = ({
   const [detailsData] = useState<any>(null);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closeInvoice, setCloseInvoice] = useState<any | null>(null);
+  const [closeInvoiceRows, setCloseInvoiceRows] = useState<any[]>([]);
+  const [closeLoading, setCloseLoading] = useState(false);
+  const [closePayLydStr, setClosePayLydStr] = useState("");
+  const [closePayUsdStr, setClosePayUsdStr] = useState("");
+  const [closePayUsdLydStr, setClosePayUsdLydStr] = useState("");
+  const [closePayEurStr, setClosePayEurStr] = useState("");
+  const [closePayEurLydStr, setClosePayEurLydStr] = useState("");
+  const [closeError, setCloseError] = useState<string>("");
+  const [closeMakeCashVoucher, setCloseMakeCashVoucher] = useState(false);
   // Trigger refresh after closing an invoice
   const [invoiceRefreshFlag, setInvoiceRefreshFlag] = useState(0);
   const [chiraDialogOpen, setChiraDialogOpen] = useState(false);
@@ -358,6 +380,18 @@ const SalesReportsTable = ({
     if (!id) return;
     if (imageUrls[id] !== undefined) return; // already fetched
     const token = localStorage.getItem("token");
+    const apiOrigin = (() => {
+      try {
+        const base = (axios as any)?.defaults?.baseURL;
+        if (base) {
+          const u = new URL(base, window.location.origin);
+          return u.origin;
+        }
+      } catch {
+        /* ignore */
+      }
+      return window.location.origin;
+    })();
     const t = supplierType?.toLowerCase() || "";
     let typed: "watch" | "diamond" | "gold" | undefined;
     if (t.includes("watch")) typed = "watch";
@@ -379,6 +413,17 @@ const SalesReportsTable = ({
           const list = res.data
             .map((u: string) => {
               if (typeof u !== "string") return "";
+              // If backend returns relative paths, anchor them to API origin so the browser can load them.
+              if (u.startsWith("images/") || u.startsWith("uploads/")) {
+                u = "/" + u;
+              }
+              if (u.startsWith("/images/") || u.startsWith("/uploads/")) {
+                u = apiOrigin.replace(/\/+$/, "") + u;
+              }
+              // Some backends may return api-prefixed paths; normalize them to origin
+              if (u.startsWith("/api/images/") || u.startsWith("/api/uploads/")) {
+                u = apiOrigin.replace(/\/+$/, "") + u.replace(/^\/api/, "");
+              }
               // Force https for system.gaja.ly (handles http or https variants)
               if (u.includes("system.gaja.ly")) {
                 try {
@@ -981,7 +1026,7 @@ const SalesReportsTable = ({
         row.Utilisateur && row.Utilisateur.name_user
           ? row.Utilisateur.name_user
           : "";
-      const invoiceComment = (row as any).COMMENT ?? "";
+      const invoiceComment = stripInternalMetaTags((row as any).COMMENT ?? "");
       const isChiraFlag = row.is_chira === true || row.is_chira === 1;
       const returnChira = row.return_chira;
       const commentChira = row.comment_chira;
@@ -1278,7 +1323,7 @@ const SalesReportsTable = ({
         row.Utilisateur && row.Utilisateur.name_user
           ? row.Utilisateur.name_user
           : "";
-      const invoiceComment = (row as any).COMMENT ?? "";
+      const invoiceComment = stripInternalMetaTags((row as any).COMMENT ?? "");
       const isChiraFlag = row.is_chira === true || row.is_chira === 1;
       const returnChira = row.return_chira;
       const commentChira = row.comment_chira;
@@ -1637,19 +1682,46 @@ const SalesReportsTable = ({
   const totalRestLYD = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
       const v = Number(row.rest_of_money || 0);
-      return sum + (isNaN(v) ? 0 : v);
+      const restField = isNaN(v) ? 0 : v;
+      if (restField > 0) return sum + restField;
+
+      // Fallback: compute remaining from totals vs paid LYD-equivalent when rest fields aren't populated.
+      const totalLyd = Number((row as any).total_remise_final_lyd ?? (row as any).total_remise_final_LYD ?? 0) || 0;
+      const paidLydEquiv =
+        (Number(row.amount_lyd) || 0) +
+        (Number(row.amount_currency_LYD) || 0) +
+        (Number(row.amount_EUR_LYD) || 0);
+      const diff = totalLyd - paidLydEquiv;
+      if (!Number.isFinite(diff) || diff <= 0) return sum;
+      return sum + diff;
     }, 0);
   }, [filteredData]);
   const totalRestUSD = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
       const v = Number(row.rest_of_moneyUSD || row.rest_of_money_usd || 0);
-      return sum + (isNaN(v) ? 0 : v);
+      const restField = isNaN(v) ? 0 : v;
+      if (restField > 0) return sum + restField;
+
+      // Fallback: compute remaining USD from totals vs paid USD when rest fields aren't populated.
+      const totalUsd = Number((row as any).total_remise_final ?? 0) || 0;
+      const paidUsd = Number(row.amount_currency ?? 0) || 0;
+      const diff = totalUsd - paidUsd;
+      if (!Number.isFinite(diff) || diff <= 0) return sum;
+      return sum + diff;
     }, 0);
   }, [filteredData]);
   const totalRestEUR = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
       const v = Number(row.rest_of_moneyEUR || row.rest_of_money_eur || 0);
-      return sum + (isNaN(v) ? 0 : v);
+      const restField = isNaN(v) ? 0 : v;
+      if (restField > 0) return sum + restField;
+
+      // Fallback: compute remaining EUR from totals vs paid EUR when rest fields aren't populated.
+      const totalEur = Number((row as any).totalAmountEur ?? (row as any).total_amount_eur ?? (row as any).total_remise_final_eur ?? 0) || 0;
+      const paidEur = Number(row.amount_EUR ?? 0) || 0;
+      const diff = totalEur - paidEur;
+      if (!Number.isFinite(diff) || diff <= 0) return sum;
+      return sum + diff;
     }, 0);
   }, [filteredData]);
 
@@ -1770,12 +1842,12 @@ const SalesReportsTable = ({
     const returnChira = row.return_chira;
     const commentChira = row.comment_chira;
     const usrReceiveChira = row.usr_receive_chira;
-    const invoiceComment = (row as any).COMMENT ?? "";
+    const invoiceComment = stripInternalMetaTags((row as any).COMMENT ?? "");
 
     // Primary label: show Chira No when chira=yes, otherwise Invoice No
     const primaryLabel = isChiraVal
-      ? `Chira No: ${returnChira || num}`
-      : `Invoice No: ${num}`;
+      ? `Chira No: ${row.num_fact || row.num || row.id_fact || ""}`
+      : `Invoice No: ${row.num_fact || row.num || row.id_fact || ""}`;
 
     // Find user name from users array by id_user
     let usrReceiveChiraName: any = usrReceiveChira;
@@ -1982,44 +2054,29 @@ const SalesReportsTable = ({
                     size="small"
                     color="primary"
                     onClick={() => {
+                      const idNum = Number(clientId);
+                      const namePart =
+                        (clientValue &&
+                          (clientValue.client_name || clientValue.name)) ||
+                        String(clientDisplay).split(" - ")[0] ||
+                        "";
+                      try {
+                        if (typeof window !== "undefined") {
+                          if (Number.isFinite(idNum) && idNum > 0) {
+                            localStorage.setItem("customerFocusId", String(idNum));
+                          } else {
+                            // Prevent stale focus id from forcing the previous customer.
+                            localStorage.removeItem("customerFocusId");
+                          }
+                          if (namePart) {
+                            localStorage.setItem("customerFocusName", String(namePart));
+                          }
+                          // Ensure we don't route by phone anymore
+                          localStorage.removeItem("customerFocusPhone");
+                        }
+                      } catch { }
                       const path = "/invoice/customerProfile";
-                      try {
-                        if (typeof window !== "undefined") {
-                          // Persist whatever we have immediately
-                          if (clientId)
-                            localStorage.setItem(
-                              "customerFocusId",
-                              String(clientId)
-                            );
-                          const namePart =
-                            (clientValue &&
-                              (clientValue.client_name || clientValue.name)) ||
-                            String(clientDisplay).split(" - ")[0] ||
-                            "";
-                          const telPart =
-                            (clientValue &&
-                              (clientValue.tel_client || clientValue.phone)) ||
-                            "";
-                          if (namePart)
-                            localStorage.setItem(
-                              "customerFocusName",
-                              String(namePart)
-                            );
-                          if (telPart)
-                            localStorage.setItem(
-                              "customerFocusPhone",
-                              String(telPart)
-                            );
-                        }
-                      } catch { }
-                      // Enforce hard redirect and stop further handling to avoid router interference
-                      try {
-                        if (typeof window !== "undefined") {
-                          (window as any).location.href = path;
-                          return;
-                        }
-                      } catch { }
-                      // Fallback: try assign, then SPA navigate
+                      // Hard navigation so the profile always remounts and reads the latest focus id.
                       try {
                         if (typeof window !== "undefined") {
                           window.location.assign(path);
@@ -2084,28 +2141,80 @@ const SalesReportsTable = ({
                   justifyContent: "flex-end",
                 }}
               >
-                <Chip
-                  label={(function buildAmountsChip() {
-                    const parts: any[] = [];
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-end",
+                    gap: 0.25,
+                    minHeight: 0,
+                    fontSize: 11,
+                  }}
+                >
+                  {(() => {
+                    const lines: Array<{ key: string; node: React.ReactNode }> = [];
+
+                    const moneyEps = 0.01;
+                    const normalizeMoney = (v: number) =>
+                      Math.round((Number(v) || 0) * 100) / 100;
+
+                    const isGold =
+                      !!row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes(
+                        "gold"
+                      );
+
+                    const totalRemiseFinalLyd = row.total_remise_final_lyd ?? "";
+
+                    // Prefer comparing in LYD equivalent when available.
+                    const totalLyd = normalizeMoney(Number(totalRemiseFinalLyd) || 0);
+                    const paidLydEquiv = normalizeMoney(
+                      (Number(row.amount_lyd) || 0) +
+                        (Number(row.amount_currency_LYD) || 0) +
+                        (Number(row.amount_EUR_LYD) || 0)
+                    );
+
+                    // Match InvoiceTotalsDialog behavior for LYD: treat as whole LYD for paid-in-full status.
+                    const totalLyd0 = normalizeLyd0(totalLyd);
+                    const paidLydEquiv0 = normalizeLyd0(paidLydEquiv);
+
+                    // Fallback comparison (when LYD total is missing): compare in base invoice currency.
+                    const totalBase = normalizeMoney(Number(totalRemiseFinalLyd) || 0);
+                    const paidBase = normalizeMoney(
+                      isGold
+                        ? (Number(row.amount_lyd) || 0)
+                        : (Number(row.amount_currency) || 0)
+                    );
+
+                    const hasLydTotal = totalLyd > 0;
+                    const diff = hasLydTotal
+                      ? (isGold ? (totalLyd0 - paidLydEquiv0) : (totalLyd - paidLydEquiv))
+                      : totalBase - paidBase;
+                    const isPaidInFull = Math.abs(diff) <= moneyEps;
+                    const isPartial = diff > moneyEps;
+                    const statusColor = isPaidInFull ? "#2e7d32" : "#d04444ff";
+
                     const total = Number(totalRemiseFinal) || 0;
                     if (total) {
-                      const isGold =
-                        !!row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes(
-                          "gold"
-                        );
-                      parts.push(
-                        <div
-                          key="total"
-                          style={{ fontWeight: 700 }}
-                        >{`${formatNumber(total)} ${isGold ? "LYD" : "USD"}`}</div>
-                      );
+                      lines.push({
+                        key: "total",
+                        node: (
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              color: statusColor,
+                            }}
+                          >
+                            {isGold
+                              ? `LYD ${Number(normalizeLyd0(total)).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+                              : `${formatNumber(total)} USD`}
+                          </span>
+                        ),
+                      });
                     }
 
                     const lyd = Number(row.amount_lyd) || 0;
                     if (lyd !== 0) {
-                      parts.push(
-                        <div key="lyd">{`LYD: ${formatNumber(lyd)}`}</div>
-                      );
+                      lines.push({ key: "lyd", node: `LYD: ${formatNumber(lyd)}` });
                     }
 
                     const usd = Number(row.amount_currency) || 0;
@@ -2113,9 +2222,7 @@ const SalesReportsTable = ({
                       const usdEq = row.amount_currency_LYD
                         ? ` (${formatNumber(row.amount_currency_LYD)} LYD)`
                         : "";
-                      parts.push(
-                        <div key="usd">{`USD: ${formatNumber(usd)}${usdEq}`}</div>
-                      );
+                      lines.push({ key: "usd", node: `USD: ${formatNumber(usd)}${usdEq}` });
                     }
 
                     const eur = Number(row.amount_EUR) || 0;
@@ -2123,12 +2230,29 @@ const SalesReportsTable = ({
                       const eurEq = row.amount_EUR_LYD
                         ? ` (${formatNumber(row.amount_EUR_LYD)} LYD)`
                         : "";
-                      parts.push(
-                        <div key="eur">{`EUR: ${formatNumber(eur)}${eurEq}`}</div>
-                      );
+                      lines.push({ key: "eur", node: `EUR: ${formatNumber(eur)}${eurEq}` });
                     }
 
-                    // Combine rest amounts (LYD / USD / EUR) into a single inline element
+                    if (isPartial) {
+                      // Match InvoiceTotalsDialog-style whole-LYD remainder; don't display "0" remainders.
+                      const remLyd0 = normalizeLyd0(Math.abs(diff));
+                      if ((hasLydTotal || isGold) && remLyd0 <= 0) {
+                        // no-op
+                      } else {
+                        lines.push({
+                          key: "remainder",
+                          node: (
+                            <span style={{ color: "#d04444ff" }}>
+                              {hasLydTotal || isGold
+                                ? `Remainder: ${Number(remLyd0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} LYD`
+                                : `Remainder: ${formatNumber(Math.abs(diff))} USD`}
+                            </span>
+                          ),
+                        });
+                      }
+                    }
+
+                    const restPieces: string[] = [];
                     const restLYD =
                       row.rest_of_money != null ? Number(row.rest_of_money) : 0;
                     const restUSD =
@@ -2139,7 +2263,6 @@ const SalesReportsTable = ({
                       row.rest_of_moneyEUR != null
                         ? Number(row.rest_of_moneyEUR)
                         : 0;
-                    const restPieces: string[] = [];
                     if (!isNaN(restLYD) && restLYD !== 0)
                       restPieces.push(`LYD ${formatNumber(restLYD)}`);
                     if (!isNaN(restUSD) && restUSD !== 0)
@@ -2147,44 +2270,34 @@ const SalesReportsTable = ({
                     if (!isNaN(restEUR) && restEUR !== 0)
                       restPieces.push(`EUR ${formatNumber(restEUR)}`);
                     if (restPieces.length > 0) {
-                      parts.push(
-                        <div
-                          key="restCombined"
-                          style={{ color: "#d04444ff" }}
-                        >{`Remaining: ${restPieces.join(" | ")}`}</div>
-                      );
+                      lines.push({
+                        key: "restCombined",
+                        node: (
+                          <span style={{ color: "#d04444ff" }}>
+                            {`Remaining: ${restPieces.join(" | ")}`}
+                          </span>
+                        ),
+                      });
                     }
 
-                    if (parts.length === 0) return "Amounts";
-                    return (
-                      <Box
+                    if (lines.length === 0) {
+                      lines.push({ key: "empty", node: "Amounts" });
+                    }
+
+                    return lines.map((l) => (
+                      <Typography
+                        key={l.key}
                         sx={{
-                          display: "flex",
-                          flexDirection: "column",
-                          alignItems: "flex-end",
-                          gap: 0,
+                          fontSize: 11,
+                          lineHeight: 1.25,
+                          background: "transparent",
                         }}
                       >
-                        {parts.map((p, i) => (
-                          <Typography key={i} sx={{ fontSize: 12 }}>
-                            {p}
-                          </Typography>
-                        ))}
-                      </Box>
-                    );
+                        {l.node}
+                      </Typography>
+                    ));
                   })()}
-                  size="small"
-                  variant="outlined"
-                  sx={{
-                    minHeight: 80,
-                    alignItems: "flex-start",
-                    py: 1.5,
-                    px: 2,
-                    fontSize: 13,
-                    border: "1px solid #05c535ff",
-                    color: "#05c535ff",
-                  }}
-                />
+                </Box>
               </Box>
 
               {!isChiraVal && !isChiraFieldsEmpty && (
@@ -2318,7 +2431,7 @@ const SalesReportsTable = ({
                                   alt={`Product Img`}
                                   style={{
                                     width: "100%",
-                                    height: "100%",
+                                    height: 140,
                                     objectFit: "fill",
                                     borderRadius: 6,
                                     border: "1px solid #eee",
@@ -2370,10 +2483,11 @@ const SalesReportsTable = ({
                                   const productRawUrls = productPicint
                                     ? imageUrls[productPicint] || []
                                     : [];
-                                  if (productRawUrls.length > 0) {
+                                  const first = (productRawUrls[0] || "").trim();
+                                  if (first) {
                                     return (
                                       <img
-                                        src={productRawUrls[0]}
+                                        src={first}
                                         alt="Product Img"
                                         style={{
                                           width: "100%",
@@ -2549,24 +2663,212 @@ const SalesReportsTable = ({
             </Box>*/}
 
             {/* Right: Confirm Order (solid) */}
-            <Box>
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
               <Button
                 variant="contained"
                 color="primary"
                 sx={{ padding: "6px 14px", fontSize: 12, fontWeight: 700 }}
                 onClick={() => {
-
                   setSelectedInvoice(row);
                   setPrintDialogOpen(true);
                 }}
               >
-                Confirm Order
+                Show Invoice
+              </Button>
+              <Button
+                variant="contained"
+                color="error"
+                sx={{ padding: "6px 14px", fontSize: 12, fontWeight: 800 }}
+                disabled={!!row?.IS_OK}
+                onClick={async () => {
+                  setCloseError("");
+                  setClosePayLydStr("");
+                  setClosePayUsdStr("");
+                  setClosePayUsdLydStr("");
+                  setClosePayEurStr("");
+                  setClosePayEurLydStr("");
+                  setCloseMakeCashVoucher(true);
+
+                  setCloseInvoice(row);
+                  setCloseDialogOpen(true);
+
+                  // Fetch full invoice rows so we can persist payment updates safely
+                  try {
+                    const token = localStorage.getItem("token");
+                    const psParam = String(row?.ps ?? "");
+                    const usrParam = String(row?.usr ?? "");
+                    const nfParam = String(row?.num_fact ?? "");
+                    if (!token || !psParam || !usrParam || !nfParam) return;
+                    const verifyRes = await axios.get(`/invoices/Getinvoice/`, {
+                      params: { ps: psParam, usr: usrParam, num_fact: nfParam },
+                      headers: { Authorization: `Bearer ${token}` },
+                    });
+                    setCloseInvoiceRows(Array.isArray(verifyRes.data) ? verifyRes.data : []);
+                  } catch {
+                    setCloseInvoiceRows([]);
+                  }
+                }}
+              >
+                Close Invoice
               </Button>
             </Box>
           </Box>
         </CardContent>
       </Card>
     );
+  };
+
+  const parseAmt = (s: string) => {
+    if (!s) return 0;
+    const v = Number(String(s).replace(/,/g, "").trim());
+    return Number.isFinite(v) ? v : 0;
+  };
+
+  const normalizeMoney = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
+
+  const normalizeLyd0 = (v: number) => Math.round(Number(v) || 0);
+  const moneyEps = 0.01;
+
+  const splitMoney2 = React.useCallback((raw: any) => {
+    const n = Number(raw) || 0;
+    const base = Math.floor(n);
+    let rem = Math.round((n - base) * 100) / 100;
+    // handle floating carry
+    if (rem >= 1) {
+      return { base: base + 1, rem: 0 };
+    }
+    if (rem < 0) rem = 0;
+    return { base, rem };
+  }, []);
+
+  const getUsdRate = React.useCallback(() => {
+    const inv = closeInvoice;
+    if (!inv) return NaN;
+    const usd = Number(inv?.amount_currency) || 0;
+    const usdLyd = Number(inv?.amount_currency_LYD) || 0;
+    if (usd > 0 && usdLyd > 0) {
+      const r = usdLyd / usd;
+      return Number.isFinite(r) && r > 0 ? r : NaN;
+    }
+    const r = Number(inv?.rate);
+    return Number.isFinite(r) && r > 0 ? r : NaN;
+  }, [closeInvoice]);
+
+  const getEurRate = React.useCallback(() => {
+    const inv = closeInvoice;
+    if (!inv) return NaN;
+    const eur = Number(inv?.amount_EUR) || 0;
+    const eurLyd = Number(inv?.amount_EUR_LYD) || 0;
+    if (eur > 0 && eurLyd > 0) {
+      const r = eurLyd / eur;
+      return Number.isFinite(r) && r > 0 ? r : NaN;
+    }
+    return NaN;
+  }, [closeInvoice]);
+
+  const closeTotals = React.useMemo(() => {
+    const inv = closeInvoice;
+    if (!inv) {
+      return {
+        totalLyd: 0,
+        paidLydEquiv: 0,
+        remainingLyd: 0,
+        recorded: { lyd: 0, usd: 0, eur: 0, usdLyd: 0, eurLyd: 0 },
+      };
+    }
+    const totalLyd = normalizeMoney(Number(inv?.total_remise_final_lyd ?? inv?.total_remise_final_LYD ?? 0) || 0);
+    const recordedLyd = normalizeMoney(Number(inv?.amount_lyd ?? 0) || 0);
+    const recordedUsd = Number(inv?.amount_currency ?? 0) || 0;
+    const recordedUsdLyd = normalizeMoney(Number(inv?.amount_currency_LYD ?? 0) || 0);
+    const recordedEur = Number(inv?.amount_EUR ?? 0) || 0;
+    const recordedEurLyd = normalizeMoney(Number(inv?.amount_EUR_LYD ?? 0) || 0);
+    const paidLydEquiv = normalizeMoney(recordedLyd + recordedUsdLyd + recordedEurLyd);
+    const remainingLyd = Math.max(0, normalizeMoney(totalLyd - paidLydEquiv));
+    return {
+      totalLyd,
+      paidLydEquiv,
+      remainingLyd,
+      recorded: { lyd: recordedLyd, usd: recordedUsd, eur: recordedEur, usdLyd: recordedUsdLyd, eurLyd: recordedEurLyd },
+    };
+  }, [closeInvoice]);
+
+  const closeEntered = React.useMemo(() => {
+    const lyd = normalizeLyd0(parseAmt(closePayLydStr));
+    const usd = parseAmt(closePayUsdStr);
+    const usdLyd = normalizeLyd0(parseAmt(closePayUsdLydStr));
+    const eur = parseAmt(closePayEurStr);
+    const eurLyd = normalizeLyd0(parseAmt(closePayEurLydStr));
+    const totalLydEquiv = lyd + usdLyd + eurLyd;
+    return { lyd, usd, usdLyd, eur, eurLyd, totalLydEquiv };
+  }, [closePayEurLydStr, closePayEurStr, closePayLydStr, closePayUsdLydStr, closePayUsdStr]);
+
+  // Compare what cashier entered now vs what was recorded during checkout.
+  // Positive diff means cashier entered more than recorded (overpayment).
+  // Negative diff means cashier entered less than recorded (remainder).
+  const closeCompareDiff = closeEntered.totalLydEquiv - closeTotals.paidLydEquiv;
+  const closeMismatch = Math.abs(closeCompareDiff) > moneyEps;
+  const closeIsOverpay = closeCompareDiff > moneyEps;
+  const closeIsRemainder = closeCompareDiff < -moneyEps;
+  const closeUsdEquivMissing = closeEntered.usd > 0 && closeEntered.usdLyd <= 0;
+  const closeEurEquivMissing = closeEntered.eur > 0 && closeEntered.eurLyd <= 0;
+
+  // Actual remaining after applying the payment entered in this dialog.
+  const closeOverpayNow = closeEntered.totalLydEquiv - closeTotals.remainingLyd;
+  const closeIsOverpayNow = closeOverpayNow > moneyEps;
+  const closeRemainingAfter = Math.max(0, normalizeLyd0(closeTotals.remainingLyd - closeEntered.totalLydEquiv));
+
+  const handleConfirmCloseInvoice = async () => {
+    const inv = closeInvoice;
+    if (!inv) return;
+    setCloseError("");
+
+    // Allow remainder, but never allow overpayment.
+    if (closeIsOverpayNow) {
+      setCloseError("Overpayment detected. Reduce the entered amount.");
+      return;
+    }
+    if (closeUsdEquivMissing || closeEurEquivMissing) {
+      setCloseError("If you enter USD/EUR you must also enter the LYD equivalent.");
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setCloseError("Missing token. Please login again.");
+      return;
+    }
+
+    const psParam = String(inv?.ps ?? "");
+    const usrParam = String(inv?.usr ?? "");
+    const numFactParam = String(inv?.num_fact ?? "");
+    if (!psParam || !usrParam || !numFactParam) {
+      setCloseError("Invoice ps/usr/num_fact missing.");
+      return;
+    }
+
+    setCloseLoading(true);
+    try {
+      // Close invoice (triggers GL)
+      await axios.get(`/invoices/CloseNF`, {
+        params: {
+          ps: psParam,
+          usr: usrParam,
+          num_fact: numFactParam,
+          MakeCashVoucher: String(!!closeMakeCashVoucher),
+          Type: String(inv?.type ?? inv?.Type ?? ""),
+        },
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setCloseDialogOpen(false);
+      setCloseInvoice(null);
+      setCloseInvoiceRows([]);
+      setInvoiceRefreshFlag((f) => f + 1);
+    } catch (e: any) {
+      setCloseError(e?.response?.data?.message || e?.message || "Failed to close invoice");
+    } finally {
+      setCloseLoading(false);
+    }
   };
 
   return (
@@ -2727,62 +3029,62 @@ const SalesReportsTable = ({
             size="small"
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
-            sx={{ minWidth: 200, flex: 1 }}
+            sx={{ minWidth: 260 }}
           />
+
           <Box
             sx={{
               display: "flex",
-              gap: 1,
               alignItems: "center",
+              justifyContent: "center",
+              gap: 1,
               flexWrap: "wrap",
+              borderRadius: 1,
+              p: 1,
             }}
           >
             <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
               Total unpaid:
             </Typography>
-            {totalRestLYD !== 0 && (
-              <Typography
-                variant="subtitle2"
-                sx={{ color: "#6a1b9a", fontWeight: 700 }}
-              >
-                LYD {formatNumber(totalRestLYD)}
-              </Typography>
-            )}
-            {totalRestUSD !== 0 && (
-              <Typography
-                variant="subtitle2"
-                sx={{ color: "#1976d2", fontWeight: 700 }}
-              >
-                USD {formatNumber(totalRestUSD)}
-              </Typography>
-            )}
-            {totalRestEUR !== 0 && (
-              <Typography
-                variant="subtitle2"
-                sx={{ color: "#388e3c", fontWeight: 700 }}
-              >
-                EUR {formatNumber(totalRestEUR)}
-              </Typography>
-            )}
+            <Box sx={{ display: "flex", flexDirection: "row", gap: 1.5, alignItems: "flex-start", flexWrap: "wrap" }}>
+              {totalRestLYD !== 0 && (() => {
+                const s = splitMoney2(totalRestLYD);
+                return (
+                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
+                    <Typography variant="subtitle2" sx={{ color: "#6a1b9a", fontWeight: 700 }}>
+                      LYD {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+                );
+              })()}
+              {totalRestUSD !== 0 && (() => {
+                const s = splitMoney2(totalRestUSD);
+                return (
+                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
+                    <Typography variant="subtitle2" sx={{ color: "#1976d2", fontWeight: 700 }}>
+                      USD {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+                );
+              })()}
+              {totalRestEUR !== 0 && (() => {
+                const s = splitMoney2(totalRestEUR);
+                return (
+                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
+                    <Typography variant="subtitle2" sx={{ color: "#388e3c", fontWeight: 700 }}>
+                      EUR {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+                );
+              })()}
+            </Box>
             {totalRestLYD === 0 && totalRestUSD === 0 && totalRestEUR === 0 && (
               <Typography variant="body2" sx={{ color: "#888" }}>
                 No outstanding payments
               </Typography>
             )}
           </Box>
-        </Box>
 
-        {/* Summary totals (moved to top after search) */}
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            mt: 0,
-            mb: 2,
-            gap: 2,
-            flexWrap: "wrap",
-          }}
-        >
           <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
             Invoice Count: {summaryStats.invoiceCount}
           </Typography>
@@ -2925,10 +3227,27 @@ const SalesReportsTable = ({
               const customer = invoice.Client || undefined;
               // Items: for compatibility, pass as array with one invoice
               const items = [invoice];
-              // Totals
-              const totalAmountLYD = Number(invoice.amount_lyd) || 0;
-              const totalAmountUSD = Number(invoice.amount_currency) || 0;
-              const totalAmountEur = Number(invoice.amount_EUR) || 0;
+              const isGold =
+                !!invoice?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER
+                  ?.toLowerCase()
+                  .includes("gold");
+
+              // Totals: IMPORTANT
+              // `amount_lyd/amount_currency/amount_EUR` are PAID amounts.
+              // The print view needs the INVOICE TOTAL to match checkout.
+              const totalLydFromInvoice =
+                Number(
+                  (invoice as any).total_remise_final_lyd ??
+                    (invoice as any).total_remise_final_LYD ??
+                    0
+                ) || 0;
+              const totalUsdFromInvoice = Number((invoice as any).total_remise_final) || 0;
+
+              const totalAmountLYD = isGold
+                ? totalLydFromInvoice || totalUsdFromInvoice
+                : totalLydFromInvoice;
+              const totalAmountUSD = isGold ? 0 : totalUsdFromInvoice;
+              const totalAmountEur = Number((invoice as any).totalAmountEur) || 0;
               const totalWeight =
                 invoice._productDetails?.reduce(
                   (sum: number, d: any) => sum + (Number(d.weight) || 0),
@@ -2961,13 +3280,216 @@ const SalesReportsTable = ({
             printRef={printRef}
             onClose={() => setPrintDialogOpen(false)}
             onInvoiceClosed={() => setInvoiceRefreshFlag((f) => f + 1)}
-            showCloseInvoiceActions={true}
-            showCloseInvoice={
-              selectedInvoice && selectedInvoice.IS_OK === false
-            }
+            showCloseInvoiceActions={false}
+            showCloseInvoice={false}
             createdBy={selectedInvoice?.Utilisateur?.name_user || ""}
           />
         )}
+
+        <Dialog
+          open={closeDialogOpen}
+          onClose={() => {
+            if (closeLoading) return;
+            setCloseDialogOpen(false);
+          }}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>Close Invoice</DialogTitle>
+          <DialogContent sx={{ pt: 2 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
+              <Typography sx={{ fontWeight: 800 }}>
+                Invoice #{closeInvoice?.num_fact}
+              </Typography>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography sx={{ fontWeight: 700 }}>Total (LYD)</Typography>
+                {(() => {
+                  return (
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography sx={{ fontWeight: 900 }}>
+                        {Number(closeTotals.totalLyd).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </Typography>
+                    </Box>
+                  );
+                })()}
+              </Box>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography sx={{ fontWeight: 700 }}>Paid so far (LYD equiv)</Typography>
+                {(() => {
+                  return (
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography sx={{ fontWeight: 900 }}>
+                        {Number(closeTotals.paidLydEquiv).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </Typography>
+                    </Box>
+                  );
+                })()}
+              </Box>
+
+              <Box sx={{ textAlign: "center", mt: 0.5, p: 1, border: "1px solid #eee", borderRadius: 1, background: "#68a5bf" }}>
+                <Typography sx={{ fontWeight: 900, fontSize: 16, mb: 0.5 }}>
+                  Recorded at invoice creation
+                </Typography>
+                <Typography sx={{ fontSize: 16, color: "primary" }}>
+                  LYD: {Number(closeTotals.recorded.lyd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  {"  "} | USD: {Number(closeTotals.recorded.usd || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} (LYD {Number(closeTotals.recorded.usdLyd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })})
+                  {"  "} | EUR: {Number(closeTotals.recorded.eur || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} (LYD {Number(closeTotals.recorded.eurLyd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })})
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography sx={{ fontWeight: 700 }}>Remaining (LYD)</Typography>
+                {(() => {
+                  return (
+                    <Box sx={{ textAlign: "right" }}>
+                      <Typography sx={{ fontWeight: 900, color: closeTotals.remainingLyd > 0 ? "error.main" : "success.main" }}>
+                        {Number(closeTotals.remainingLyd).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </Typography>
+                    </Box>
+                  );
+                })()}
+              </Box>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography sx={{ fontWeight: 800 }}>Remaining after this payment</Typography>
+                <Typography sx={{ fontWeight: 900, color: closeIsOverpayNow ? "error.main" : closeRemainingAfter > 0 ? "warning.main" : "success.main" }}>
+                  {closeIsOverpayNow
+                    ? `Overpayment: ${Number(Math.abs(closeOverpayNow)).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD`
+                    : `${Number(closeRemainingAfter).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD`}
+                </Typography>
+              </Box>
+
+              <Box sx={{ mt: 1, fontWeight: 900 }}>Enter payment now (partial allowed, no overpay)</Box>
+
+              <TextField
+                label="Pay now (LYD)"
+                value={closePayLydStr}
+                onChange={(e) => setClosePayLydStr(e.target.value)}
+                onBlur={() => {
+                  const v = parseAmt(closePayLydStr);
+                  setClosePayLydStr(v ? String(normalizeMoney(v)) : "");
+                }}
+                size="small"
+                fullWidth
+                inputMode="decimal"
+                inputProps={{ pattern: "[0-9.,-]*" }}
+              />
+              <TextField
+                label="Pay now (USD)"
+                value={closePayUsdStr}
+                onChange={(e) => setClosePayUsdStr(e.target.value)}
+                onBlur={() => {
+                  const usd = parseAmt(closePayUsdStr);
+                  const r = getUsdRate();
+                  setClosePayUsdStr(usd ? String(normalizeMoney(usd)) : "");
+                  if (usd > 0 && (!parseAmt(closePayUsdLydStr) || parseAmt(closePayUsdLydStr) <= 0) && Number.isFinite(r) && r > 0) {
+                    setClosePayUsdLydStr(String(normalizeMoney(usd * r)));
+                  }
+                }}
+                size="small"
+                fullWidth
+                inputMode="decimal"
+                inputProps={{ pattern: "[0-9.,-]*" }}
+              />
+              <TextField
+                label="USD equiv (LYD)"
+                value={closePayUsdLydStr}
+                onChange={(e) => setClosePayUsdLydStr(e.target.value)}
+                onBlur={() => {
+                  const v = parseAmt(closePayUsdLydStr);
+                  setClosePayUsdLydStr(v ? String(normalizeMoney(v)) : "");
+                }}
+                size="small"
+                fullWidth
+                inputMode="decimal"
+                inputProps={{ pattern: "[0-9.,-]*" }}
+              />
+              <TextField
+                label="Pay now (EUR)"
+                value={closePayEurStr}
+                onChange={(e) => setClosePayEurStr(e.target.value)}
+                onBlur={() => {
+                  const eur = parseAmt(closePayEurStr);
+                  const r = getEurRate();
+                  setClosePayEurStr(eur ? String(normalizeMoney(eur)) : "");
+                  if (eur > 0 && (!parseAmt(closePayEurLydStr) || parseAmt(closePayEurLydStr) <= 0) && Number.isFinite(r) && r > 0) {
+                    setClosePayEurLydStr(String(normalizeMoney(eur * r)));
+                  }
+                }}
+                size="small"
+                fullWidth
+                inputMode="decimal"
+                inputProps={{ pattern: "[0-9.,-]*" }}
+              />
+              <TextField
+                label="EUR equiv (LYD)"
+                value={closePayEurLydStr}
+                onChange={(e) => setClosePayEurLydStr(e.target.value)}
+                onBlur={() => {
+                  const v = parseAmt(closePayEurLydStr);
+                  setClosePayEurLydStr(v ? String(normalizeMoney(v)) : "");
+                }}
+                size="small"
+                fullWidth
+                inputMode="decimal"
+                inputProps={{ pattern: "[0-9.,-]*" }}
+              />
+
+              <Box sx={{ display: "flex", justifyContent: "space-between", mt: 0.5 }}>
+                <Typography sx={{ fontWeight: 800 }}>Entered (LYD equiv)</Typography>
+                <Typography sx={{ fontWeight: 900, color: closeMismatch ? "error.main" : "text.primary" }}>
+                  {closeEntered.totalLydEquiv.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                </Typography>
+              </Box>
+
+              <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                <Typography sx={{ fontWeight: 800 }}>Compare vs recorded</Typography>
+                <Typography sx={{ fontWeight: 900 }}>
+                  {closeMismatch ? (
+                    <Box component="span" sx={{ color: "error.main" }}>
+                      {closeIsOverpay ? "Overpayment" : "Remainder"}: {Math.abs(closeCompareDiff).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD
+                    </Box>
+                  ) : (
+                    <Box component="span" sx={{ color: "success.main" }}>
+                      Match
+                    </Box>
+                  )}
+                </Typography>
+              </Box>
+
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={closeMakeCashVoucher}
+                    onChange={(e) => setCloseMakeCashVoucher(e.target.checked)}
+                  />
+                }
+                label="Create cash voucher"
+              />
+
+              {closeError ? (
+                <Box sx={{ color: "error.main", fontWeight: 800 }}>
+                  {closeError}
+                </Box>
+              ) : null}
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setCloseDialogOpen(false)} disabled={closeLoading}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={handleConfirmCloseInvoice}
+              disabled={closeLoading || closeIsOverpayNow || closeUsdEquivMissing || closeEurEquivMissing}
+            >
+              {closeLoading ? "Closing..." : "Close Invoice"}
+            </Button>
+          </DialogActions>
+        </Dialog>
         {/* Chira Return Dialog */}
         <Dialog
           open={chiraDialogOpen}

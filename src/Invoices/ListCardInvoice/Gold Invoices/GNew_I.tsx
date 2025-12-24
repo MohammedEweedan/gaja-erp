@@ -12,13 +12,14 @@ import axios from "../../../api";
 
 import IconButton from "@mui/material/IconButton";
 import { useNavigate } from "react-router-dom";
-import { Box, Button, Typography, TextField, MenuItem, Menu } from "@mui/material";
+import { Box, Button, Typography, TextField, MenuItem, Menu, Slider } from "@mui/material";
 import Switch from "@mui/material/Switch";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import Collapse from "@mui/material/Collapse";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Divider from "@mui/material/Divider";
+import { ShoppingCartCheckoutOutlined } from "@mui/icons-material";
 
 import {
   Dialog,
@@ -357,6 +358,36 @@ type Sm = {
 
 const API_BASEImage = "/images";
 
+const normalizeImageList = (arr: any): string[] => {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((it: any) => {
+      if (typeof it === "string") return it;
+      if (it && typeof it === "object") return it.url || it.path || it.href || it.src || "";
+      return "";
+    })
+    .filter(Boolean);
+};
+
+const toApiImageAbsolute = (url: string): string => {
+  try {
+    if (!url) return url;
+    if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+    if (/^https?:\/\//i.test(url) || url.startsWith("//")) return url;
+    if (!url.startsWith("/")) return url;
+    const base = (axios as any)?.defaults?.baseURL;
+    if (base) {
+      const u = new URL(base, window.location.origin);
+      const cleanPath = u.pathname.replace(/\/+$/, "");
+      const root = `${u.origin}${cleanPath}`;
+      return `${root}${url}`;
+    }
+    return `${window.location.origin}${url}`;
+  } catch {
+    return url;
+  }
+};
+
 
 
 // Normalize / rewrite watch image URLs to the new alias route
@@ -412,6 +443,21 @@ function stripToken(u: string): string {
   }
 }
 
+const canonicalizePrefUrl = (rawUrl: string, kind: "gold" | "diamond" | "watch" | undefined, idAchat: any): string => {
+  if (!rawUrl) return rawUrl;
+  try {
+    let u = stripToken(String(rawUrl));
+    if (kind === "watch" && idAchat != null) {
+      u = normalizeWatchUrl(u, Number(idAchat));
+    }
+    // Canonical form: pathname only (stable across origins)
+    const urlObj = new URL(u, window.location.origin);
+    return urlObj.pathname;
+  } catch {
+    return stripToken(String(rawUrl));
+  }
+};
+
 // Parse purity factor from a type string (e.g., "21K" -> 0.875)
 const parsePurityFactorFromType = (raw?: string): number | null => {
   if (!raw) return null;
@@ -455,6 +501,7 @@ const DNew_I = () => {
 
   // const [images, setImages] = useState<Record<number, string[]>>({});
   const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
+  const [resolvedImgSrc, setResolvedImgSrc] = useState<Record<string, string>>({});
 
   // Image key namespacing to isolate gold/watch/diamond
   const getImageKey = (kind: "gold" | "watch" | "diamond" | undefined, id: number | string): string => {
@@ -715,34 +762,72 @@ const DNew_I = () => {
     return bestIdx;
   }
 
+  const IMAGE_BASES = (() => {
+    const unique = new Set<string>();
+    const add = (s: string) => {
+      const v = String(s || "").trim().replace(/\/+$/, "");
+      if (v) unique.add(v);
+    };
+    const candidates: string[] = [];
+    const envBase =
+      (process.env.REACT_APP_API_BASE_URL ||
+        process.env.REACT_APP_API_IP ||
+        axios.defaults.baseURL ||
+        "")
+        .toString()
+        .trim();
+    if (envBase) candidates.push(envBase);
+    candidates.push(window.location.origin);
+
+    for (const c of candidates) {
+      let origin = "";
+      try {
+        origin = new URL(c).origin;
+      } catch {
+        origin = c.replace(/\/+$/, "");
+      }
+      if (!origin) continue;
+      add(`${origin}/images`);
+      add(`${origin}/api/images`);
+      // If base already contains /api, still ensure non-api images base exists
+      add(origin.replace(/\/+$/, "") + "/images");
+    }
+
+    return Array.from(unique);
+  })();
+
   const fetchImages = async (
     id_achat: number,
-    kind?: "diamond" | "watch" | "gold"
-  ) => {
+    kind?: "diamond" | "watch" | "gold",
+    storeKeyOverride?: string
+  ): Promise<string[] | null> => {
     const token = localStorage.getItem("token");
     if (!token || !id_achat) {
       console.debug('[fetchImages] skip: missing token or id', { id_achat, kind, hasToken: !!token });
-      return;
+      return null;
     }
     // Avoid refetch if already loaded (even empty array marks attempted)
-    const nsKey = getImageKey(kind, id_achat);
-    if (imageUrls[nsKey]) return;
+    const nsKey = storeKeyOverride || getImageKey(kind, id_achat);
+    // If we already have a non-empty list, don't refetch.
+    // IMPORTANT: empty list should NOT block retries (gold often needs fallbacks id_achat -> id_fact).
+    if (Array.isArray(imageUrls[nsKey]) && imageUrls[nsKey].length > 0) return imageUrls[nsKey];
 
     const tryEndpoints: string[] = [];
-    if (kind === "diamond") {
-      tryEndpoints.push(`${API_BASEImage}/list/diamond/${id_achat}`);
-      tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`); // fallback
-    } else if (kind === "watch") {
-      // Be explicit for watches: only read from WatchPic
-      tryEndpoints.push(`${API_BASEImage}/list/watch/${id_achat}`);
-      // Fallback to legacy watch list just in case
-      tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`);
-    } else if (kind === "gold") {
-      // Gold specific endpoint then generic legacy
-      tryEndpoints.push(`${API_BASEImage}/list/gold/${id_achat}`);
-      tryEndpoints.push(`${API_BASEImage}/list/${id_achat}`);
+    for (const base of IMAGE_BASES) {
+      if (kind === "diamond") {
+        tryEndpoints.push(`${base}/list/diamond/${id_achat}`);
+        tryEndpoints.push(`${base}/list/${id_achat}`); // fallback
+      } else if (kind === "watch") {
+        // Be explicit for watches: only read from WatchPic
+        tryEndpoints.push(`${base}/list/watch/${id_achat}`);
+        // Fallback to legacy watch list just in case
+        tryEndpoints.push(`${base}/list/${id_achat}`);
+      } else if (kind === "gold") {
+        // Gold specific endpoint then generic legacy
+        tryEndpoints.push(`${base}/list/gold/${id_achat}`);
+        tryEndpoints.push(`${base}/list/${id_achat}`);
+      }
     }
-
 
     for (const ep of tryEndpoints) {
       try {
@@ -750,16 +835,7 @@ const DNew_I = () => {
         const res = await axios.get(ep, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        let urls: string[] = [];
-        if (
-          Array.isArray(res.data) &&
-          res.data.length > 0 &&
-          typeof res.data[0] === "object"
-        ) {
-          urls = res.data.map((img: any) => img.url || img);
-        } else {
-          urls = res.data;
-        }
+        let urls: string[] = normalizeImageList(res.data);
         // For diamond type, sort images by creation date (if possible) and show last image as default
         if (kind === "diamond") {
           // Keep all images; sort by date/name for stable ordering
@@ -782,15 +858,16 @@ const DNew_I = () => {
         console.debug('[fetchImages] received', { nsKey, urlsLength: urls.length, sample: urls[0] });
         setImageUrls((prev) => ({ ...prev, [nsKey]: urls }));
         // await Promise.all(urls.map((url) => fetchImageWithAuth(url, token)));
-        return;
+        return urls;
       } catch (e) {
         console.debug('[fetchImages] endpoint error', { ep, err: (e as any)?.message });
       }
     }
+    // Mark attempted (empty). Candidate-id fetchers may still retry with another id and override.
     setImageUrls((prev) => ({ ...prev, [nsKey]: [] }));
     console.debug('[fetchImages] no urls found, set empty for', nsKey);
 
-
+    return null;
   };
 
   // const   Type  = 'gold';
@@ -1042,31 +1119,102 @@ const DNew_I = () => {
   const [dialogImageList, setDialogImageList] = useState<string[]>([]);
   const [dialogImageIndex, setDialogImageIndex] = useState(0);
   const [dialogZoom, setDialogZoom] = useState(1);
+  const [dialogPan, setDialogPan] = useState({ x: 0, y: 0 });
+  const dialogPanStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dialogPointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [dialogIsPanning, setDialogIsPanning] = useState(false);
   const [dialogItem, setDialogItem] = useState<InventoryItem | null>(null);
 
   useEffect(() => {
-    if (imageDialogOpen) setDialogZoom(1);
+    if (imageDialogOpen) {
+      setDialogZoom(1);
+      setDialogPan({ x: 0, y: 0 });
+      setDialogIsPanning(false);
+      dialogPanStartRef.current = null;
+      dialogPointerStartRef.current = null;
+    }
   }, [imageDialogOpen]);
+
+  useEffect(() => {
+    if (!dialogIsPanning) return;
+    const onMove = (e: PointerEvent) => {
+      if (!dialogPanStartRef.current || !dialogPointerStartRef.current) return;
+      const dx = e.clientX - dialogPointerStartRef.current.x;
+      const dy = e.clientY - dialogPointerStartRef.current.y;
+      setDialogPan({
+        x: dialogPanStartRef.current.x + dx,
+        y: dialogPanStartRef.current.y + dy,
+      });
+    };
+    const onUp = () => {
+      setDialogIsPanning(false);
+      dialogPanStartRef.current = null;
+      dialogPointerStartRef.current = null;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dialogIsPanning]);
 
   // Charges dialog (admin only)
   const [chargesDialogOpen, setChargesDialogOpen] = useState(false);
   const [chargesDialogRow, setChargesDialogRow] = useState<any | null>(null);
+
+  const getPreferredImageKey = React.useCallback(
+    (kind: "gold" | "diamond" | "watch", id: any) =>
+      `prefImg:${kind}:${String(id ?? "").trim()}`,
+    []
+  );
+
+  const pickPreferredIndexWithOverride = React.useCallback(
+    (urls: string[], kind?: "gold" | "diamond" | "watch", id?: any) => {
+      try {
+        if (kind && id != null) {
+          const prefRaw = localStorage.getItem(getPreferredImageKey(kind, id)) || "";
+          const pref = canonicalizePrefUrl(prefRaw, kind, id);
+          if (pref) {
+            const idx = urls.findIndex((u) => canonicalizePrefUrl(String(u), kind, id) === pref);
+            if (idx >= 0) return idx;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return pickPreferredImageIndex(urls);
+    },
+    [getPreferredImageKey]
+  );
+
+  const normalizeDialogUrls = React.useCallback(
+    (raw: any): string[] => {
+      const list = normalizeImageList(raw);
+      return list.map((u) => toApiImageAbsolute(String(u)));
+    },
+    [normalizeImageList]
+  );
 
   const handleViewImage = (row: InventoryItem) => {
     // Determine whether row has diamond or watch purchase to choose endpoint
     let dp: any = row.DistributionPurchase;
     let diamond: any;
     let watch: any;
+    let gold: any;
     let idAchat: any;
     if (Array.isArray(dp) && dp.length > 0) {
       diamond = dp[0]?.OriginalAchatDiamond;
       watch = dp[0]?.OriginalAchatWatch;
+      gold = dp.find((d: any) => d?.GoldOriginalAchat)?.GoldOriginalAchat;
     } else if (dp && typeof dp === "object") {
       diamond = dp?.OriginalAchatDiamond;
       watch = dp?.OriginalAchatWatch;
+      gold = (dp as any)?.GoldOriginalAchat;
     }
     if (diamond?.id_achat) idAchat = diamond.id_achat;
     else if (watch?.id_achat) idAchat = watch.id_achat;
+    else if (gold?.id_achat) idAchat = gold.id_achat;
     else idAchat = row.id_fact;
     const kind: "diamond" | "watch" | "gold" | undefined = diamond?.id_achat
       ? "diamond"
@@ -1077,20 +1225,23 @@ const DNew_I = () => {
           : undefined;
     const key = getImageKey(kind, idAchat);
     let urls = imageUrls[key] || [];
+    urls = normalizeDialogUrls(urls);
     // If diamond type, apply preferred selection logic for default image
-    if (diamond?.id_achat) {
+    if (kind === "gold") {
       // Filter out group images; pick marketing -> invoice -> newest
       const filteredUrls = urls.filter((u) => !/group/i.test(u));
       if (filteredUrls.length === 0) {
         setDialogImageList(urls);
-        setDialogImageIndex(pickPreferredImageIndex(urls));
+        setDialogImageIndex(pickPreferredIndexWithOverride(urls, kind, idAchat));
       } else {
         setDialogImageList(filteredUrls);
-        setDialogImageIndex(pickPreferredImageIndex(filteredUrls));
+        setDialogImageIndex(
+          pickPreferredIndexWithOverride(filteredUrls, kind, idAchat)
+        );
       }
     } else {
       setDialogImageList(urls);
-      setDialogImageIndex(pickPreferredImageIndex(urls));
+      setDialogImageIndex(pickPreferredIndexWithOverride(urls, kind, idAchat));
     }
     setDialogItem(row);
     setImageDialogOpen(true);
@@ -1427,39 +1578,95 @@ const DNew_I = () => {
       // Gold items: fetch by id_fact using gold endpoint
       const typeSupplier = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
       if (typeSupplier.includes("gold")) {
-        const goldId = (row as any).picint || row.id_fact;
-        if (goldId) {
-          const goldKey = getImageKey("gold", goldId);
-          if (imageUrls[goldKey] === undefined && !requested.has(goldKey)) {
-            fetchImages(goldId, "gold");
-            requested.add(goldKey);
+        const goldDp: any = row.DistributionPurchase;
+        const goldObj = Array.isArray(goldDp) && goldDp.length > 0
+          ? goldDp.find((d: any) => d?.GoldOriginalAchat)?.GoldOriginalAchat || goldDp[0]?.GoldOriginalAchat
+          : (goldDp && typeof goldDp === 'object' ? (goldDp as any).GoldOriginalAchat : null);
+        const candidates = [
+          goldObj?.id_achat,
+          (row as any).id_art,
+          (row as any).picint,
+          row.id_fact,
+        ]
+          .map((v) => Number(v || 0))
+          .filter((v) => v > 0);
+        const storeId = candidates[0];
+        if (storeId) {
+          const storeKey = getImageKey("gold", storeId);
+          if (imageUrls[storeKey] === undefined && !requested.has(storeKey)) {
+            (async () => {
+              for (const cid of candidates) {
+                const got = await fetchImages(cid, "gold", storeKey);
+                if (Array.isArray(got) && got.length > 0) break;
+              }
+            })();
+            requested.add(storeKey);
           }
         }
       }
     });
     datainv.forEach((inv) => {
-      if (inv.picint) {
-        const achat = inv.ACHATs?.[0];
-        const ts = String(achat?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
-        const kind: "gold" | "watch" | "diamond" | undefined = ts.includes('gold')
-          ? 'gold'
-          : ts.includes('watch')
-            ? 'watch'
-            : ts.includes('diamond')
-              ? 'diamond'
-              : undefined;
-        const key = getImageKey(kind, inv.picint);
-        if (imageUrls[key] === undefined && !requested.has(key)) {
-          fetchImages(inv.picint, kind);
-          requested.add(key);
+      const achat = inv.ACHATs?.[0];
+      const ts = String(achat?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
+      const dp: any = (achat as any)?.DistributionPurchase || (inv as any)?.DistributionPurchase;
+      let diamond: any;
+      let watch: any;
+      let gold: any;
+      if (Array.isArray(dp) && dp.length > 0) {
+        diamond = dp[0]?.OriginalAchatDiamond;
+        watch = dp[0]?.OriginalAchatWatch;
+        gold = dp.find((d: any) => d?.GoldOriginalAchat)?.GoldOriginalAchat || dp[0]?.GoldOriginalAchat;
+      } else if (dp && typeof dp === 'object') {
+        diamond = (dp as any)?.OriginalAchatDiamond;
+        watch = (dp as any)?.OriginalAchatWatch;
+        gold = (dp as any)?.GoldOriginalAchat;
+      }
+
+      const isGold = ts.includes('gold') && !ts.includes('watch') && !ts.includes('diamond');
+      const kind: "gold" | "watch" | "diamond" | undefined = isGold
+        ? 'gold'
+        : ts.includes('watch')
+          ? 'watch'
+          : ts.includes('diamond')
+            ? 'diamond'
+            : undefined;
+
+      const goldCandidates = kind === 'gold'
+        ? [
+          gold?.id_achat,
+          (inv as any).id_art,
+          (inv as any).picint,
+          inv.id_fact,
+        ]
+          .map((v) => Number(v || 0))
+          .filter((v) => v > 0)
+        : [];
+
+      const imageId =
+        kind === 'gold'
+          ? goldCandidates[0]
+          : (diamond?.id_achat || watch?.id_achat || (inv as any).picint || inv.id_fact);
+
+      if (!kind || !imageId) return;
+      const key = getImageKey(kind, imageId);
+      if (imageUrls[key] === undefined && !requested.has(key)) {
+        if (kind === 'gold' && goldCandidates.length > 0) {
+          // try invoice/item ids until we get a non-empty list, store under the key used by UI
+          const storeKey = key;
+          (async () => {
+            for (const cid of goldCandidates) {
+              const got = await fetchImages(cid, kind, storeKey);
+              if (Array.isArray(got) && got.length > 0) break;
+            }
+          })();
+        } else {
+          fetchImages(imageId, kind);
         }
-
-
-
+        requested.add(key);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paginatedData, datainv, imageUrls]);
+  }, [paginatedData, datainv]);
 
   const apiUrlinv = `${apiIp}/invoices`;
 
@@ -1667,12 +1874,15 @@ const DNew_I = () => {
       const shippingVal = Number(ShippingCharge || 0);
       const travelVal = Number(TravelExpesenes || 0);
       const qtyVal = Number(item.qty || 0);
-      const subtotal = (basePerGram * f + makingVal + shippingVal + travelVal) * qtyVal;
-      const lossPct = Number(subtotal * (LossExpesenes || 0) / 100);
-      const profitPct = Number(subtotal * (profitMargin || 0) / 100);
-      const salesUsd = subtotal + lossPct + profitPct;
-      const fx = effectiveUsdToLyd || (lastUsdRate || 1);
-      const sales = Number(salesUsd * fx);
+
+      // IMPORTANT: match the UI card formula used for displayMainNum/displaySubNum.
+      const indirectCostPct = Number((((goldObj as any)?.IndirectCost || 0)) / 100);
+      const profitPct = Number((profitMargin || 0) / 100);
+      const lossPct = Number(LossExpesenes || 0) / 100;
+
+      const perGramUsd = basePerGram * f * (1 + lossPct) + makingVal + shippingVal + travelVal;
+      const fx = Number(lastUsdRate || 1);
+      const sales = qtyVal * perGramUsd * (1 + indirectCostPct + profitPct) * fx;
       if (!Number.isFinite(sales)) return null;
       return sales;
     } catch (e) {
@@ -1744,20 +1954,11 @@ const DNew_I = () => {
         const w = Number(item.qty || 0);
         price_per_piece = Number(prix_vente) || 0;
         price_per_gram = w > 0 ? (Number(prix_vente) || 0) / w : 0;
-        editInvoice.picint = item.id_fact;
       } else {
         prix_vente = item.Selling_Price_Currency || 0;
       }
 
-      const existingComment = String(editInvoice?.COMMENT ?? "");
-      const meta = {
-        price_per_gram,
-        price_per_piece,
-      };
-      const metaTag = `__META__${JSON.stringify(meta)}`;
-      const commentWithMeta = existingComment.includes("__META__")
-        ? existingComment.replace(/__META__\{[\s\S]*\}$/, metaTag)
-        : (existingComment ? `${existingComment} | ${metaTag}` : metaTag);
+      const commentWithMeta = String(editInvoice?.COMMENT ?? "");
 
       const invoiceData = {
         ...editInvoice,
@@ -2240,32 +2441,43 @@ const DNew_I = () => {
       // ensure latest USD rate before creating new invoice
       try { await fetchLastUsdRate(); } catch { }
       try { await fetchGoldSpot(); } catch { }
-      const { status } = await axios.get(`${apiUrlinv}/NewNF`, {
+      const res = await axios.get(`${apiUrlinv}/NewNF`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { ps, usr: Cuser },
       });
-      if (status !== 200) throw new Error("Failed to fetch new invoice number");
+      if (res.status !== 200) throw new Error("Failed to fetch new invoice number");
 
-      // Update num_fact for all items in datainv to newNumFact
-      setDatainv((prev) =>
-        prev.map((item) => ({
-          ...item,
-          num_fact: 0
-        }))
-      );
+      const maybeNum =
+        (res.data && typeof res.data === 'object' && (res.data as any).num_fact != null)
+          ? Number((res.data as any).num_fact)
+          : (typeof res.data === 'number' || typeof res.data === 'string')
+            ? Number(res.data)
+            : NaN;
 
-      const latestInvoice = datainv[datainv.length - 1];
+      // Server should move the draft (num_fact=0) to issued by assigning num_fact.
+      // Clear local cart immediately to avoid requiring a refresh.
+      setDatainv([]);
+      setEditInvoice(initialInvoiceState);
+      setCanPrint(false);
 
-      if (latestInvoice) {
-        latestInvoice.num_fact = 0;
-      }
+      // Refresh the cart from server (should become empty). If not empty, keep what server says.
+      try {
+        await fetchDataINV();
+      } catch { }
 
-      // Option 1 printing hierarchy: do not auto-open print dialog.
-      // After creating a new invoice number, allow printing manually.
-      setCanPrint(true);
+      setSnackbar({
+        open: true,
+        message: Number.isFinite(maybeNum) && maybeNum > 0
+          ? `Invoice #${maybeNum} created.`
+          : `Invoice created.`,
+        severity: "success",
+      });
     } catch (error) {
-
-
+      setSnackbar({
+        open: true,
+        message: (error as any)?.response?.data?.message || (error as any)?.message || "Failed to create invoice number",
+        severity: "error",
+      });
     }
   };
 
@@ -2328,8 +2540,12 @@ const DNew_I = () => {
         } catch { /* ignore comment bulk update errors */ }
         //   setSnackbar({ open: true, message: 'Invoice totals updated successfully', severity: 'success' });
         setTotalsDialog((prev) => ({ ...prev, open: false }));
-        await fetchDataINV();
-        // After successful checkout update, allow printing (do not auto-open dialog)
+        // Confirm Checkout should NOT generate num_fact.
+        // Keep draft invoice rows (num_fact=0) so user can proceed to invoice preview.
+        // Refresh from server and then enable "Proceed to Invoice".
+        try {
+          await fetchDataINV();
+        } catch { }
         setCanPrint(true);
       } catch (error) {
 
@@ -2418,6 +2634,10 @@ const DNew_I = () => {
           setImageDialogOpen(false);
           setDialogItem(null);
           setDialogZoom(1);
+          setDialogPan({ x: 0, y: 0 });
+          setDialogIsPanning(false);
+          dialogPanStartRef.current = null;
+          dialogPointerStartRef.current = null;
         }}
         maxWidth="md"
         fullWidth
@@ -2436,7 +2656,7 @@ const DNew_I = () => {
           >
             {dialogImageList.length > 0 ? (
               <>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%", justifyContent: "center" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
                   <Button
                     onClick={() =>
                       setDialogImageIndex(
@@ -2450,107 +2670,94 @@ const DNew_I = () => {
                     {"<"}
                   </Button>
 
-                  <IconButton
-                    size="small"
-                    onClick={() => setDialogZoom((z) => Math.max(1, Number((z - 0.25).toFixed(2))))}
-                    disabled={dialogZoom <= 1}
-                  >
-                    <RemoveOutlinedIcon />
-                  </IconButton>
-                  <Typography sx={{ fontWeight: 800, color: "text.secondary" }}>{Math.round(dialogZoom * 100)}%</Typography>
-                  <IconButton
-                    size="small"
-                    onClick={() => setDialogZoom((z) => Math.min(3, Number((z + 0.25).toFixed(2))))}
-                  >
-                    <AddOutlinedIcon />
-                  </IconButton>
-
-                  <img
-                    src={(() => {
-                      let url = dialogImageList[dialogImageIndex];
-                      if (!url) return "";
-                      const token = localStorage.getItem("token");
-                      if (token && url && !url.includes("token=")) {
-                        url +=
-                          (url.includes("?") ? "&" : "?") +
-                          "token=" +
-                          encodeURIComponent(token);
-                      }
-                      return url;
-                    })()}
-                    alt="Selected"
-                    style={{
-                      maxWidth: "100%",
-                      maxHeight: "400px",
-                      objectFit: "contain",
-                      transform: `scale(${dialogZoom})`,
-                      transformOrigin: "center center",
-                      transition: "transform 120ms ease",
+                  <Box
+                    sx={{
+                      flex: 1,
+                      height: 420,
+                      overflow: "hidden",
+                      position: "relative",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      touchAction: "none",
+                      cursor:
+                        dialogZoom > 1
+                          ? dialogIsPanning
+                            ? "grabbing"
+                            : "grab"
+                          : "default",
                     }}
-                  />
+                    onPointerDown={(e) => {
+                      if (dialogZoom <= 1) return;
+                      setDialogIsPanning(true);
+                      dialogPanStartRef.current = { x: dialogPan.x, y: dialogPan.y };
+                      dialogPointerStartRef.current = { x: e.clientX, y: e.clientY };
+                    }}
+                  >
+                    <img
+                      src={(() => {
+                        let url = dialogImageList[dialogImageIndex];
+                        if (!url) return "/default-image.png";
+                        url = toApiImageAbsolute(url);
+                        const token = localStorage.getItem("token");
+                        if (token && url && !url.includes("token=")) {
+                          url +=
+                            (url.includes("?") ? "&" : "?") +
+                            "token=" +
+                            encodeURIComponent(token);
+                        }
+                        return url;
+                      })()}
+                      alt="Selected"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        transform: `translate(${dialogPan.x}px, ${dialogPan.y}px) scale(${dialogZoom})`,
+                        transformOrigin: "center center",
+                        transition: dialogIsPanning ? "none" : "transform 120ms ease",
+                        userSelect: "none",
+                        pointerEvents: "none",
+                      }}
+                      draggable={false}
+                    />
+                  </Box>
+
                   <Button
                     onClick={() =>
-                      setDialogImageIndex(
-                        (idx) => (idx + 1) % dialogImageList.length
-                      )
+                      setDialogImageIndex((idx) => (idx + 1) % dialogImageList.length)
                     }
                     disabled={dialogImageList.length <= 1}
                   >
                     {">"}
                   </Button>
                 </Box>
-                {dialogItem && (
-                  <Box sx={{ mt: 2, width: "100%" }}>
-                    <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1, flexWrap: "wrap" }}>
-                      <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
-                        <Typography sx={{ fontWeight: 900 }}>
-                          ID: {String(dialogItem.id_fact)}{dialogItem.Design_art ? ` - ${dialogItem.Design_art}` : ""}
-                        </Typography>
-                        {dialogItem.Fournisseur?.client_name ? (
-                          <Typography sx={{ color: "text.secondary", fontWeight: 700 }}>
-                            {dialogItem.Fournisseur?.client_name}
-                          </Typography>
-                        ) : null}
-                        {dialogItem.Fournisseur?.TYPE_SUPPLIER ? (
-                          <Typography sx={{ color: "text.secondary", fontWeight: 700 }}>
-                            {dialogItem.Fournisseur?.TYPE_SUPPLIER}
-                          </Typography>
-                        ) : null}
-                        {(dialogItem.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase().includes("gold") && (
-                          <Typography sx={{ color: "text.secondary", fontWeight: 800 }}>
-                            Weight: {dialogItem.qty} g
-                          </Typography>
-                        )}
-                      </Box>
 
-                      {(() => {
-                        const isGold = (dialogItem.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase().includes("gold");
-                        const sales = isGold ? computeGoldSalesPrice(dialogItem) : null;
-                        if (isGold) {
-                          const v = typeof sales === "number" ? sales : null;
-                          return v !== null ? (
-                            <Chip
-                              variant="outlined"
-                              color="warning"
-                              label={`${v.toLocaleString("en-LY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} LYD`}
-                              sx={{ fontWeight: 900 }}
-                            />
-                          ) : null;
-                        }
-                        // for diamond/watch just show whatever salePriceUsd logic would show (fallback to Selling_Price_Currency)
-                        const usd = Number((dialogItem as any)?.Selling_Price_Currency || 0);
-                        return usd ? (
-                          <Chip
-                            variant="outlined"
-                            color="info"
-                            label={`${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`}
-                            sx={{ fontWeight: 900 }}
-                          />
-                        ) : null;
-                      })()}
-                    </Box>
-                  </Box>
-                )}
+                <Box
+                  sx={{
+                    width: "100%",
+                    mt: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 2,
+                  }}
+                >
+                  <Typography sx={{ fontWeight: 800, color: "text.secondary", minWidth: 56 }}>
+                    {Math.round(dialogZoom * 100)}%
+                  </Typography>
+                  <Slider
+                    value={dialogZoom}
+                    min={1}
+                    max={3}
+                    step={0.05}
+                    onChange={(_, val) => {
+                      const v = Array.isArray(val) ? val[0] : val;
+                      const next = Number(v);
+                      setDialogZoom(next);
+                      if (next <= 1) setDialogPan({ x: 0, y: 0 });
+                    }}
+                  />
+                </Box>
               </>
             ) : (
               <Typography>No Image Available</Typography>
@@ -2558,6 +2765,48 @@ const DNew_I = () => {
           </Box>
         </DialogContent>
         <DialogActions>
+          <Button
+            onClick={() => {
+              try {
+                if (!dialogItem) return;
+                const urls = dialogImageList || [];
+                const selected = urls[dialogImageIndex];
+                if (!selected) return;
+                const typeSupplierLower =
+                  (dialogItem as any)?.Fournisseur?.TYPE_SUPPLIER?.toLowerCase?.() ||
+                  "";
+                const dp: any = (dialogItem as any)?.DistributionPurchase;
+                let diamond: any = undefined;
+                let watch: any = undefined;
+                if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                  diamond = dp[0]?.OriginalAchatDiamond;
+                  watch = dp[0]?.OriginalAchatWatch;
+                } else if (dp && typeof dp === "object") {
+                  diamond = dp?.OriginalAchatDiamond;
+                  watch = dp?.OriginalAchatWatch;
+                }
+                let kind: "gold" | "diamond" | "watch" | undefined = undefined;
+                let imageKey: any = (dialogItem as any).picint || (dialogItem as any).id_fact;
+                if (diamond?.id_achat) {
+                  kind = "diamond";
+                  imageKey = diamond.id_achat;
+                } else if (watch?.id_achat) {
+                  kind = "watch";
+                  imageKey = watch.id_achat;
+                } else if (typeSupplierLower.includes("gold")) {
+                  kind = "gold";
+                }
+                if (!kind) return;
+                const canonical = canonicalizePrefUrl(String(selected), kind, imageKey);
+                localStorage.setItem(getPreferredImageKey(kind, imageKey), canonical);
+              } catch {
+                // ignore
+              }
+            }}
+            disabled={!dialogItem || dialogImageList.length <= 1}
+          >
+            Use This Image As Default
+          </Button>
           <Button onClick={() => setImageDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
@@ -3455,11 +3704,12 @@ const DNew_I = () => {
                           key={row.id_fact}
                           sx={{
                             borderRadius: 2,
-                            border: "1px solid #e0e0e0",
+                            border: "none",
                             overflow: "hidden",
                             bgcolor: "background.paper",
                             display: "flex",
                             flexDirection: "column",
+                            boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
                             transition: "transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease",
                             '&:hover': {
                               transform: 'scale(1.03)',
@@ -3473,8 +3723,8 @@ const DNew_I = () => {
                               width: '100%',
                               aspectRatio: '1 / 1',
                               display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
+                              alignItems: 'stretch',
+                              justifyContent: 'stretch',
                               bgcolor: 'rgba(0,0,0,0.02)',
                             }}
                           >
@@ -3510,43 +3760,59 @@ const DNew_I = () => {
                                 return (
                                   <Box
                                     component="img"
-                                    src={'/default-image.png'}
+                                    src={"/GJ LOGO.png"}
                                     alt="Product"
                                     loading="lazy"
-                                    sx={{ width: '100%', height: '100%', objectFit: 'contain', opacity: 0.9 }}
+                                    sx={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9, display: 'block' }}
                                   />
                                 );
                               }
 
                               const keyStr = getImageKey(kind, imageKey);
-                              const urls = imageUrls?.[keyStr] || [];
+                              const urls = normalizeImageList(imageUrls?.[keyStr] || []);
                               if (!urls.length) {
                                 return (
                                   <Box
                                     component="img"
-                                    src={'/default-image.png'}
+                                    src={"/GJ LOGO.png"}
                                     alt="Product"
                                     loading="lazy"
-                                    sx={{ width: '100%', height: '100%', objectFit: 'contain', opacity: 0.9 }}
+                                    sx={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9, display: 'block' }}
                                   />
                                 );
                               }
 
-                              const idx = pickPreferredImageIndex(urls);
+                              const idx = pickPreferredIndexWithOverride(urls, kind, imageKey);
                               let url = urls[idx] || "";
+                              // Some endpoints return legacy /uploads/... paths; normalize to /images/* routes when possible
+                              try {
+                                if (url && typeof url === 'string' && url.startsWith('/uploads/')) {
+                                  const parts = url.split('/').filter(Boolean);
+                                  const len = parts.length;
+                                  if (len >= 3) {
+                                    const filename = parts[len - 1];
+                                    const idSeg = parts[len - 2];
+                                    url = `/images/gold/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                                  }
+                                }
+                              } catch { }
+                              url = ensureHttps(toApiImageAbsolute(url));
                               if (token && url && !url.includes('token=')) {
                                 url += (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
                               }
 
+                              const resolved = resolvedImgSrc[keyStr];
+                              const finalSrc = resolved || url;
+
                               return (
                                 <Box
                                   component="img"
-                                  src={url}
+                                  src={finalSrc}
                                   alt="Product"
                                   loading="lazy"
-                                  sx={{ width: '100%', height: '100%', objectFit: 'contain', cursor: 'zoom-in' }}
+                                  sx={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in', display: 'block' }}
                                   onClick={() => {
-                                    setDialogImageList(urls);
+                                    setDialogImageList(normalizeDialogUrls(urls));
                                     setDialogImageIndex(idx);
                                     setDialogItem(row);
                                     setImageDialogOpen(true);
@@ -3554,7 +3820,7 @@ const DNew_I = () => {
                                   onError={(e) => {
                                     const img = e.currentTarget as HTMLImageElement;
                                     img.onerror = null;
-                                    img.src = '/default-image.png';
+                                    setResolvedImgSrc((prev) => ({ ...prev, [keyStr]: "/GJ LOGO.png" }));
                                   }}
                                 />
                               );
@@ -3565,15 +3831,24 @@ const DNew_I = () => {
                               <Typography sx={{ fontWeight: 900, fontSize: 12, lineHeight: 1.2, flex: 1, minWidth: 0 }}>
                                 {`ID: ${String(headerIdLabel)}`}{row.Design_art ? ` - ${row.Design_art}` : ""}
                               </Typography>
-                              {priceText && (
-                                <Chip
-                                  size="small"
-                                  variant="outlined"
-                                  color={isGoldItem ? "warning" : "info"}
-                                  label={priceText}
-                                  sx={{ fontWeight: 900, height: 22 }}
-                                />
-                              )}
+                              {priceText ? (
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
+                                  <Typography
+                                    variant="body2"
+                                    sx={{ fontWeight: 900, fontSize: 12, color: isGoldItem ? 'warning.main' : 'info.main' }}
+                                  >
+                                    {priceText}
+                                  </Typography>
+                                  {isGoldItem && displaySub ? (
+                                    <Typography
+                                      variant="caption"
+                                      sx={{ fontWeight: 800, fontSize: 10.5, color: 'text.secondary' }}
+                                    >
+                                      {displaySub} LYD/g
+                                    </Typography>
+                                  ) : null}
+                                </Box>
+                              ) : null}
                             </Box>
                             {isGoldItem && (
                               <Typography sx={{ fontWeight: 800, fontSize: 12, lineHeight: 1.1, color: 'text.secondary' }}>
@@ -3586,11 +3861,6 @@ const DNew_I = () => {
                             {isGoldItem && (
                               <Typography sx={{ fontWeight: 900, fontSize: 12, lineHeight: 1.1, color: 'warning.main' }}>
                                 {goldLabel}
-                              </Typography>
-                            )}
-                            {isGoldItem && displaySub && (
-                              <Typography sx={{ fontWeight: 900, fontSize: 11, lineHeight: 1.1, color: 'text.secondary' }}>
-                                {displaySub} LYD/g
                               </Typography>
                             )}
                             {row.Fournisseur?.client_name && (
@@ -3631,7 +3901,7 @@ const DNew_I = () => {
                           
                           display: "flex",
                           flexDirection: "column",
-                          border: "1px solid #e0e0e0",
+                          border: "none",
                           alignItems: "stretch",
                           justifyContent: "flex-start",
                           gap: gridView === "3" ? 0.5 : 0.75,
@@ -3639,6 +3909,7 @@ const DNew_I = () => {
                           bgcolor: "background.paper",
                           overflow: "hidden",
                           cursor: "default",
+                          boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
                           transition: "box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease",
                           '&:hover': {
                             boxShadow: '0 10px 24px rgba(0,0,0,0.10)',
@@ -3654,97 +3925,17 @@ const DNew_I = () => {
                             boxShadow: '0 2px 8px 0 rgba(255, 215, 0, 0.07)',
                           }),
                         }}  >
-                        {/* Price badge top-right */}
-                        {displayMain && (
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              top: 8,
-                              right: 8,
-                              zIndex: 5,
-                            }}
-                          >
-                            <Box
-                              sx={{
-                                position: 'relative',
-                                display: 'flex',
-                                alignItems: 'center',
-                                 
-                              height: '30px',
-                                borderRadius: '999px',
-                                bgcolor: '#03793821',
- 
-                                boxShadow: '0 10px 22px rgba(0,0,0,0.18)',
-                                overflow: 'visible',
-                                border: '1px solid rgba(9, 233, 110, 0.3)',
-                              }}
-                            >
-                              <Box
-                                sx={{
-                                  // bgcolor: '#fff',
-                                  color: "text.secondary",
-                                  px: 1.25,
-                                  py: 0.45,
-                                  borderRadius: '999px',
-                                  fontWeight: 700,
-                                  fontSize: 13,
-                                  lineHeight: 1,
-                                  //  boxShadow: '0 2px 0 rgba(0,0,0,0.35), inset 0 0 0 1px rgba(0,0,0,0.08)',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                   
-                                }}
-                                   >
-                                {displayMain}
-                                <Box component="sup" sx={{ ml: 0.5, fontWeight: 800, fontSize: 10, color: '#333' }}>
-                                  LYD
-                                </Box>
-                              </Box>
-                              {displaySub && (
-                                <Box
-                                  sx={{
-                                    bgcolor: 'rgba(255, 0, 0, 0.11)',
-                                    color: "text.secondary",
-                                    px: 1.35,
-                                    py: 0.5,
-                                    mr: 1,
-                                    borderRadius: '999px',
-                                    fontWeight: 900,
-                                    fontSize: 10,
-                                    // letterSpacing: 0.6,
-                                    lineHeight: 1,
-                                    //textTransform: 'uppercase',
-                                    //transform: 'rotate(-2deg) translateX(-2px)',
-                                    //boxShadow: '0 0 0 2px rgba(0,0,0,0.35), 0 10px 18px rgba(255,0,0,0.32)',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    border: '1px solid rgba(255, 0, 0, 0.3)',
-                                  }}
-                                  title={`${displaySub} LYD/g`}
-                                >
-                                  {displaySub}
-                                  <Box component="span" sx={{ ml: 0.6, fontSize: 10, fontWeight: 900 }}>
-                                    LYD/g
-                                  </Box>
-                                </Box>
-                              )}
-                            </Box>
-                          </Box>
-                        )}
                         <Box
                           sx={{
                             width: '100%',
-                            height:
-                              gridView === "3"
-                                ? 135
-                                : 150,
+                            aspectRatio: '1 / 1',
                             display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            borderRadius: 2,
+                            alignItems: "stretch",
+                            justifyContent: "stretch",
+                            borderRadius: 0,
                             overflow: "hidden",
                             position: "relative",
-                            bgcolor: 'rgba(0,0,0,0.02)',
+                            bgcolor: 'transparent',
 
                           }}
                         >
@@ -3759,18 +3950,26 @@ const DNew_I = () => {
                             const typeSupplierLower = row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || "";
                             // If the supplier type indicates a watch, do not use gold images here
                             if (typeSupplierLower.includes("gold") && !typeSupplierLower.includes("watch")) {
-                              const goldKeyStr = getImageKey("gold", (row as any).picint || row.id_fact);
-                              const urls = imageUrls[goldKeyStr] || [];
+                              const goldDp: any = row.DistributionPurchase;
+                              const goldObj = Array.isArray(goldDp) && goldDp.length > 0
+                                ? goldDp.find((d: any) => d?.GoldOriginalAchat)?.GoldOriginalAchat
+                                : (goldDp && typeof goldDp === 'object' ? (goldDp as any).GoldOriginalAchat : null);
+                              const goldId = goldObj?.id_achat || (row as any).picint || row.id_fact;
+                              const goldKeyStr = getImageKey("gold", goldId);
+                              const urls = normalizeImageList(imageUrls[goldKeyStr] || []);
                               // Pick preferred image (marketing -> invoice -> newest)
                               const idx = pickPreferredImageIndex(urls);
                               const token = localStorage.getItem("token");
+                              const resolved = resolvedImgSrc[goldKeyStr];
                               return urls.length > 0 ? (
-                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', width: '100%', height: '100%' }}>
                                   <Box
                                     component="img"
                                     src={(() => {
+                                      if (resolved) return resolved;
                                       let url = urls[idx];
                                       if (!url) return "";
+                                      url = ensureHttps(toApiImageAbsolute(url));
                                       if (token && !url.includes("token=")) {
                                         url += (url.includes("?") ? "&" : "?") +
                                           "token=" + encodeURIComponent(token);
@@ -3780,16 +3979,12 @@ const DNew_I = () => {
                                     alt={`Gold Image ${idx + 1}`}
                                     loading="lazy"
                                     sx={{
-
-                                      maxHeight: gridView === "3" ? 120 : 140,
-                                      height: gridView === "3" ? 120 : 140,
-                                      maxWidth: gridView === "3" ? 120 : 140,
-                                      borderRadius: 8,
-                                      border: "1px solid #ccc",
                                       width: "100%",
-                                      objectFit: "contain",
+                                      height: "100%",
+                                      objectFit: "cover",
                                       background: "inherit",
                                       cursor: "pointer",
+                                      display: 'block',
                                     }}
                                     onClick={() => {
                                       setDialogImageList(urls);
@@ -3799,7 +3994,7 @@ const DNew_I = () => {
                                     onError={(e) => {
                                       const img = e.currentTarget as HTMLImageElement;
                                       img.onerror = null;
-                                      img.src = "/default-image.png";
+                                      setResolvedImgSrc((prev) => ({ ...prev, [goldKeyStr]: "/GJ LOGO.png" }));
                                     }}
                                     title={urls[idx] || "No image URL"}
                                   />
@@ -3808,13 +4003,14 @@ const DNew_I = () => {
                               ) : (
                                 <Box
                                   component="img"
-                                  src="/default-image.png"
+                                  src="/GJ LOGO.png"
                                   alt="No Image"
                                   sx={{
-                                    maxHeight: 120,
-                                    maxWidth: 120,
                                     opacity: 0.5,
-                                    mb: 1,
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block',
                                   }}
                                 />
                               );
@@ -3841,7 +4037,7 @@ const DNew_I = () => {
                               const urls = imageUrls[imageKeyStr] || [];
                               const idx = pickPreferredImageIndex(urls);
                               return urls.length > 0 ? (
-                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', width: '100%', height: '100%' }}>
                                   <Box
                                     component="img"
                                     src={(() => {
@@ -3862,19 +4058,16 @@ const DNew_I = () => {
                                     alt={`Image ${idx + 1}`}
                                     loading="lazy"
                                     sx={{
-                                      maxHeight: gridView === "3" ? 120 : 140,
-                                      height: gridView === "3" ? 120 : 140,
-                                      maxWidth: gridView === "3" ? 120 : 140,
-                                      borderRadius: 8,
-                                      border: "1px solid #ccc",
                                       width: "100%",
-                                      objectFit: "contain",
+                                      height: "100%",
+                                      objectFit: "cover",
                                       background: "inherit",
                                       cursor: "pointer",
+                                      display: 'block',
                                     }}
                                     onClick={() => {
                                       // Open dialog with ALL images for this diamond (no marketing/invoice filtering)
-                                      setDialogImageList(urls);
+                                      setDialogImageList(normalizeDialogUrls(urls));
                                       setDialogImageIndex(idx);
                                       setImageDialogOpen(true);
                                     }}
@@ -3893,10 +4086,11 @@ const DNew_I = () => {
                                   src="/default-image.png"
                                   alt="No Image"
                                   sx={{
-                                    maxHeight: 120,
-                                    maxWidth: 120,
                                     opacity: 0.5,
-                                    mb: 1,
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block',
                                   }}
                                 />
                               );
@@ -3926,7 +4120,7 @@ const DNew_I = () => {
                                     return tokenParam ? u + (u.includes('?') ? '&' : '?') + tokenParam : u;
                                   };
                                   return (
-                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+                                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', width: '100%', height: '100%' }}>
                                       <Box
                                         component="img"
                                         src={withToken(chain[0])}
@@ -3935,15 +4129,12 @@ const DNew_I = () => {
                                         alt={`Image ${idx + 1}`}
                                         loading="lazy"
                                         sx={{
-                                          maxHeight: gridView === "3" ? 120 : 140,
-                                          height: gridView === "3" ? 120 : 140,
-                                          maxWidth: gridView === "3" ? 120 : 140,
-                                          borderRadius: 8,
-                                          border: "1px solid #ccc",
                                           width: "100%",
-                                          objectFit: "contain",
+                                          height: "100%",
+                                          objectFit: "cover",
                                           background: "inherit",
                                           cursor: "pointer",
+                                          display: 'block',
                                         }}
 
                                         onClick={() => {
@@ -3961,7 +4152,7 @@ const DNew_I = () => {
                                             }
                                             return u;
                                           });
-                                          setDialogImageList(urlsForDialog);
+                                          setDialogImageList(normalizeDialogUrls(urlsForDialog));
                                           setDialogImageIndex(idx);
                                           setImageDialogOpen(true);
                                         }}
@@ -3992,10 +4183,11 @@ const DNew_I = () => {
                                   src="/default-image.png"
                                   alt="No Image"
                                   sx={{
-                                    maxHeight: 120,
-                                    maxWidth: 120,
                                     opacity: 0.5,
-                                    mb: 1,
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block',
                                   }}
                                 />
                               );
@@ -4021,22 +4213,55 @@ const DNew_I = () => {
                           <Box
                             sx={{ display: "flex", flexDirection: "column", gap: 0.5, mt: 1, width: '100%' }}
                           >
-                            <Typography
-                              component="div"
-                              sx={{
-                                color: "text.primary",
-                                fontWeight: 800,
-                                fontSize: gridView === "3" ? 13 : 14,
-                                lineHeight: 1.2,
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
-                                wordBreak: 'break-word',
-                              }}
-                            >
-                              {`ID: ${String(headerIdLabel)}`}{row.Design_art ? ` - ${row.Design_art}` : ""}
-                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, width: '100%' }}>
+                              <Typography
+                                component="div"
+                                sx={{
+                                  color: "text.primary",
+                                  fontWeight: 800,
+                                  fontSize: gridView === "3" ? 13 : 14,
+                                  lineHeight: 1.2,
+                                  display: "-webkit-box",
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: "vertical",
+                                  overflow: "hidden",
+                                  wordBreak: 'break-word',
+                                  flex: 1,
+                                  minWidth: 0,
+                                }}
+                              >
+                                {`ID: ${String(headerIdLabel)}`}{row.Design_art ? ` - ${row.Design_art}` : ""}
+                              </Typography>
+                              {(() => {
+                                const priceText = (() => {
+                                  if (isGoldItem) {
+                                    if (displayMain) return `${displayMain} LYD`;
+                                    return "";
+                                  }
+                                  if (salePriceDisplay) return `${salePriceDisplay} USD`;
+                                  return "";
+                                })();
+                                if (!priceText) return null;
+                                return (
+                                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
+                                    <Typography
+                                      variant="body2"
+                                      sx={{ fontWeight: 900, fontSize: 12, color: isGoldItem ? 'warning.main' : 'info.main' }}
+                                    >
+                                      {priceText}
+                                    </Typography>
+                                    {isGoldItem && displaySub ? (
+                                      <Typography
+                                        variant="caption"
+                                        sx={{ fontWeight: 800, fontSize: 10.5, color: 'text.secondary' }}
+                                      >
+                                        {displaySub} LYD/g
+                                      </Typography>
+                                    ) : null}
+                                  </Box>
+                                );
+                              })()}
+                            </Box>
 
                             {row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('gold') && (
                               <Typography
@@ -4067,26 +4292,6 @@ const DNew_I = () => {
                             {row.Fournisseur?.client_name && (
                               <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
                                 {row.Fournisseur?.client_name}
-                              </Typography>
-                            )}
-                            {salePriceDisplay && (
-                              <Typography
-                                component="span"
-                                sx={{
-                                  color: "text.secondary",
-                                  fontWeight: 900,
-                                  fontSize: 18,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 0.5,
-                                  pt: 0,
-                                  
-                                }}
-                              >
-                                {salePriceDisplay}
-                                <Box component="sup" sx={{ fontSize: 11, ml: 0.25 }}>
-                                  USD
-                                </Box>
                               </Typography>
                             )}
                             {/* Gold Charges Row: show only Sales Price inline; admin can open details */}
@@ -4799,7 +5004,7 @@ const DNew_I = () => {
             >
               <Box sx={{ color: "warning.main", fontSize: 28, mr: 0.5 }}>
                 <span role="img" aria-label="cart">
-                  🛒
+                  <ShoppingCartCheckoutOutlined />
                 </span>
               </Box>
               <Box
@@ -4877,18 +5082,18 @@ const DNew_I = () => {
                         width: 60,
                         height: 60,
                         display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        borderRadius: 1,
+                        alignItems: "stretch",
+                        justifyContent: "stretch",
+                        borderRadius: 0,
                         overflow: "hidden",
                         mr: 1,
                         bgcolor: "inherit",
-                        border: "1px solid #eee",
+                        border: "none",
                       }}
                     >
                       {(() => {
                         // Show preferred image from imageUrls if available, else fallback to pic
-
+ 
                         const imageKey = (item as any).picint || (item as any).id_fact;
                         const kind: "gold" | "watch" | "diamond" | undefined =
                           typeSupplier.toLowerCase().includes("gold")
@@ -4899,7 +5104,7 @@ const DNew_I = () => {
                             ? "diamond"
                             : undefined;
                         const imageKeyStr = getImageKey(kind, imageKey);
-
+ 
                         const urls = imageUrls?.[imageKeyStr] || [];
                         const token = localStorage.getItem("token");
                         if (urls.length > 0) {
@@ -4961,7 +5166,7 @@ const DNew_I = () => {
                                   borderRadius: 1,
                                   border: "1px solid #ccc",
                                 }}
-
+ 
                                 onError={(e) => {
                                   const img = e.currentTarget as HTMLImageElement;
                                   const currentIdx = Number(img.dataset.fallbackIndex || '0');
@@ -4981,7 +5186,7 @@ const DNew_I = () => {
                             );
                           }
                         }
-
+ 
                         // If we reach here there are no image URLs available for this item.
                         // Fall back to any inline `pic` field the item might have, otherwise a default image.
                         const fallbackSrc = (item as any)?.pic || '/default-image.png';
@@ -5306,7 +5511,7 @@ const DNew_I = () => {
                   Proceed to Invoice
                 </Button>
               )}
-{/* 
+
               <Button
                 variant="text"
                 color="primary"
@@ -5315,7 +5520,7 @@ const DNew_I = () => {
                 onClick={handleOpenIssuedInvoices}
               >
                 View Issued Invoices
-              </Button> */}
+              </Button>
 
               <Dialog
                 open={issuedInvoicesOpen}
@@ -5534,6 +5739,10 @@ const DNew_I = () => {
                   fetchData(typeFilter); // Refresh data after closing invoice
                 }}
                 onCartRefresh={() => {
+                  // Issuing an invoice number should remove draft rows from the cart immediately.
+                  setDatainv([]);
+                  setEditInvoice(initialInvoiceState);
+                  setCanPrint(false);
                   fetchDataINV(); // Refresh the cart after closing invoice
                 }}
                 showCloseInvoiceActions={false}

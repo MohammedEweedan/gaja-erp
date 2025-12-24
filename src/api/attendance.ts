@@ -11,7 +11,7 @@ export type DailyPreview = {
   
   // Backend base URL
   // Set REACT_APP_API_BASE in .env, e.g. http://102.213.182.8:8000 or http://localhost:8000
-  const API_BASE = "http://192.168.3.98:9000".replace(/\/+$/, '');
+  const API_BASE = "https://system.gaja.ly/api".replace(/\/+$/, '');
   
   function absolute(url: string): string {
     // If API_BASE is configured and absolute, use it; otherwise same-origin with leading slash

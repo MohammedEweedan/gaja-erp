@@ -1,23 +1,24 @@
 import {
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Box,
-  TextField,
-  InputAdornment,
+  Alert,
   Autocomplete,
-  Tabs,
-  Tab,
+  Box,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormControlLabel,
+  FormLabel,
+  IconButton,
+  InputAdornment,
   Radio,
   RadioGroup,
-  FormControlLabel,
-  FormControl,
-  FormLabel,
-  Alert,
+  Tab,
+  Tabs,
+  TextField,
   Typography,
-  IconButton,
 } from "@mui/material";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
@@ -138,7 +139,20 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const isGoldInvoice = Type_Supplier.toLowerCase().includes("gold");
   const baseCurrencyLabel = isGoldInvoice ? "LYD" : "USD";
 
-  const roundUpLyd = React.useCallback((v: number) => Math.ceil(Number(v) || 0), []);
+  const normalizeMoney = React.useCallback(
+    (v: number) => Math.round((Number(v) || 0) * 100) / 100,
+    []
+  );
+  const normalizeLyd0 = React.useCallback(
+    (v: number) => Math.round(Number(v) || 0),
+    []
+  );
+  const moneyEps = 0.01;
+
+  const [paymentRemainderMsg, setPaymentRemainderMsg] = React.useState<string>("");
+  const [paymentRemainderKind, setPaymentRemainderKind] = React.useState<
+    "success" | "warning" | "error" | ""
+  >("");
   const [alertOpen, setAlertOpen] = React.useState(false);
   const [alertMsg, setAlertMsg] = React.useState("");
   const [tabIndex, setTabIndex] = React.useState(0);
@@ -173,7 +187,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       const v = Number(totals.total_remise_final_lyd);
       setTotalLydStr(
         Number.isFinite(v) && v !== 0
-          ? String(roundUpLyd(v))
+          ? String(normalizeMoney(v))
           : ""
       );
     }
@@ -211,8 +225,6 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const [newCustomerErrors, setNewCustomerErrors] = React.useState<Record<string, string>>({});
 
   const [fullPaymentRequiredOpen, setFullPaymentRequiredOpen] = React.useState(false);
-  const [partialPaymentConfirmOpen, setPartialPaymentConfirmOpen] = React.useState(false);
-  const [partialPaymentRemainingLyd, setPartialPaymentRemainingLyd] = React.useState<number>(0);
 
   React.useEffect(() => {
     setLocalCustomers(customers);
@@ -301,15 +313,13 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       }
 
       if (targetTotalLyd == null) return;
-      // Round UP to whole LYD
-      const roundedUp = Math.ceil(targetTotalLyd);
-
       const existing = Number(totals.total_remise_final_lyd) || 0;
-      if (Math.abs(existing - roundedUp) > 0.01) {
-        onChange("total_remise_final_lyd", Number(roundedUp));
+      const next = normalizeMoney(targetTotalLyd);
+      if (Math.abs(existing - next) > moneyEps) {
+        onChange("total_remise_final_lyd", Number(next));
       }
     },
-    [Type_Supplier, totals.total_remise_final_lyd, lastUsdRate, getFinalTotalNumeric, onChange]
+    [Type_Supplier, totals.total_remise_final_lyd, lastUsdRate, getFinalTotalNumeric, onChange, normalizeMoney]
   );
 
   // Validation handler for update
@@ -317,66 +327,20 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
     // Compute final total after discount / surcharge (numeric)
     const finalAfterDiscountNumeric = getFinalTotalNumeric();
 
-    const totalLyd = roundUpLyd(Number(totals.total_remise_final_lyd) || 0);
-    const paidLyd = roundUpLyd(Number(totals.amount_lyd) || 0);
+    // NOTE: For remainder/status we treat LYD as whole LYD (display + comparisons)
+    // to avoid UI showing "Remainder: 0" due to float tails (e.g. 842.0000076).
+    const totalLyd = normalizeLyd0(Number(totals.total_remise_final_lyd) || 0);
+    const paidLyd = normalizeLyd0(Number(totals.amount_lyd) || 0);
     const paidUsd = Number(totals.amount_currency) || 0;
-    const paidUsdLyd = roundUpLyd(Number(totals.amount_currency_LYD) || 0);
+    const paidUsdLyd = normalizeLyd0(Number(totals.amount_currency_LYD) || 0);
     const paidEur = Number(totals.amount_EUR) || 0;
-    const paidEurLyd = roundUpLyd(Number(totals.amount_EUR_LYD) || 0);
+    const paidEurLyd = normalizeLyd0(Number(totals.amount_EUR_LYD) || 0);
     const sumPaid = paidLyd + paidUsdLyd + paidEurLyd;
     const diff = totalLyd - sumPaid;
     const alertList: string[] = [];
     const newFieldErrors: Record<string, string> = {};
-    // Payment mismatch behavior:
-    // - Only show guidance on the Payments tab
-    // - Allow partial payments (diff > 0) (will require confirmation)
-    // - Block overpayment (diff < 0) (no overpayment surcharge at this stage)
-    if (tabIndex === 2 && paymentTouched) {
-      const fmt0 = (v: number) =>
-        v.toLocaleString("en-US", {
-          minimumFractionDigits: 0,
-          maximumFractionDigits: 0,
-        });
-      if (diff > 0.01) {
-        newFieldErrors.paymentRemainder = `Remainder: ${fmt0(diff)} LYD (Partially Paid).`;
-      } else if (diff < -0.01) {
-        newFieldErrors.paymentRemainder = `Overpaid: ${fmt0(Math.abs(diff))} LYD (not allowed).`;
-      } else {
-        delete newFieldErrors.paymentRemainder;
-      }
-    }
-    if (paidUsdLyd > 0 && paidUsd === 0) {
-      alertList.push(
-        "If Equivalent Amount Paid (USD to LYD) > 0, Amount Paid (USD) must be greater than 0."
-      );
-      newFieldErrors.amountCurrency =
-        "Amount Paid (USD) is required when USD to LYD is entered.";
-    }
-    if (paidEurLyd > 0 && paidEur === 0) {
-      alertList.push(
-        "If Equivalent Amount Paid (EUR to LYD) > 0, Amount Paid (EUR) must be greater than 0."
-      );
-      newFieldErrors.amountEur =
-        "Amount Paid (EUR) is required when EUR to LYD is entered.";
-    }
-    if (Type_Supplier.toLowerCase().includes("gold")) {
-      // For gold, ensure Total Amount (LYD) equals Final Total After Discount (LYD)
-      const finalRoundedUp = Math.ceil(finalAfterDiscountNumeric);
-      if (Math.abs(totalLyd - finalRoundedUp) > 0.01) {
-        alertList.push(
-          [
-            "Gold rounding rule:",
-            `- Total Amount (LYD) must match Final After Discount rounded up to whole LYD.`,
-            `- Expected: ${finalRoundedUp.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} LYD`,
-            `- Current: ${totalLyd.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} LYD`,
-            `= Difference: ${(totalLyd - finalRoundedUp).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} LYD`,
-          ].join("\n")
-        );
-        if (!newFieldErrors.totalAmountLyd) {
-          newFieldErrors.totalAmountLyd = "Check Total Amount (LYD).";
-        }
-      }
-    }
+
+    void finalAfterDiscountNumeric;
     
     setFieldErrors(newFieldErrors);
 
@@ -387,15 +351,14 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       return false;
     }
 
-    // On Payments tab: no top alert; allow partial payments but block overpayment.
+    // On Payments tab: no top alert; full payment required (block partial + overpayment).
     setAlertOpen(false);
     setAlertMsg("");
     if (tabIndex === 2) {
       setFieldErrors(newFieldErrors);
-      // paymentRemainder is informational for partial payment; do not block checkout.
-      const blockingKeys = Object.keys(newFieldErrors).filter((k) => k !== "paymentRemainder");
-      const isOverpaid = diff < -0.01;
-      if (isOverpaid) return false;
+      const blockingKeys = Object.keys(newFieldErrors);
+      const mismatch = Math.abs(diff) > moneyEps;
+      if (mismatch) return false;
       return blockingKeys.length === 0;
     }
 
@@ -434,60 +397,31 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       .filter(Boolean)
       .join(" | ");
 
-    setEditInvoice((prev: any) => ({
-      ...prev,
-      COMMENT: merged,
-    }));
-  }, [discountComment, surchargeComment, setEditInvoice]);
-
-  const applyDiscountSurchargeMetaToInvoice = React.useCallback(() => {
-    const dsv = Number(remiseDiscount) || 0;
-    const ssv = Number(remiseSurcharge) || 0;
-    const dsp = Number(remisePerDiscount) || 0;
-    const ssp = Number(remisePerSurcharge) || 0;
-
-    const meta = {
-      discount_value: dsv,
-      surcharge_value: ssv,
-      discount_per: dsp,
-      surcharge_per: ssp,
-    };
-    const tag = `__DSMETA__${JSON.stringify(meta)}`;
-
     setEditInvoice((prev: any) => {
-      const existing = String(prev?.COMMENT ?? "");
-      const next = existing.includes("__DSMETA__")
-        ? existing.replace(/__DSMETA__\{[\s\S]*\}$/, tag)
-        : (existing ? `${existing} | ${tag}` : tag);
+      const existingClean = stripInternalCommentTags(prev?.COMMENT ?? "");
+      const next = existingClean
+        ? (merged ? `${existingClean} | ${merged}` : existingClean)
+        : merged;
       return {
         ...prev,
         COMMENT: next,
       };
     });
-  }, [remiseDiscount, remiseSurcharge, remisePerDiscount, remisePerSurcharge, setEditInvoice]);
-
-  // Keep discount/surcharge split meta persisted for printing even before checkout
-  React.useEffect(() => {
-    if (!open) return;
-    applyDiscountSurchargeMetaToInvoice();
-  }, [open, applyDiscountSurchargeMetaToInvoice, remiseDiscount, remiseSurcharge, remisePerDiscount, remisePerSurcharge]);
+  }, [discountComment, surchargeComment, setEditInvoice]);
 
   const handleUpdate = () => {
     if (!validateTotals()) return;
 
-    applyDiscountSurchargeMetaToInvoice();
-
-    // Payments tab: allow partial payments but require explicit confirmation.
+    // Payments tab: full payment required.
     if (tabIndex === 2) {
-      const totalLyd = roundUpLyd(Number(totals.total_remise_final_lyd) || 0);
+      const totalLyd = normalizeLyd0(Number(totals.total_remise_final_lyd) || 0);
       const sumPaid =
-        roundUpLyd(Number(totals.amount_lyd) || 0) +
-        roundUpLyd(Number(totals.amount_currency_LYD) || 0) +
-        roundUpLyd(Number(totals.amount_EUR_LYD) || 0);
+        normalizeLyd0(Number(totals.amount_lyd) || 0) +
+        normalizeLyd0(Number(totals.amount_currency_LYD) || 0) +
+        normalizeLyd0(Number(totals.amount_EUR_LYD) || 0);
       const diff = totalLyd - sumPaid;
-      if (diff > 0.01) {
-        setPartialPaymentRemainingLyd(diff);
-        setPartialPaymentConfirmOpen(true);
+      if (Math.abs(diff) > moneyEps) {
+        setFullPaymentRequiredOpen(true);
         return;
       }
     }
@@ -495,13 +429,6 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
     // Persist updated comments before checkout
     applyCommentsToInvoice();
 
-    onUpdate();
-  };
-
-  const handlePartialPaymentProceed = () => {
-    setPartialPaymentConfirmOpen(false);
-    // Persist updated comments before checkout
-    applyCommentsToInvoice();
     onUpdate();
   };
 
@@ -597,8 +524,6 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   // When discount % exceeds minPer, send an approval request instead of normal checkout
   const handleRequestApproval = async () => {
     if (!validateTotals()) return;
-
-    applyDiscountSurchargeMetaToInvoice();
 
     try {
       const userStr = localStorage.getItem("user");
@@ -1134,16 +1059,20 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 }}
                 onBlur={() => {
                   setActiveField(null);
-                  onChange("amount_lyd", parseNumber(amountLydStr));
+                  onChange("amount_lyd", normalizeMoney(parseNumber(amountLydStr)));
                   validateTotals();
                 }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">LYD</InputAdornment>
                   ),
+                  inputProps: {
+                    inputMode: "decimal",
+                    pattern: "[0-9.,-]*",
+                  },
                 }}
-                error={!!fieldErrors.amountLyd || !!fieldErrors.paymentRemainder}
-                helperText={fieldErrors.amountLyd || fieldErrors.paymentRemainder || ""}
+                error={!!fieldErrors.amountLyd}
+                helperText={fieldErrors.amountLyd || ""}
               />
             </Box>
 
@@ -1170,7 +1099,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   onChange("amount_currency", usd);
                   const rate = Number(lastUsdRate);
                   if (usd > 0 && Number.isFinite(rate) && rate > 0) {
-                    const lyd = usd * rate;
+                    const lyd = normalizeMoney(usd * rate);
                     setAmountUsdLydStr(String(lyd));
                     onChange("amount_currency_LYD", lyd);
                   }
@@ -1180,6 +1109,10 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   startAdornment: (
                     <InputAdornment position="start">USD</InputAdornment>
                   ),
+                  inputProps: {
+                    inputMode: "decimal",
+                    pattern: "[0-9.,-]*",
+                  },
                 }}
                 error={!!fieldErrors.amountCurrency}
                 helperText={fieldErrors.amountCurrency || ""}
@@ -1202,21 +1135,33 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 }}
                 onBlur={() => {
                   setActiveField(null);
-                  onChange("amount_currency_LYD", parseNumber(amountUsdLydStr));
+                  const lyd = normalizeMoney(parseNumber(amountUsdLydStr));
+                  onChange("amount_currency_LYD", lyd);
+                  const rate = Number(lastUsdRate);
+                  const currentUsd = Number(totals.amount_currency) || 0;
+                  if (lyd > 0 && currentUsd === 0 && Number.isFinite(rate) && rate > 0) {
+                    const usd = normalizeMoney(lyd / rate);
+                    setAmountUsdStr(String(usd));
+                    onChange("amount_currency", usd);
+                  }
                   validateTotals();
                 }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">LYD</InputAdornment>
                   ),
+                  inputProps: {
+                    inputMode: "decimal",
+                    pattern: "[0-9.,-]*",
+                  },
                 }}
-                error={!!fieldErrors.amountCurrencyLyd || !!fieldErrors.paymentRemainder}
-                helperText={fieldErrors.amountCurrencyLyd || fieldErrors.paymentRemainder || ""}
+                error={!!fieldErrors.amountCurrencyLyd}
+                helperText={fieldErrors.amountCurrencyLyd || ""}
               />
               {(() => {
                 const usdToLyd = Number(totals.amount_currency_LYD);
                 const usd = Number(totals.amount_currency);
-                const exRate = usdToLyd / usd;
+                const exRate = usd > 0 ? usdToLyd / usd : NaN;
                 return (
                   <Box
                     sx={{
@@ -1227,10 +1172,12 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                     }}
                   >
                     Ex. rate ={" "}
-                    {exRate.toLocaleString("en-LY", {
-                      minimumFractionDigits: 3,
-                      maximumFractionDigits: 3,
-                    })}
+                    {Number.isFinite(exRate)
+                      ? exRate.toLocaleString("en-LY", {
+                          minimumFractionDigits: 3,
+                          maximumFractionDigits: 3,
+                        })
+                      : "-"}
                   </Box>
                 );
               })()}
@@ -1259,7 +1206,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   onChange("amount_EUR", eur);
                   const rate = Number(lastEurRate);
                   if (eur > 0 && Number.isFinite(rate) && rate > 0) {
-                    const lyd = eur * rate;
+                    const lyd = normalizeMoney(eur * rate);
                     setAmountEurLydStr(String(lyd));
                     onChange("amount_EUR_LYD", lyd);
                   }
@@ -1269,6 +1216,10 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   startAdornment: (
                     <InputAdornment position="start">EUR</InputAdornment>
                   ),
+                  inputProps: {
+                    inputMode: "decimal",
+                    pattern: "[0-9.,-]*",
+                  },
                 }}
                 error={!!fieldErrors.amountEur}
                 helperText={fieldErrors.amountEur || ""}
@@ -1291,21 +1242,33 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 }}
                 onBlur={() => {
                   setActiveField(null);
-                  onChange("amount_EUR_LYD", parseNumber(amountEurLydStr));
+                  const lyd = normalizeMoney(parseNumber(amountEurLydStr));
+                  onChange("amount_EUR_LYD", lyd);
+                  const rate = Number(lastEurRate);
+                  const currentEur = Number(totals.amount_EUR) || 0;
+                  if (lyd > 0 && currentEur === 0 && Number.isFinite(rate) && rate > 0) {
+                    const eur = normalizeMoney(lyd / rate);
+                    setAmountEurStr(String(eur));
+                    onChange("amount_EUR", eur);
+                  }
                   validateTotals();
                 }}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">LYD</InputAdornment>
                   ),
+                  inputProps: {
+                    inputMode: "decimal",
+                    pattern: "[0-9.,-]*",
+                  },
                 }}
-                error={!!fieldErrors.amountEurLyd || !!fieldErrors.paymentRemainder}
-                helperText={fieldErrors.amountEurLyd || fieldErrors.paymentRemainder || ""}
+                error={!!fieldErrors.amountEurLyd}
+                helperText={fieldErrors.amountEurLyd || ""}
               />
               {(() => {
                 const eurToLyd = Number(totals.amount_EUR_LYD);
                 const eur = Number(totals.amount_EUR);
-                const exRate = eurToLyd / eur;
+                const exRate = eur > 0 ? eurToLyd / eur : NaN;
                 return (
                   <Box
                     sx={{
@@ -1316,32 +1279,49 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                     }}
                   >
                     Ex. rate ={" "}
-                    {exRate.toLocaleString("en-LY", {
-                      minimumFractionDigits: 3,
-                      maximumFractionDigits: 3,
-                    })}
+                    {Number.isFinite(exRate)
+                      ? exRate.toLocaleString("en-LY", {
+                          minimumFractionDigits: 3,
+                          maximumFractionDigits: 3,
+                        })
+                      : "-"}
                   </Box>
                 );
               })()}
+
+            </Box>
+
+            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1 }}>
+              {paymentRemainderMsg ? (
+                <Chip
+                  size="small"
+                  color={
+                    paymentRemainderKind === "success"
+                      ? "success"
+                      : paymentRemainderKind === "warning"
+                        ? "warning"
+                        : paymentRemainderKind === "error"
+                          ? "error"
+                          : "default"
+                  }
+                  label={paymentRemainderMsg}
+                />
+              ) : null}
             </Box>
 
             <Box sx={{ mt: 1 }}>
               {(() => {
                 if (!paymentTouched) return null;
-                const totalLyd = Number(totals.total_remise_final_lyd) || 0;
+                const totalLyd = normalizeLyd0(Number(totals.total_remise_final_lyd) || 0);
                 const sumPaid =
-                  (Number(totals.amount_lyd) || 0) +
-                  (Number(totals.amount_currency_LYD) || 0) +
-                  (Number(totals.amount_EUR_LYD) || 0);
+                  normalizeLyd0(Number(totals.amount_lyd) || 0) +
+                  normalizeLyd0(Number(totals.amount_currency_LYD) || 0) +
+                  normalizeLyd0(Number(totals.amount_EUR_LYD) || 0);
                 const delta = sumPaid - totalLyd;
-                const isOver = delta > 0.01;
-                const isPartial = delta < -0.01;
+                const isOver = delta > moneyEps;
+                const isPartial = delta < -moneyEps;
 
-                const status = isOver
-                  ? "Overpaid (Surcharge)"
-                  : isPartial
-                    ? "Partially Paid"
-                    : "Paid";
+                const status = isOver ? "Overpaid" : isPartial ? "Partially Paid" : "Paid";
 
                 const overcharged = Math.max(0, delta);
                 const remainder = Math.max(0, -delta);
@@ -1373,9 +1353,6 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                     <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
                         Status
-                      </Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 900 }}>
-                        {status}
                       </Typography>
                     </Box>
 
@@ -1453,15 +1430,10 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 value={stripInternalCommentTags(editInvoice?.COMMENT ?? "")}
                 onChange={(e) => {
                   const val = e.target.value;
-                  setEditInvoice((prev: any) => {
-                    const existingTags = extractInternalCommentTags(prev?.COMMENT);
-                    const clean = String(val ?? "").trim();
-                    const next =
-                      existingTags.length > 0
-                        ? (clean ? `${clean} | ${existingTags.join(" | ")}` : existingTags.join(" | "))
-                        : clean;
-                    return { ...prev, COMMENT: next };
-                  });
+                  setEditInvoice((prev: any) => ({
+                    ...prev,
+                    COMMENT: String(val ?? ""),
+                  }));
                 }}
               />
             </Box>
@@ -1498,7 +1470,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
               const paidEurLyd = Number(totals.amount_EUR_LYD) || 0;
 
               const sumPaidLyd =
-                roundUpLyd(paidLyd) + roundUpLyd(paidUsdLyd) + roundUpLyd(paidEurLyd);
+                normalizeMoney(paidLyd) + normalizeMoney(paidUsdLyd) + normalizeMoney(paidEurLyd);
 
               const fmt = (val: number, frac: number = 2) =>
                 val.toLocaleString("en-US", {
@@ -1506,7 +1478,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   maximumFractionDigits: frac,
                 });
 
-              const roundUp2 = (v: number) => Math.ceil((Number(v) || 0) * 100) / 100;
+              const round2 = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
 
               return (
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -1521,13 +1493,13 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                         <Typography variant="body2">Total invoice</Typography>
                         <Typography variant="body2" fontWeight={600}>
-                          {fmt(roundUp2(totalBase))} {currencyLabel}
+                          {fmt(round2(totalBase))} {currencyLabel}
                         </Typography>
                       </Box>
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                         <Typography variant="body2">Subtotal</Typography>
                         <Typography variant="body2" fontWeight={600}>
-                          {fmt(roundUp2(totalBase))} {currencyLabel}
+                          {fmt(round2(totalBase))} {currencyLabel}
                         </Typography>
                       </Box>
                       {(discountValue > 0 || discountPer > 0) && (
@@ -1584,13 +1556,13 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                         <Typography variant="body2">Final after discount</Typography>
                         <Typography variant="body2" fontWeight={600}>
-                          {fmt(roundUp2(finalAfterDiscount))} {currencyLabel}
+                          {fmt(round2(finalAfterDiscount))} {currencyLabel}
                         </Typography>
                       </Box>
                       <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                         <Typography variant="body2">Total amount (LYD)</Typography>
                         <Typography variant="body2" fontWeight={600}>
-                          {fmt(roundUpLyd(totalLyd), 0)} LYD
+                          {fmt(normalizeMoney(totalLyd), 0)} LYD
                         </Typography>
                       </Box>
                     </Box>
@@ -1608,25 +1580,25 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                         <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                           <Typography variant="body2">Subtotal (Paid)</Typography>
                           <Typography variant="body2" fontWeight={700}>
-                            {fmt(roundUpLyd(sumPaidLyd), 0)} LYD
+                            {fmt(normalizeMoney(sumPaidLyd), 0)} LYD
                           </Typography>
                         </Box>
                         <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                           <Typography variant="body2">LYD</Typography>
                           <Typography variant="body2" fontWeight={600}>
-                            {fmt(roundUpLyd(paidLyd), 0)} LYD
+                            {fmt(normalizeMoney(paidLyd), 0)} LYD
                           </Typography>
                         </Box>
                         <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                           <Typography variant="body2">USD & equiv</Typography>
                           <Typography variant="body2" fontWeight={600}>
-                            {fmt(roundUp2(paidUsd))} ({fmt(roundUpLyd(paidUsdLyd), 0)} LYD)
+                            {fmt(round2(paidUsd))} ({fmt(normalizeMoney(paidUsdLyd), 0)} LYD)
                           </Typography>
                         </Box>
                         <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                           <Typography variant="body2">EUR & equiv</Typography>
                           <Typography variant="body2" fontWeight={600}>
-                            {fmt(roundUp2(paidEur))} ({fmt(roundUpLyd(paidEurLyd), 0)} LYD)
+                            {fmt(round2(paidEur))} ({fmt(normalizeMoney(paidEurLyd), 0)} LYD)
                           </Typography>
                         </Box>
                       </Box>
@@ -1678,14 +1650,28 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 color="warning"
                 disabled={(() => {
                   if (isSaving) return true;
-                  const totalLyd = Math.ceil(Number(totals.total_remise_final_lyd) || 0);
-                  const sumPaid =
-                    Math.ceil(Number(totals.amount_lyd) || 0) +
-                    Math.ceil(Number(totals.amount_currency_LYD) || 0) +
-                    Math.ceil(Number(totals.amount_EUR_LYD) || 0);
-                  const diff = totalLyd - sumPaid;
-                  // Allow partial payment (diff > 0) but block overpayment.
-                  return diff < -0.01;
+                  const totalLyd0 = normalizeLyd0(Number(totals.total_remise_final_lyd) || 0);
+
+                  const paidLydLive =
+                    String(amountLydStr ?? "").trim() !== ""
+                      ? parseNumber(amountLydStr)
+                      : Number(totals.amount_lyd) || 0;
+                  const paidUsdLydLive =
+                    String(amountUsdLydStr ?? "").trim() !== ""
+                      ? parseNumber(amountUsdLydStr)
+                      : Number(totals.amount_currency_LYD) || 0;
+                  const paidEurLydLive =
+                    String(amountEurLydStr ?? "").trim() !== ""
+                      ? parseNumber(amountEurLydStr)
+                      : Number(totals.amount_EUR_LYD) || 0;
+
+                  const sumPaid0 =
+                    normalizeLyd0(paidLydLive) +
+                    normalizeLyd0(paidUsdLydLive) +
+                    normalizeLyd0(paidEurLydLive);
+                  const diff0 = totalLyd0 - sumPaid0;
+                  // Full payment required: block any mismatch.
+                  return Math.abs(diff0) > moneyEps;
                 })()}
               >
                 Confirm Checkout
@@ -1693,32 +1679,6 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             ))}
         </Box>
       </DialogActions>
-
-      <Dialog
-        open={partialPaymentConfirmOpen}
-        onClose={() => setPartialPaymentConfirmOpen(false)}
-      >
-        <DialogTitle>Partial Payment</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Typography>
-            This invoice is partially paid.
-          </Typography>
-          <Typography sx={{ mt: 1, fontWeight: 800 }}>
-            Remaining: {Math.ceil(Number(partialPaymentRemainingLyd) || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })} LYD
-          </Typography>
-          <Typography sx={{ mt: 1 }}>
-            Do you want to proceed?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setPartialPaymentConfirmOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained" color="warning" onClick={handlePartialPaymentProceed}>
-            Proceed
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Dialog open={createCustomerOpen} onClose={() => setCreateCustomerOpen(false)}>
         <DialogTitle>New Customer</DialogTitle>
@@ -1833,7 +1793,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
         <DialogTitle>Full Payment Required</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Typography>
-            This invoice is partially paid. Please enter full payment before confirming checkout.
+            The paid amount must match the invoice total before confirming checkout.
           </Typography>
         </DialogContent>
         <DialogActions>

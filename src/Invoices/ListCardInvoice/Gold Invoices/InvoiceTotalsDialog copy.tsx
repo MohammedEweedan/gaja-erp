@@ -24,6 +24,16 @@ interface Client {
   tel_client: string;
 }
 
+const stripInternalCommentTags = (raw: any) => {
+  const s = String(raw ?? "");
+  return s
+    .replace(/\s*\|\s*__META__\{[\s\S]*?\}\s*$/, "")
+    .replace(/\s*\|\s*__DSMETA__\{[\s\S]*?\}\s*$/, "")
+    .replace(/__META__\{[\s\S]*?\}\s*$/, "")
+    .replace(/__DSMETA__\{[\s\S]*?\}\s*$/, "")
+    .trim();
+};
+
 interface Sm {
   id_SourceMark: number;
   SourceMarketing: string;
@@ -727,10 +737,10 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
               multiline
               minRows={2}
               maxRows={4}
-              value={editInvoice?.COMMENT ?? ""}
+              value={stripInternalCommentTags(editInvoice?.COMMENT ?? "")}
               onChange={(e) => {
                 const val = e.target.value;
-                setEditInvoice((prev: any) => ({ ...prev, COMMENT: val }));
+                setEditInvoice((prev: any) => ({ ...prev, COMMENT: String(val ?? "") }));
               }}
             />
           </Box>

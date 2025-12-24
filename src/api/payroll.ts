@@ -52,7 +52,7 @@ export type PayrollRunResponse = {
   employees: Payslip[];
 };
 
-const API_BASE = "http://192.168.3.98:9000".replace(/\/+$/, "");
+const API_BASE = "https://system.gaja.ly/api".replace(/\/+$/, "");
 
 function absolute(url: string): string {
   if (API_BASE && /^https?:\/\//i.test(API_BASE)) {

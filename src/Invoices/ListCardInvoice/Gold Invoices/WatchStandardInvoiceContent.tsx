@@ -37,11 +37,12 @@ interface Props {
   data: InvoicePrintData;
   num_fact?: number; // Add num_fact as an optional prop
   showImage?: boolean; // Add showImage prop
+  showGoldUnitPrices?: boolean;
   createdBy?: string; // creator name passed from parent (SalesReportsTable -> PrintInvoiceDialog)
 }
 
 const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
-  ({ data, num_fact, showImage = true, createdBy }, ref) => {
+  ({ data, num_fact, showImage = true, showGoldUnitPrices = true, createdBy }, ref) => {
     const {
       TotalAmountFinal,
       invoice,
@@ -57,11 +58,27 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
       amount_EUR,
     } = data;
 
+    const paidUsdLyd = (data as any)?.amount_currency_LYD;
+    const paidEurLyd = (data as any)?.amount_EUR_LYD;
+
+    const placeholderImgSrc = "/GJ LOGO.png";
+
+    const moneyEps = 0.01;
+    const normalizeLyd0 = (v: number) => Math.round(Number(v) || 0);
+
+    const getPreferredImageKey = (kind: "gold" | "diamond" | "watch", id: any) =>
+      `prefImg:${kind}:${String(id ?? "").trim()}`;
+
     const fmt0 = (v: any) =>
       Math.ceil(Number(v) || 0).toLocaleString(undefined, {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
       });
+
+    const fmtWeight = (v: any) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? String(v) : "0";
+    };
 
     const parseMetaFromComment = (raw: any): any | null => {
       const s = String(raw || "");
@@ -521,77 +538,147 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
       // eslint-disable-next-line
     }, [pdata, typeinv, hasDiamondData]);
 
-    // Build the images base preserving any base path (e.g. "/api").
-    // Prefer axios baseURL when available and normalize to https.
-    const API_BASEImage = (() => {
+    // Build image base candidates from axios baseURL. Some deployments serve images at /api/images,
+    // others at /images. We try both.
+    const IMAGE_BASES = (() => {
       try {
         const base = (axios as any)?.defaults?.baseURL;
         if (base) {
           const u = new URL(base, window.location.origin);
-          // preserve existing path (e.g. /api) and append /images
           const cleanPath = u.pathname.replace(/\/+$/, "");
-          u.pathname = `${cleanPath}/images`;
-          // enforce https scheme
-          u.protocol = 'https:';
-          return u.toString().replace(/\/+$/, "");
+          const origin = u.origin;
+          const candidates: string[] = [];
+          // 1) /api/images when baseURL ends with /api
+          if (/\/api$/i.test(cleanPath)) {
+            candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+            candidates.push(`${origin}/images`);
+          } else {
+            // 1) preserve base path + /images
+            candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+            // 2) also try origin /images
+            candidates.push(`${origin}/images`);
+          }
+          return Array.from(new Set(candidates.map((s) => s.replace(/\/+$/, ""))));
         }
-        // Fallback to window origin
         const o = new URL(window.location.origin);
-        o.protocol = 'https:';
-        return `${o.origin}/images`;
+        return [`${o.origin}/images`];
       } catch {
-        try {
-          const { hostname, port } = window.location as any;
-          const p = port ? `:${port}` : "";
-          return `https://${hostname}${p}/images`;
-        } catch {
-          return '/images';
-        }
+        return ['/images'];
       }
     })();
 
-    // Ensure any image URL is https absolute (handles http://, //, and /paths)
+    // Primary base used for URL prefixing.
+    const API_BASEImage = IMAGE_BASES[0] || "/images";
+
+    // Ensure any image URL is absolute (handles http://, https://, //, and /paths)
+    // Keep the current protocol to avoid breaking local/dev environments.
     const toHttpsAbsolute = (url: string): string => {
       try {
         if (!url) return url;
-        if (url.startsWith("https://")) return url;
-        if (url.startsWith("http://")) return "https://" + url.substring(7);
-        if (url.startsWith("//")) return `https:${url}`;
-        if (url.startsWith("/")) {
-          // use the same origin as API_BASEImage
-          const origin = API_BASEImage.replace(/\/images$/,'');
-          return `${origin}${url}`;
+        if (url.startsWith("data:")) return url;
+        if (url.startsWith("blob:")) return url;
+
+        if (/^https?:\/\//i.test(url)) {
+          // Avoid mixed-content issues when the app runs on https.
+          if (window?.location?.protocol === "https:" && /^http:\/\//i.test(url)) {
+            return url.replace(/^http:\/\//i, "https://");
+          }
+          return url;
         }
-        return url;
+        if (url.startsWith("//")) return `${window.location.protocol}${url}`;
+        if (url.startsWith("/")) return `${window.location.origin}${url}`;
+        return new URL(url, window.location.origin).toString();
       } catch {
         return url;
       }
     };
 
+    // If we have a normalized secure route like /images/... we must prefix with API_BASEImage ROOT
+    // to preserve any base path (e.g. /api).
+    const toApiImageAbsolute = (url: string): string => {
+      try {
+        if (!url) return url;
+        if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+        if (/^https?:\/\//i.test(url) || url.startsWith("//")) return toHttpsAbsolute(url);
+
+        if (url.startsWith("/images/")) {
+          // API_BASEImage is like http(s)://host[/api]/images
+          const root = API_BASEImage.replace(/\/images\/?$/i, "");
+          return `${root}${url}`;
+        }
+
+        if (url.startsWith("/uploads/")) {
+          // Preserve API base path (e.g. /api) for legacy upload mounts
+          const root = API_BASEImage.replace(/\/images\/?$/i, "");
+          return `${root}${url}`;
+        }
+
+        // Fallback to browser origin
+        return toHttpsAbsolute(url);
+      } catch {
+        return toHttpsAbsolute(url);
+      }
+    };
+
+    const withToken = (rawUrl: string, token: string | null): string => {
+      if (!token) return rawUrl;
+      try {
+        const u = new URL(rawUrl, window.location.origin);
+        u.searchParams.delete("token");
+        u.searchParams.append("token", token);
+        return u.toString();
+      } catch {
+        // Fallback: best-effort append
+        if (!rawUrl) return rawUrl;
+        if (/([?&])token=/.test(rawUrl)) return rawUrl;
+        return rawUrl + (rawUrl.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+      }
+    };
+
     const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
 
-    // Typed fetch helper (watch | diamond)
+    const normalizeImageList = React.useCallback((arr: any): string[] => {
+      if (!Array.isArray(arr)) return [];
+      return arr
+        .map((it: any) => {
+          if (typeof it === "string") return it;
+          if (it && typeof it === "object") return it.url || it.path || it.href || it.src || "";
+          return "";
+        })
+        .filter(Boolean);
+    }, []);
+
+    // Typed fetch helper (watch | diamond) with dual base support
     const fetchImagesTyped = async (
       id: number | string,
       type: "watch" | "diamond"
     ): Promise<string[] | null> => {
       const token = localStorage.getItem("token");
       try {
-        const url = `${API_BASEImage}/list/${type}/${id}`;
-        try { console.log('[InvoiceImages:fetch] GET', url); } catch {}
-        const res = await axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const out = Array.isArray(res.data) ? res.data : [];
-        try { console.log('[InvoiceImages:fetch] OK', { url, count: out.length }); } catch {}
-        if (out.length) return out;
-        return [];
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        try { console.log('[InvoiceImages:fetch] ERR', { url: `${API_BASEImage}/list/${type}/${id}`, error: (e as any)?.message || e }); } catch {}
-        
-        return null;
+        for (const base of IMAGE_BASES) {
+          const url = `${base}/list/${type}/${id}`;
+          try { console.log('[InvoiceImages:fetch] GET', url); } catch {}
+          try {
+            const res = await axios.get(url, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            const outRaw = Array.isArray(res.data) ? res.data : [];
+            const out = outRaw
+              .map((it: any) => {
+                if (typeof it === "string") return it;
+                if (it && typeof it === "object") return it.url || it.path || it.href || it.src || "";
+                return "";
+              })
+              .filter(Boolean);
+            if (out.length) return out;
+          } catch {
+            /* try next base */
+          }
+        }
+      } catch {
+        // ignore
       }
+      return null;
     };
 
     // Fetch images for watch, diamond, or gold when detected (typed endpoints)
@@ -628,14 +715,14 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
           sourceIds = pdata.map((inv) => inv.picint).filter(Boolean);
         }
       } else if (isGold) {
-        // For gold, use picint or id_fact from pdata/items
+        // For gold, images are stored per ACHAT id_achat; fetch by those ids.
         sourceIds = pdata
-          .map((inv) => inv.picint || inv.id_fact || inv.id_achat)
+          .flatMap((inv) => (inv?.ACHATs || []).map((a: any) => a?.id_achat))
           .filter(Boolean)
           .map(String);
         if (sourceIds.length === 0) {
-          sourceIds = items
-            .map((it: any) => it.picint || it.id_fact || it.id_achat)
+          sourceIds = (items || [])
+            .flatMap((it: any) => (it?.ACHATs || []).map((a: any) => a?.id_achat))
             .filter(Boolean)
             .map(String);
         }
@@ -704,7 +791,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                   const fUrl = `${API_BASEImage}/list/${cid}`;
                   try { console.log('[InvoiceImages:fetch-fallback] GET', fUrl); } catch {}
                   const r = await axios.get(fUrl, { headers: { Authorization: `Bearer ${token}` } });
-                  if (Array.isArray(r.data) && r.data.length) urls = r.data.map((it: any) => it.url || it);
+                  if (Array.isArray(r.data) && r.data.length) urls = normalizeImageList(r.data);
                   try { console.log('[InvoiceImages:fetch-fallback] OK', { url: fUrl, count: Array.isArray(r.data) ? r.data.length : 0 }); } catch {}
                 } catch {}
               }
@@ -726,7 +813,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                   const fUrl = `${API_BASEImage}/list/${id}`;
                   try { console.log('[InvoiceImages:fetch-fallback] GET', fUrl); } catch {}
                   const r = await axios.get(fUrl, { headers: { Authorization: `Bearer ${token}` } });
-                  if (Array.isArray(r.data) && r.data.length) urls = r.data.map((it: any) => it.url || it);
+                  if (Array.isArray(r.data) && r.data.length) urls = normalizeImageList(r.data);
                   try { console.log('[InvoiceImages:fetch-fallback] OK', { url: fUrl, count: Array.isArray(r.data) ? r.data.length : 0 }); } catch {}
                 } catch {}
               }
@@ -780,56 +867,38 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
           } else if (isGold) {
             // Gold images are stored per id_achat. Build candidates and fetch.
             const token = localStorage.getItem("token");
-            // Put picint/id first as requested, then other id_achat candidates
-            const candidateIds: string[] = [];
-            const pushId = (v: any) => {
-              if (v !== undefined && v !== null) {
-                const s = String(v).trim();
-                if (s !== '' && !candidateIds.includes(s)) candidateIds.push(s);
-              }
-            };
-            // Ensure we try the row key first if numeric
-            pushId(id);
-            // From invoices that map to this identifier (picint/id_fact/id_achat)
-            pdata
-              .filter(
-                (inv) =>
-                  String(inv.picint) === String(id) ||
-                  String(inv.id_fact) === String(id) ||
-                  String(inv.id_achat) === String(id)
-              )
-              .forEach((inv) => {
-                (inv.ACHATs || []).forEach((a: any) => pushId(a?.id_achat));
-              });
-            // candidateIds now has id first, followed by found id_achat values
-
+            // Here `id` is expected to already be an id_achat.
+            const cid = String(id);
             let fetched = false;
-            for (const cid of candidateIds) {
-              if (!cid) continue;
+            if (cid) {
               // If we already fetched for this cid, map it to this id and stop
               if (imageUrls[cid]) {
                 setImageUrls((prev) => ({ ...prev, [id]: prev[cid] }));
                 fetched = true;
-                break;
               }
               try {
-                console.log('[InvoiceImages] gold candidate id_achat', cid);
+                console.log('[InvoiceImages] gold id_achat', cid);
                 let urls: string[] = [];
                 try {
-                  const gUrl = `${API_BASEImage}/list/gold/${cid}`;
-                  try { console.log('[InvoiceImages:fetch-gold] GET', gUrl); } catch {}
-                  const r = await axios.get(gUrl,
-                    { headers: { Authorization: `Bearer ${token}` } });
-                  if (Array.isArray(r.data) && r.data.length) {
-                    urls = r.data.map((it: any) => it.url || it);
+                  for (const base of IMAGE_BASES) {
+                    const gUrl = `${base}/list/gold/${cid}`;
+                    try { console.log('[InvoiceImages:fetch-gold] GET', gUrl); } catch {}
+                    try {
+                      const r = await axios.get(gUrl,
+                        { headers: { Authorization: `Bearer ${token}` } });
+                      if (Array.isArray(r.data) && r.data.length) {
+                        urls = normalizeImageList(r.data);
+                        break;
+                      }
+                    } catch {
+                      /* try next */
+                    }
                   }
                 } catch {}
-                // Do not fallback to watch list for gold; keep gold-only sources
                 if (urls && urls.length) {
                   setImageUrls((prev) => ({ ...prev, [id]: urls, [cid]: urls }));
                   fetched = true;
-                  console.log('[InvoiceImages] gold fetched', { key: id, id_achat: cid, count: urls.length });
-                  break;
+                  console.log('[InvoiceImages] gold fetched', { id_achat: cid, count: urls.length });
                 }
               } catch {}
             }
@@ -862,8 +931,8 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                 .invoice-header-right { display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; min-width: 140px !important; }
                 .invoice-header-right .MuiBox-root { width: 100% !important; }
                 .invoice-header-right > * + * { margin-top: 8px !important; }
-                /* Ensure customer info shows as a visible box in print/PDF */
-                .invoice-header-right .customer-box { border: 1px solid #bfbfbf !important; background: #fff !important; padding: 8px !important; border-radius: 6px !important; -webkit-print-color-adjust: exact; width: 100% !important; }
+                /* Ensure customer info shows cleanly in print/PDF */
+                .invoice-header-right .customer-box { border: none !important; background: #fff !important; padding: 8px !important; border-radius: 6px !important; -webkit-print-color-adjust: exact; width: 100% !important; }
 
                 /* Logo and stamp sizing for print */
                 .invoice-logo { width: 90px !important; height: auto !important; }
@@ -987,21 +1056,18 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
 
             <Box
               sx={{
-                mt: 0,
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
               }}
             >
-              <QRCode value={qrData} size={120} />
+              <QRCode value={qrData} size={90} />
             </Box>
             <Box
               className="customer-box"
               sx={{
                 mt: 1,
                 p: 1,
-                border: "1px solid #eee",
-                borderRadius: 2,
                 width: "100%",
               }}
             >
@@ -1011,27 +1077,26 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               >
                 Customer
               </Typography>
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: 18,
-                  fontSize: 13,
-                  listStyleType: "disc",
-                }}
-              >
-                <li>
+              <Box sx={{ mt: 0.5, display: "flex", flexDirection: "column", gap: 0.25 }}>
+                <Typography sx={{ fontSize: 12 }}>
                   <span style={{ fontWeight: "bold" }}>Code:</span>{" "}
-                  {pdata[0]?.client || pdata[0]?.Client?.num_client || "N/A"}
-                </li>
-                <li>
+                  <span style={{ fontFamily: "monospace" }}>
+                    {customer?.id_client ?? pdata[0]?.client ?? pdata[0]?.Client?.num_client ?? "N/A"}
+                  </span>
+                </Typography>
+                <Typography sx={{ fontSize: 12 }}>
                   <span style={{ fontWeight: "bold" }}>Name:</span>{" "}
-                  {pdata[0]?.Client?.client_name || "N/A"}
-                </li>
-                <li>
+                  <span style={{ fontFamily: "monospace" }}>
+                    {customer?.client_name ?? pdata[0]?.Client?.client_name ?? "N/A"}
+                  </span>
+                </Typography>
+                <Typography sx={{ fontSize: 12 }}>
                   <span style={{ fontWeight: "bold" }}>Tel:</span>{" "}
-                  {pdata[0]?.Client?.tel_client || "N/A"}
-                </li>
-              </ul>
+                  <span style={{ fontFamily: "monospace" }}>
+                    {customer?.tel_client ?? pdata[0]?.Client?.tel_client ?? "N/A"}
+                  </span>
+                </Typography>
+              </Box>
             </Box>
           </Box>
         </Box>
@@ -1074,12 +1139,15 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               )}
               {typeinv && typeinv.toLowerCase().includes("gold") && (
                 <>
-                  <TableCell sx={{ color: "#000" }}>Weight</TableCell>
-                  <TableCell sx={{ color: "#000" }}>Price /g</TableCell>
-                  <TableCell sx={{ color: "#000" }}>Price /piece</TableCell>
+                  <TableCell sx={{ color: "#000" }}>Weight (g)</TableCell>
+                  {showGoldUnitPrices ? (
+                    <>
+                      <TableCell sx={{ color: "#000" }}>Price /g</TableCell>
+                      <TableCell sx={{ color: "#000" }}>Price /piece</TableCell>
+                    </>
+                  ) : null}
                   <TableCell sx={{ color: "#000" }}>Gold Color</TableCell>
                   <TableCell sx={{ color: "#000" }}>Rush Color</TableCell>
-                 
                 </>
               )}
               {typeinv && !typeinv.toLowerCase().includes("gold") && (
@@ -1101,12 +1169,14 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                 <TableCell
                   colSpan={(() => {
                     const baseSN = 1; // S/N
+                    const goldId = typeinv && typeinv.toLowerCase().includes("gold") ? 1 : 0; // ID
                     const img = showImage ? 1 : 0; // Image column
                     const isGold =
                       typeinv && typeinv.toLowerCase().includes("gold");
-                    const middle = isGold ? 4 : 2; // gold uses 4 columns (weight..size), non-gold uses Price + Details
+                    const goldMid = showGoldUnitPrices ? 5 : 3; // weight + (price/g + price/piece?) + colors
+                    const middle = isGold ? goldMid : 2; // non-gold uses Price + Details
                     const gift = 1; // IS_GIFT
-                    return baseSN + img + middle + gift;
+                    return baseSN + goldId + img + middle + gift;
                   })()}
                   align="center"
                 >
@@ -1339,19 +1409,38 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                             {(() => {
                               const parentInvoice = item._parent;
                               const rowId = parentInvoice?.picint;
-                              // Fallback sequence for image source (row picint, direct id_achat, invoice.picint, any diamond detail id)
+                              const rowPicintKey =
+                                rowId !== undefined && rowId !== null ? String(rowId) : "";
+                              const rowAchatKey =
+                                item?.id_achat !== undefined && item?.id_achat !== null
+                                  ? String(item.id_achat)
+                                  : "";
+                              const invPicintKey =
+                                invoice?.picint !== undefined && invoice?.picint !== null
+                                  ? String(invoice.picint)
+                                  : "";
+                              const isGoldType = typeinv?.toLowerCase().includes("gold");
+                              // Prefer the correct key per type; placeholder should only be used when there are truly no URLs.
                               let urls = [] as string[];
-                              if (rowId && imageUrls[rowId]) urls = imageUrls[rowId];
-                              if ((!urls || urls.length === 0) && item.id_achat && imageUrls[item.id_achat]) {
-                                urls = imageUrls[item.id_achat];
+                              // Gold: images are stored per ACHAT id_achat
+                              if (isGoldType && rowAchatKey && imageUrls[rowAchatKey]) {
+                                urls = imageUrls[rowAchatKey];
+                              }
+                              // Non-gold (or fallback): allow picint-based lookup
+                              if ((!urls || urls.length === 0) && rowPicintKey && imageUrls[rowPicintKey]) {
+                                urls = imageUrls[rowPicintKey];
+                              }
+                              // Generic fallback: id_achat lookup if available
+                              if ((!urls || urls.length === 0) && rowAchatKey && imageUrls[rowAchatKey]) {
+                                urls = imageUrls[rowAchatKey];
                               }
                               // Try using current invoice picint as fallback key
-                              if ((!urls || urls.length === 0) && typeof invoice?.picint !== 'undefined') {
-                                const invKey = String(invoice.picint);
-                                if (imageUrls[invKey]) urls = imageUrls[invKey];
+                              if (
+                                (!urls || urls.length === 0) &&
+                                !!invPicintKey
+                              ) {
+                                if (imageUrls[invPicintKey]) urls = imageUrls[invPicintKey];
                               }
-                              if (urls.length === 0 && item.id_achat)
-                                urls = imageUrls[item.id_achat] || urls;
                               if (
                                 urls.length === 0 &&
                                 (typeinv?.toLowerCase().includes("diamond") ||
@@ -1377,14 +1466,11 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                   urls = imageUrls[altId];
                                 }
                               }
-                              // As a last resort for gold, attempt a direct gold key using rowId
-                              if ((!urls || urls.length === 0) && rowId && imageUrls[rowId]) {
-                                urls = imageUrls[rowId];
-                              }
+                              urls = normalizeImageList(urls);
                               const token = localStorage.getItem("token");
-                              const isGoldType = typeinv?.toLowerCase().includes("gold");
                               const isWatchType = typeinv?.toLowerCase().includes("watch");
-                              let candidateUrls = urls;
+                              // Candidate images already fetched and stored in imageUrls
+                              let candidateUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
                               // Neutral normalization based on source folder, independent of type
                               if (Array.isArray(candidateUrls) && candidateUrls.length) {
                                 candidateUrls = candidateUrls.map((u) => {
@@ -1474,17 +1560,31 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                     urlsNormalized: candidateUrls
                                   });
                                 } catch {}
-                                // Prefer the last candidate (often newest by prior sorts); fallback to first
-                                const imgUrl = candidateUrls[candidateUrls.length - 1] || candidateUrls[0];
-                                // Force https absolute URL for images
-                                const httpsImg = toHttpsAbsolute(imgUrl);
-                                let urlWithToken = httpsImg;
-                                if (token) {
-                                  urlWithToken +=
-                                    (httpsImg.includes("?") ? "&" : "?") +
-                                    "token=" +
-                                    encodeURIComponent(token);
+                                // If user chose a preferred image for this item, honor it.
+                                let preferredUrl: string | null = null;
+                                try {
+                                  const kind: "gold" | "diamond" | "watch" = isGoldType
+                                    ? "gold"
+                                    : isWatchType
+                                      ? "watch"
+                                      : "watch";
+                                  const keyId = item?.id_achat ?? rowId ?? invoice?.picint;
+                                  const pref = localStorage.getItem(getPreferredImageKey(kind, keyId));
+                                  if (pref && candidateUrls.some((u) => String(u) === String(pref))) {
+                                    preferredUrl = pref;
+                                  }
+                                } catch {
+                                  // ignore
                                 }
+
+                                // Prefer chosen image; otherwise last candidate (often newest); fallback to first
+                                const imgUrl =
+                                  preferredUrl ||
+                                  candidateUrls[candidateUrls.length - 1] ||
+                                  candidateUrls[0];
+                                // Ensure the URL targets the correct API base (preserve /api) when using /images/* routes
+                                const httpsImg = toApiImageAbsolute(imgUrl);
+                                const urlWithToken = withToken(httpsImg, token);
                                 try {
                                   console.log('[InvoiceImages:render] img', {
                                     rowPicint: rowId,
@@ -1516,7 +1616,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                     ) => {
                                       e.currentTarget.onerror = null;
                                       e.currentTarget.src =
-                                        "/default-image.png";
+                                        placeholderImgSrc;
                                     }}
                                   />
                                 );
@@ -1530,9 +1630,21 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                   });
                                 } catch {}
                                 return (
-                                  <span style={{ color: "#bbb", fontSize: 10 }}>
-                                    No Image
-                                  </span>
+                                  <Box
+                                    component="img"
+                                    src={placeholderImgSrc}
+                                    alt="Product"
+                                    loading="lazy"
+                                    sx={{
+                                      width: 100,
+                                      height: 100,
+                                      objectFit: "contain",
+                                      borderRadius: 4,
+                                      border: "1px solid #eee",
+                                      background: "#fff",
+                                      p: 1,
+                                    }}
+                                  />
                                 );
                               }
                             })()}
@@ -1592,51 +1704,55 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                 padding: "2px 6px",
                               }}
                             >
-                              {fmt0(item.qty)} g
+                              {fmtWeight(item.qty)} g
                             </TableCell>
 
-                            <TableCell
-                              sx={{
-                                color: "#000",
-                                fontSize: 11,
-                                padding: "2px 6px",
-                              }}
-                            >
-                              {(() => {
-                                const parent = item._parent;
-                                const meta = parseMetaFromComment(parent?.COMMENT);
-                                const w = Number(item.qty || 0);
-                                const piece =
-                                  meta?.price_per_piece != null
-                                    ? Number(meta.price_per_piece)
-                                    : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
-                                const perGram =
-                                  meta?.price_per_gram != null
-                                    ? Number(meta.price_per_gram)
-                                    : w > 0
-                                      ? piece / w
-                                      : 0;
-                                return fmt0(perGram);
-                              })()}
-                            </TableCell>
+                            {showGoldUnitPrices ? (
+                              <>
+                                <TableCell
+                                  sx={{
+                                    color: "#000",
+                                    fontSize: 11,
+                                    padding: "2px 6px",
+                                  }}
+                                >
+                                  {(() => {
+                                    const parent = item._parent;
+                                    const meta = parseMetaFromComment(parent?.COMMENT);
+                                    const w = Number(item.qty || 0);
+                                    const piece =
+                                      meta?.price_per_piece != null
+                                        ? Number(meta.price_per_piece)
+                                        : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
+                                    const perGram =
+                                      meta?.price_per_gram != null
+                                        ? Number(meta.price_per_gram)
+                                        : w > 0
+                                          ? piece / w
+                                          : 0;
+                                    return fmt0(perGram);
+                                  })()}
+                                </TableCell>
 
-                            <TableCell
-                              sx={{
-                                color: "#000",
-                                fontSize: 11,
-                                padding: "2px 6px",
-                              }}
-                            >
-                              {(() => {
-                                const parent = item._parent;
-                                const meta = parseMetaFromComment(parent?.COMMENT);
-                                const piece =
-                                  meta?.price_per_piece != null
-                                    ? Number(meta.price_per_piece)
-                                    : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
-                                return <span style={{ fontFamily: "monospace" }}>{fmt0(piece)}</span>;
-                              })()}
-                            </TableCell>
+                                <TableCell
+                                  sx={{
+                                    color: "#000",
+                                    fontSize: 11,
+                                    padding: "2px 6px",
+                                  }}
+                                >
+                                  {(() => {
+                                    const parent = item._parent;
+                                    const meta = parseMetaFromComment(parent?.COMMENT);
+                                    const piece =
+                                      meta?.price_per_piece != null
+                                        ? Number(meta.price_per_piece)
+                                        : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
+                                    return <span style={{ fontFamily: "monospace" }}>{fmt0(piece)}</span>;
+                                  })()}
+                                </TableCell>
+                              </>
+                            ) : null}
                             <TableCell
                               sx={{
                                 color: "#000",
@@ -1654,15 +1770,6 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                               }}
                             >
                               {item.Color_Rush ?? ""}
-                            </TableCell>
-                            <TableCell
-                              sx={{
-                                color: "#000",
-                                fontSize: 11,
-                                padding: "2px 6px",
-                              }}
-                            >
-                              {item.Unite ?? ""}
                             </TableCell>
                           </>
                         )}
@@ -1807,17 +1914,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                 <Typography>
                   <span style={{ fontWeight: "bold" }}>Total Weight:</span>
                   <span style={{ fontFamily: "monospace" }}>
-                    {pdata
-                      .flatMap((inv) => inv.ACHATs || [])
-                      .reduce(
-                        (sum, item) => sum + (parseFloat(item.qty) || 0),
-                        0
-                      )
-                      .toLocaleString(undefined, {
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}{" "}
-                    g
+                    {fmtWeight(totalWeight)} g
                   </span>
                 </Typography>
               </>
@@ -1826,7 +1923,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               <>
                 {/* Total USD after discount */}
                 <Typography>
-                  <span style={{ fontWeight: "bold" }}>Total USD:</span>
+                  <span style={{ fontWeight: "bold" }}>Total USD: </span>
                   <span style={{ fontFamily: "monospace" }}>
                     {TotalAmountFinal.toLocaleString(undefined, {
                       minimumFractionDigits: 2,
@@ -1884,7 +1981,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
 
                 {/* Total USD after discount */}
                 <Typography>
-                  <span style={{ fontWeight: "bold" }}>Total Saved USD:</span>
+                  <span style={{ fontWeight: "bold" }}>Final Price in USD: </span>
                   <span style={{ fontFamily: "monospace" }}>
                     {(
                       (Number(TotalAmountFinal) || 0) +
@@ -1908,24 +2005,51 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               textAlign: "right",
             }}
           >
-            <Typography>
-              <span style={{ fontWeight: "bold" }}>LYD Paid:</span>{" "}
-              <span style={{ fontFamily: "monospace" }}>
-                {fmt0(amount_lyd)}
-              </span>
-            </Typography>
-            <Typography>
-              <span style={{ fontWeight: "bold" }}>USD Paid:</span>{" "}
-              <span style={{ fontFamily: "monospace" }}>
-                {fmt0(amount_currency)}
-              </span>
-            </Typography>
-            <Typography>
-              <span style={{ fontWeight: "bold" }}>EUR Paid:</span>{" "}
-              <span style={{ fontFamily: "monospace" }}>
-                {fmt0(amount_EUR)}
-              </span>
-            </Typography>
+            {(() => {
+              const lyd = Number(amount_lyd) || 0;
+              const usd = Number(amount_currency) || 0;
+              const eur = Number(amount_EUR) || 0;
+              const usdLyd = Number(paidUsdLyd) || 0;
+              const eurLyd = Number(paidEurLyd) || 0;
+              const paidTotalLydEquiv = lyd + usdLyd + eurLyd;
+
+              const totalLyd = normalizeLyd0(Number(totalAmountLYD) || 0);
+              const paidLyd0 = normalizeLyd0(paidTotalLydEquiv);
+              const diff = totalLyd - paidLyd0;
+              const isPaidInFull = Math.abs(diff) <= moneyEps;
+              const hasRemainder = diff > moneyEps;
+              const paidColor = isPaidInFull ? "#2e7d32" : (hasRemainder ? "#d04444ff" : "#d04444ff");
+
+              const lines: Array<{ label: string; value: string }> = [];
+              if (lyd > 0) lines.push({ label: "LYD", value: fmt0(lyd) });
+              if (usd > 0) lines.push({ label: "USD", value: fmt0(usd) });
+              if (eur > 0) lines.push({ label: "EUR", value: fmt0(eur) });
+              if (lines.length === 0) lines.push({ label: "LYD", value: fmt0(paidTotalLydEquiv) });
+
+              return (
+                <>
+                  <Typography>
+                    <span style={{ fontWeight: "bold" }}>Payments:</span>
+                  </Typography>
+                  <Typography sx={{ mt: 0.5 }}>
+                    <span style={{ fontWeight: "bold" }}>Paid (LYD equivalent):</span>{" "}
+                    <span style={{ fontFamily: "monospace", color: paidColor }}>
+                      {fmt0(paidTotalLydEquiv)} LYD
+                    </span>
+                  </Typography>
+                  {hasRemainder && (
+                    <Typography sx={{ mt: 0.25 }}>
+                      <span style={{ fontWeight: "bold", color: "#d04444ff" }}>
+                        Remainder:
+                      </span>{" "}
+                      <span style={{ fontFamily: "monospace", color: "#d04444ff" }}>
+                        {fmt0(diff)} LYD
+                      </span>
+                    </Typography>
+                  )}
+                </>
+              );
+            })()}
           </Box>
         </Box>
 
@@ -1963,7 +2087,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                     marginRight: 6,
                   }}
                 >
-                  Created by:
+                  Issued by:
                 </span>
                 <span style={{ color: "#666" }}>{createdBy}</span>
               </div>
@@ -1989,7 +2113,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                         marginRight: 6,
                       }}
                     >
-                      Created by:
+                      Issued by:
                     </span>
                     <span style={{ color: "#666" }}>{user}</span>
                   </div>

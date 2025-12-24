@@ -930,7 +930,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         }
         if (tab === 'advances') {
           try {
-            const url = `http://192.168.3.98:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+            const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -942,7 +942,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         }
         try {
           const q = new URLSearchParams({ employeeId: String(adjEmpId) });
-          const res = await fetch(`http://192.168.3.98:9000/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`https://system.gaja.ly/api/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
           const js = await res.json();
           if (res.ok) setHistoryPoints(Array.isArray(js?.points) ? js.points : []);
           else setHistoryPoints([]);
@@ -959,7 +959,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     }
     (async () => {
       try {
-        const url = `http://192.168.3.98:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+        const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
         const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
         if (!res.ok) {
           setAdjRows([]);
@@ -1028,7 +1028,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
   React.useEffect(() => {
   (async () => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_IP || 'http://192.168.3.98:9000'}/jobs/jobs`, {
+      const res = await fetch(`${process.env.REACT_APP_API_IP || 'https://system.gaja.ly/api'}/jobs/jobs`, {
         headers: authHeader() as any,
       });
       if (!res.ok) return;
@@ -1067,7 +1067,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         currency: isLydOnly ? 'LYD' : adjForm.currency,
         note: adjForm.note,
       };
-      const res = await fetch(`http://192.168.3.98:9000/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
+      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Failed to add adjustment');
       const js = await res.json();
       setAdjRows(prev => [...prev, js.entry]);
@@ -1113,7 +1113,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         currency: isLydOnly ? 'LYD' : adjForm.currency,
         note: adjForm.note,
       };
-      const res = await fetch(`http://192.168.3.98:9000/hr/payroll/adjustments/${adjEditId}`, { 
+      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments/${adjEditId}`, { 
         method: 'PUT', 
         headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), 
         body: JSON.stringify(payload) 
@@ -1144,7 +1144,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
   const deleteAdjustment = async (id: number) => {
     setAdjLoading(true);
     try {
-      const res = await fetch(`http://192.168.3.98:9000/hr/payroll/adjustments/${id}`, { 
+      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments/${id}`, { 
         method: 'DELETE', 
         headers: authHeader() as unknown as HeadersInit 
       });
@@ -1230,7 +1230,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
   // Fetch sales metrics for the current window
   const fetchSales = React.useCallback(async () => {
     try {
-      const url = `http://192.168.3.98:9000/hr/payroll/sales-metrics?year=${year}&month=${month}`;
+      const url = `https://system.gaja.ly/api/hr/payroll/sales-metrics?year=${year}&month=${month}`;
       const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
       if (!res.ok) return setSales({});
       const js = await res.json();
@@ -1269,7 +1269,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
       setCommLoading(true);
       (async () => {
         try {
-          const res = await fetch(`http://192.168.3.98:9000/employees`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`https://system.gaja.ly/api/employees`, { headers: authHeader() as unknown as HeadersInit });
           if (res.ok) {
             const js = await res.json();
             const arr: any[] = Array.isArray(js) ? js : (Array.isArray(js?.data) ? js.data : []);
@@ -1302,7 +1302,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
             mp[e.id_emp] = days.filter((d: any) => !!d?.present).length;
           } catch {}
           try {
-            const r = await fetch(`http://192.168.3.98:9000/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+            const r = await fetch(`https://system.gaja.ly/api/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
             if (r.ok) {
               const js = await r.json();
               const obj = js?.data ?? js;
@@ -1358,7 +1358,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         let rowsAll: any[] = [];
         try {
           const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-          const r = await fetch(`http://192.168.3.98:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+          const r = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
           if (r.ok) rowsAll = await r.json();
         } catch {}
         const gramsByUser = new Map<number, number>();
@@ -1776,7 +1776,7 @@ React.useEffect(() => {
       const monthEndISO = dayjs(periodStart).endOf("month").format("YYYY-MM-DD");
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
 
-      const invRes = await fetch(`http://192.168.3.98:9000/invoices/allDetailsP?${qs}`, {
+      const invRes = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, {
         headers: authHeader() as unknown as HeadersInit,
       });
 
@@ -1792,7 +1792,7 @@ React.useEffect(() => {
 
           let empObj: any = null;
           try {
-            const r = await fetch(`http://192.168.3.98:9000/employees/${empId}`, {
+            const r = await fetch(`https://system.gaja.ly/api/employees/${empId}`, {
               headers: authHeader() as unknown as HeadersInit,
             });
             if (r.ok) {
@@ -2014,7 +2014,7 @@ React.useEffect(() => {
           const hasComm = Number((empRow as any).COMMUNICATION || 0) > 0;
           if (!hasFuel || !hasComm) {
             try {
-              const res = await fetch(`http://192.168.3.98:9000/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+              const res = await fetch(`https://system.gaja.ly/api/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
               if (res.ok) {
                 const payload = await res.json();
                 const obj = payload?.data ?? payload;
@@ -2039,7 +2039,7 @@ React.useEffect(() => {
           let dedUsd = 0;
           let advSum = 0;
           try {
-            const url = `http://192.168.3.98:9000/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
+            const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -2601,7 +2601,7 @@ React.useEffect(() => {
   try {
     // Resolve Position (TITLE) before drawing header
     try {
-      const resTitle = await fetch(`http://192.168.3.98:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resTitle = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resTitle.ok) {
         const payload = await resTitle.json();
         const obj = payload?.data ?? payload;
@@ -2826,7 +2826,7 @@ React.useEffect(() => {
   let commMonthlyPDF = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
   if (!fuelMonthlyPDF && !commMonthlyPDF) {
     try {
-      const resEmp = await fetch(`http://192.168.3.98:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resEmp = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resEmp.ok) {
         const payload = await resEmp.json();
         const obj = payload?.data ?? payload;
@@ -2842,7 +2842,7 @@ React.useEffect(() => {
   // Fetch this month's Salary Advances total for this employee (to deduct from Net Pay)
   let advSumLYD = 0;
   try {
-    const adjUrlSum = `http://192.168.3.98:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const adjUrlSum = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(adjUrlSum, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -2860,7 +2860,7 @@ React.useEffect(() => {
   let commissionRole: string = '';
   let commissionPs: number[] = [];
   try {
-    const resEmp = await fetch(`http://192.168.3.98:9000/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+    const resEmp = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
     if (resEmp.ok) {
       const payload = await resEmp.json();
       const obj = payload?.data ?? payload;
@@ -2898,7 +2898,7 @@ React.useEffect(() => {
   if (sellerUserId != null) {
     try {
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-      const r = await fetch(`http://192.168.3.98:9000/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+      const r = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
       if (r.ok) {
         const js = await r.json();
         const rowsAll: any[] = Array.isArray(js) ? js : [];
@@ -3036,7 +3036,7 @@ React.useEffect(() => {
   // --- Load period adjustments for this employee and map into earnings/deductions rows ---
   let adjRowsPdf: Array<{ type: string; label?: string; direction?: string; amount: number; currency: string; note?: string; ts?: string }> = [];
   try {
-    const url = `http://192.168.3.98:9000/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -4703,7 +4703,7 @@ React.useEffect(() => {
                           currency: "LYD",
                           note: "salary advance",
                         };
-                        const res = await fetch(`http://192.168.3.98:9000/hr/payroll/adjustments`, {
+                        const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...authHeader() } as unknown as HeadersInit,
                           body: JSON.stringify(payload),
@@ -6060,7 +6060,7 @@ React.useEffect(() => {
                     >
                       <Box display="flex" alignItems="center" gap={1.25}>
                         <Avatar
-                          src={`http://192.168.3.98:9000/employees/${e.id_emp}/picture`}
+                          src={`https://system.gaja.ly/api/employees/${e.id_emp}/picture`}
                           sx={{ width: 28, height: 28 }}
                         />
                         <Box

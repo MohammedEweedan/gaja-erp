@@ -30,6 +30,7 @@ import {
   TextField,
   Autocomplete,
 } from "@mui/material";
+import LockIcon from "@mui/icons-material/Lock";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "react-router-dom";
 import AttachMoneyIcon from "@mui/icons-material/AttachMoney";

@@ -206,6 +206,7 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
   const [makeTransactionToCashier, setMakeTransactionToCashier] =
     React.useState(false);
   const [showImage] = React.useState(true);
+  const [showGoldUnitPrices, setShowGoldUnitPrices] = React.useState(false);
 
   // Initialize invoice number from the provided invoice when available
   React.useEffect(() => {
@@ -302,6 +303,50 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     }, 300);
   };
 
+  const goldWeightInfo = React.useMemo(() => {
+    const directType = String((data as any)?.type || "").toLowerCase();
+    const firstItem: any = data?.items?.[0];
+    const supplierType =
+      String(
+        firstItem?.Fournisseur?.TYPE_SUPPLIER ||
+          firstItem?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER ||
+          ""
+      ).toLowerCase();
+    const isGold = directType.includes("gold") || supplierType.includes("gold");
+    if (!isGold) return { totalWeight: 0, lydPerGram: 0 };
+
+    const totalWeight = (data?.items || []).reduce((sum, row: any) => {
+      // Prefer invoice qty for gold weight (this is what GNew_I shows as "Weight: {row.qty} g")
+      const w =
+        row?.qty ??
+        row?.ACHATs?.[0]?.qty ??
+        row?.ACHATs?.[0]?.DistributionPurchase?.[0]?.Weight ??
+        row?.ACHATs?.[0]?.DistributionPurchase?.Weight ??
+        row?.DistributionPurchase?.[0]?.Weight ??
+        row?.DistributionPurchase?.Weight ??
+        row?.Weight;
+      const n = Number(w);
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+
+    const totalLyd = Number(data?.totalAmountLYD) || 0;
+    const lydPerGram = totalWeight > 0 ? totalLyd / totalWeight : 0;
+
+    return { totalWeight, lydPerGram };
+  }, [data]);
+
+  const isGoldInvoice = React.useMemo(() => {
+    const directType = String((data as any)?.type || "").toLowerCase();
+    const firstItem: any = data?.items?.[0];
+    const supplierType =
+      String(
+        firstItem?.Fournisseur?.TYPE_SUPPLIER ||
+          firstItem?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER ||
+          ""
+      ).toLowerCase();
+    return directType.includes("gold") || supplierType.includes("gold");
+  }, [data]);
+
   /*
    if (data && data.items && data.items.length > 0) {
      const type = (data.items[0] as any)?.Fournisseur?.TYPE_SUPPLIER?.toLowerCase() || '';
@@ -315,8 +360,12 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
       ...data,
       num_fact: invoiceNumFact ?? invoice?.num_fact,
       TotalAmountFinal: data.items[0].total_remise_final,
+      totalWeight:
+        isGoldInvoice && Number(goldWeightInfo.totalWeight) > 0
+          ? goldWeightInfo.totalWeight
+          : data.totalWeight,
     }),
-    [data, invoiceNumFact, invoice]
+    [data, invoiceNumFact, invoice, goldWeightInfo.totalWeight, isGoldInvoice]
   );
 
   // Helper to derive invoice Type for backend GL account mapping
@@ -341,35 +390,6 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     }
     // Default to gold if nothing matches (adjust if needed)
     return 'gold';
-  }, [data]);
-
-  const goldWeightInfo = React.useMemo(() => {
-    const directType = String((data as any)?.type || "").toLowerCase();
-    const firstItem: any = data?.items?.[0];
-    const supplierType =
-      String(
-        firstItem?.Fournisseur?.TYPE_SUPPLIER ||
-          firstItem?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER ||
-          ""
-      ).toLowerCase();
-    const isGold = directType.includes("gold") || supplierType.includes("gold");
-    if (!isGold) return { totalWeight: 0, lydPerGram: 0 };
-
-    const totalWeight = (data?.items || []).reduce((sum, row: any) => {
-      const w =
-        row?.ACHATs?.[0]?.DistributionPurchase?.[0]?.Weight ??
-        row?.ACHATs?.[0]?.DistributionPurchase?.Weight ??
-        row?.DistributionPurchase?.[0]?.Weight ??
-        row?.DistributionPurchase?.Weight ??
-        row?.Weight;
-      const n = Number(w);
-      return sum + (Number.isFinite(n) ? n : 0);
-    }, 0);
-
-    const totalLyd = Number(data?.totalAmountLYD) || 0;
-    const lydPerGram = totalWeight > 0 ? totalLyd / totalWeight : 0;
-
-    return { totalWeight, lydPerGram };
   }, [data]);
  
   // Handler for closing this invoice
@@ -538,14 +558,45 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
   const handleGenerateNewNumberClick = () => setConfirmOpen(true);
   const handleConfirmClose = () => setConfirmOpen(false);
 
+  const normalizeMoney = React.useCallback(
+    (v: number) => Math.round((Number(v) || 0) * 100) / 100,
+    []
+  );
+  const normalizeLyd0 = React.useCallback(
+    (v: number) => Math.round(Number(v) || 0),
+    []
+  );
+  const moneyEps = 0.01;
+
+  const getUsdRate = React.useCallback(() => {
+    const usd = Number((data as any)?.amount_currency) || 0;
+    const usdLyd = Number((data as any)?.amount_currency_LYD) || 0;
+    if (usd > 0 && usdLyd > 0) {
+      const r = usdLyd / usd;
+      return Number.isFinite(r) && r > 0 ? r : NaN;
+    }
+    const r = Number((invoice as any)?.rate);
+    return Number.isFinite(r) && r > 0 ? r : NaN;
+  }, [data, invoice]);
+
+  const getEurRate = React.useCallback(() => {
+    const eur = Number((data as any)?.amount_EUR) || 0;
+    const eurLyd = Number((data as any)?.amount_EUR_LYD) || 0;
+    if (eur > 0 && eurLyd > 0) {
+      const r = eurLyd / eur;
+      return Number.isFinite(r) && r > 0 ? r : NaN;
+    }
+    return NaN;
+  }, [data]);
+
   const getRemainingLyd = React.useCallback(() => {
-    const totalLyd = Math.ceil(Number(data?.totalAmountLYD) || 0);
-    const paidLyd = Math.ceil(Number((data as any)?.amount_lyd) || 0);
-    const paidUsdLyd = Math.ceil(Number((data as any)?.amount_currency_LYD) || 0);
-    const paidEurLyd = Math.ceil(Number((data as any)?.amount_EUR_LYD) || 0);
+    const totalLyd = normalizeLyd0(Number(data?.totalAmountLYD) || 0);
+    const paidLyd = normalizeLyd0(Number((data as any)?.amount_lyd) || 0);
+    const paidUsdLyd = normalizeLyd0(Number((data as any)?.amount_currency_LYD) || 0);
+    const paidEurLyd = normalizeLyd0(Number((data as any)?.amount_EUR_LYD) || 0);
     const diff = totalLyd - (paidLyd + paidUsdLyd + paidEurLyd);
     return Math.max(0, diff);
-  }, [data]);
+  }, [data, normalizeLyd0]);
 
   const isPartiallyPaid = React.useMemo(() => getRemainingLyd() > 0.01, [getRemainingLyd]);
 
@@ -562,13 +613,13 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
   const payEurLyd = parseAmt(payEurLydStr);
 
   const enteredLydEquivalent =
-    Math.ceil(payLyd) + Math.ceil(payUsdLyd) + Math.ceil(payEurLyd);
+    normalizeLyd0(payLyd) + normalizeLyd0(payUsdLyd) + normalizeLyd0(payEurLyd);
 
   const remainingLyd = getRemainingLyd();
   const canConfirmPayment =
-    enteredLydEquivalent >= remainingLyd - 0.01 && enteredLydEquivalent <= remainingLyd + 0.01;
+    enteredLydEquivalent >= remainingLyd - moneyEps && enteredLydEquivalent <= remainingLyd + moneyEps;
 
-  const isOverpay = enteredLydEquivalent > remainingLyd + 0.01;
+  const isOverpay = enteredLydEquivalent > remainingLyd + moneyEps;
 
   const usdEquivMissing = payUsd > 0 && payUsdLyd <= 0;
   const eurEquivMissing = payEur > 0 && payEurLyd <= 0;
@@ -646,12 +697,38 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     const nf = await handleAddNew();
     if (!nf) {
       alert("Failed to generate invoice number.");
+      return;
     }
-  }, [handleAddNew]);
+    // Issuing invoice should remove it from cart immediately on the cart page.
+    if (onCartRefresh) onCartRefresh();
+    onClose();
+  }, [handleAddNew, onCartRefresh, onClose]);
 
   const proceedClose = React.useCallback(async () => {
     await handleCloseInvoice();
   }, [handleCloseInvoice]);
+
+  React.useEffect(() => {
+    if (!paymentRequiredOpen) return;
+    if (remainingLyd <= moneyEps) {
+      setPaymentRequiredOpen(false);
+      setPayLydStr("");
+      setPayUsdStr("");
+      setPayUsdLydStr("");
+      setPayEurStr("");
+      setPayEurLydStr("");
+    }
+  }, [paymentRequiredOpen, remainingLyd]);
+
+  React.useEffect(() => {
+    // Avoid stale Payment Required dialog when switching invoices
+    setPaymentRequiredOpen(false);
+    setPayLydStr("");
+    setPayUsdStr("");
+    setPayUsdLydStr("");
+    setPayEurStr("");
+    setPayEurLydStr("");
+  }, [invoice?.num_fact, invoice?.id_fact, open]);
 
   const handlePaymentRequiredConfirm = async () => {
     if (!canConfirmPayment) return;
@@ -691,12 +768,10 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     const paidEur = Number((data as any)?.amount_EUR) || 0;
     const sumPaid = paidLyd + paidUsd + paidEur;
 
-    const paidUsdLyd = Number((data as any)?.amount_currency_LYD) || 0;
-    const paidEurLyd = Number((data as any)?.amount_EUR_LYD) || 0;
-    const diff = totalLyd - (paidLyd + paidUsdLyd + paidEurLyd);
+    const remaining = getRemainingLyd();
 
     // Require entering missing payment before closing
-    if (!isGiftInvoice && diff > 0.01) {
+    if (!isGiftInvoice && remaining > moneyEps) {
       setPaymentAction("close");
       setPaymentRequiredOpen(true);
       return;
@@ -731,28 +806,17 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               This invoice is partially paid.
             </Box>
           ) : null}
-          {/* Show Image Checkbox
-          
-            <FormControlLabel
-            control={<Checkbox checked={showImage} onChange={e => setShowImage(e.target.checked)} size="small" color="primary" />}
-            label="Do you want to show image?"
-            sx={{ mr: 2 }}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={showGoldUnitPrices}
+                onChange={(e) => setShowGoldUnitPrices(e.target.checked)}
+                size="small"
+              />
+            }
+            label="Show price/g & price/piece"
+            sx={{ mr: 1 }}
           />
-          
-          */}
-
-          {/* Show close invoice button if invoice is not closed */}
-          {invoice && showCloseInvoice && (
-            <>
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleCloseInvoiceClick}
-              >
-                Close This Invoice
-              </Button>
-            </>
-          )}
 
           {/* {!showCloseInvoiceActions &&
             (!invoiceNumFact || invoiceNumFact === 0) && (
@@ -765,18 +829,6 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               </Button>
             )} */}
 
-          {/* Only show close actions if prop is true */}
-          {invoiceNumFact && !showCloseInvoiceActions ? (
-            <>
-              <Button
-                variant="contained"
-                color="error"
-                onClick={handleCloseInvoiceClick}
-              >
-                Close This Invoice
-              </Button>
-            </>
-          ) : null}
         </Box>
       </DialogTitle>
       <DialogContent sx={{ p: 3, background: "#fff", color: "#000" }}>
@@ -786,6 +838,7 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           num_fact={invoiceNumFact ?? invoice?.num_fact}
           key={invoiceNumFact ?? invoice?.num_fact ?? "default"}
           showImage={showImage}
+          showGoldUnitPrices={showGoldUnitPrices}
           createdBy={createdBy}
         />
       </DialogContent>
@@ -818,13 +871,17 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           Remaining amount:
           <br />
           <span style={{ color: "red", fontWeight: 700 }}>
-            {Math.ceil(remainingLyd).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD
+            {normalizeLyd0(remainingLyd).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD
           </span>
           <Box sx={{ mt: 2, display: "flex", flexDirection: "column", gap: 1.5 }}>
             <TextField
               label="Pay (LYD)"
               value={payLydStr}
               onChange={(e) => setPayLydStr(e.target.value)}
+              onBlur={() => {
+                const v = parseAmt(payLydStr);
+                setPayLydStr(v ? String(normalizeLyd0(v)) : "");
+              }}
               size="small"
               fullWidth
             />
@@ -832,6 +889,14 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               label="Pay (USD)"
               value={payUsdStr}
               onChange={(e) => setPayUsdStr(e.target.value)}
+              onBlur={() => {
+                const usd = parseAmt(payUsdStr);
+                const r = getUsdRate();
+                if (usd > 0 && (!parseAmt(payUsdLydStr) || parseAmt(payUsdLydStr) <= 0) && Number.isFinite(r) && r > 0) {
+                  const lyd = normalizeLyd0(usd * r);
+                  setPayUsdLydStr(String(lyd));
+                }
+              }}
               size="small"
               fullWidth
             />
@@ -839,6 +904,16 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               label="USD to LYD (equivalent)"
               value={payUsdLydStr}
               onChange={(e) => setPayUsdLydStr(e.target.value)}
+              onBlur={() => {
+                const lyd = parseAmt(payUsdLydStr);
+                setPayUsdLydStr(lyd ? String(normalizeLyd0(lyd)) : "");
+                const usd = parseAmt(payUsdStr);
+                const r = getUsdRate();
+                if (lyd > 0 && (!usd || usd <= 0) && Number.isFinite(r) && r > 0) {
+                  const nextUsd = normalizeMoney(lyd / r);
+                  setPayUsdStr(nextUsd ? String(nextUsd) : "");
+                }
+              }}
               size="small"
               fullWidth
               error={usdEquivMissing}
@@ -848,6 +923,14 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               label="Pay (EUR)"
               value={payEurStr}
               onChange={(e) => setPayEurStr(e.target.value)}
+              onBlur={() => {
+                const eur = parseAmt(payEurStr);
+                const r = getEurRate();
+                if (eur > 0 && (!parseAmt(payEurLydStr) || parseAmt(payEurLydStr) <= 0) && Number.isFinite(r) && r > 0) {
+                  const lyd = normalizeLyd0(eur * r);
+                  setPayEurLydStr(String(lyd));
+                }
+              }}
               size="small"
               fullWidth
             />
@@ -855,13 +938,23 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
               label="EUR to LYD (equivalent)"
               value={payEurLydStr}
               onChange={(e) => setPayEurLydStr(e.target.value)}
+              onBlur={() => {
+                const lyd = parseAmt(payEurLydStr);
+                setPayEurLydStr(lyd ? String(normalizeLyd0(lyd)) : "");
+                const eur = parseAmt(payEurStr);
+                const r = getEurRate();
+                if (lyd > 0 && (!eur || eur <= 0) && Number.isFinite(r) && r > 0) {
+                  const nextEur = normalizeMoney(lyd / r);
+                  setPayEurStr(nextEur ? String(nextEur) : "");
+                }
+              }}
               size="small"
               fullWidth
               error={eurEquivMissing}
               helperText={eurEquivMissing ? "Enter EUR equivalent in LYD" : ""}
             />
             <Box sx={{ fontWeight: 700 }}>
-              Entered (LYD equiv): {Math.ceil(enteredLydEquivalent).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD
+              Entered (LYD equiv): {normalizeLyd0(enteredLydEquivalent).toLocaleString(undefined, { maximumFractionDigits: 0 })} LYD
             </Box>
             {isOverpay ? (
               <Box sx={{ color: "error.main", fontWeight: 700 }}>
