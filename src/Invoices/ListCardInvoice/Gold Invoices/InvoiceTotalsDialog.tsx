@@ -139,6 +139,18 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const isGoldInvoice = Type_Supplier.toLowerCase().includes("gold");
   const baseCurrencyLabel = isGoldInvoice ? "LYD" : "USD";
 
+  const getApprovalReferenceNumber = React.useCallback((): number => {
+    const fromInvoice =
+      (editInvoice && (editInvoice.num_fact || editInvoice.id_fact)) || 0;
+    const fromProp = referenceId || 0;
+    return Number(fromInvoice || fromProp || 0) || 0;
+  }, [editInvoice, referenceId]);
+
+  const getApprovalPendingKey = React.useCallback((): string => {
+    const ref = getApprovalReferenceNumber();
+    return `approval_pending_invoice_${String(ref || 0)}`;
+  }, [getApprovalReferenceNumber]);
+
   const normalizeMoney = React.useCallback(
     (v: number) => Math.round((Number(v) || 0) * 100) / 100,
     []
@@ -180,6 +192,11 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const [amountUsdLydStr, setAmountUsdLydStr] = React.useState<string>("");
   const [amountEurStr, setAmountEurStr] = React.useState<string>("");
   const [amountEurLydStr, setAmountEurLydStr] = React.useState<string>("");
+  const [approvalWaitOpen, setApprovalWaitOpen] = React.useState(false);
+
+  const [approvalGrantedOpen, setApprovalGrantedOpen] = React.useState(false);
+
+  const [paymentType, setPaymentType] = React.useState<"cash" | "bank">("cash");
 
   React.useEffect(() => {
     if (!open) return;
@@ -212,6 +229,49 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       setAmountEurLydStr(Number.isFinite(v) && v !== 0 ? String(v) : "");
     }
   }, [open, totals, activeField]);
+
+  const commitLiveInputsToTotals = React.useCallback(() => {
+    // Commit any in-progress string edits so issuance uses what the user typed.
+    // Only commit when user has a non-empty value (so we don't overwrite existing values with 0).
+    const setIfPresent = (field: string, raw: string) => {
+      const s = String(raw ?? "").trim();
+      if (s === "") return;
+      onChange(field, parseNumber(s));
+    };
+
+    // Commit payment amounts
+    setIfPresent("total_remise_final_lyd", totalLydStr);
+    setIfPresent("amount_lyd", amountLydStr);
+    setIfPresent("amount_currency", amountUsdStr);
+    setIfPresent("amount_currency_LYD", amountUsdLydStr);
+    setIfPresent("amount_EUR", amountEurStr);
+    setIfPresent("amount_EUR_LYD", amountEurLydStr);
+
+    // Ensure customer data is committed to editInvoice
+    if (editInvoice) {
+      setEditInvoice((prev: any) => ({
+        ...prev,
+        // Ensure customer details are preserved
+        client: prev?.client || null,
+        Client: prev?.Client || null,
+        tel_client: prev?.tel_client || "",
+        // Ensure payment details are preserved
+        amount_lyd: parseNumber(amountLydStr) || prev?.amount_lyd || 0,
+        amount_currency: parseNumber(amountUsdStr) || prev?.amount_currency || 0,
+        amount_currency_LYD: parseNumber(amountUsdLydStr) || prev?.amount_currency_LYD || 0,
+        amount_EUR: parseNumber(amountEurStr) || prev?.amount_EUR || 0,
+        amount_EUR_LYD: parseNumber(amountEurLydStr) || prev?.amount_EUR_LYD || 0,
+        total_remise_final_lyd: parseNumber(totalLydStr) || prev?.total_remise_final_lyd || 0,
+        // Ensure discount values are preserved
+        remise: prev?.remise || 0,
+        remise_per: prev?.remise_per || 0,
+        // Ensure other essential fields are preserved
+        ps: prev?.ps || null,
+        usr: prev?.usr || null,
+        date_fact: prev?.date_fact || new Date().toISOString().split('T')[0],
+      }));
+    }
+  }, [amountEurLydStr, amountEurStr, amountLydStr, amountUsdLydStr, amountUsdStr, onChange, totalLydStr, editInvoice, setEditInvoice]);
 
   const [localCustomers, setLocalCustomers] = React.useState<Client[]>(customers);
   const [createCustomerOpen, setCreateCustomerOpen] = React.useState(false);
@@ -293,6 +353,32 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
     const approvalNeeded = minAllowed > 0 && diffPer > minAllowed;
     return { baseTotal, minAllowed, diffPer, approvalNeeded };
   }, [minPer, totalPrixVente, getFinalTotalNumeric]);
+
+
+  const [approvalPending, setApprovalPending] = React.useState(false);
+  const [approvalPolling, setApprovalPolling] = React.useState(false);
+  const [approvalStatus, setApprovalStatus] = React.useState<"" | "pending" | "approved" | "rejected" | "timeout">("");
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (!approvalInfo.approvalNeeded) {
+      setApprovalPending(false);
+      setApprovalPolling(false);
+      setApprovalStatus("");
+      return;
+    }
+    try {
+      const k = getApprovalPendingKey();
+      const raw = localStorage.getItem(k);
+      if (raw) {
+        setApprovalPending(true);
+        setApprovalStatus("pending");
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, approvalInfo.approvalNeeded]);
 
   // Helper to recompute Total Amount (LYD) based on current discounts/surcharges and type/rate
   const recomputeLydTotal = React.useCallback(() => {
@@ -409,8 +495,65 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
     });
   }, [discountComment, surchargeComment, setEditInvoice]);
 
+  // const finalizeAndIssueInvoice = React.useCallback(() => {
+  //   // Ensure parent totals state contains latest values typed by the user.
+  //   commitLiveInputsToTotals();
+  //   applyCommentsToInvoice();
+
+  //   // Create a comprehensive snapshot of all invoice data before issuance
+  //   const invoiceSnapshot = {
+  //     ...editInvoice,
+  //     // Explicitly preserve all critical fields
+  //     client: editInvoice?.client || null,
+  //     Client: editInvoice?.Client || null,
+  //     tel_client: editInvoice?.tel_client || editInvoice?.Client?.tel_client || "",
+  //     phone_client: editInvoice?.phone_client || editInvoice?.Client?.tel_client || "",
+  //     date_fact: editInvoice?.date_fact || new Date().toISOString().split('T')[0],
+  //     mode_fact: editInvoice?.mode_fact || "Debitor",
+  //     SourceMark: editInvoice?.SourceMark || null,
+  //     is_chira: editInvoice?.is_chira || false,
+  //     IS_WHOLE_SALE: editInvoice?.IS_WHOLE_SALE || false,
+  //     COMMENT: editInvoice?.COMMENT || "",
+  //     accept_discount: editInvoice?.accept_discount ?? false,
+  //     ps: editInvoice?.ps || null,
+  //     usr: editInvoice?.usr || null,
+  //     // Payment fields from current totals
+  //     total_remise_final_lyd: parseNumber(totalLydStr) || totals.total_remise_final_lyd,
+  //     amount_lyd: parseNumber(amountLydStr) || totals.amount_lyd,
+  //     amount_currency: parseNumber(amountUsdStr) || totals.amount_currency,
+  //     amount_currency_LYD: parseNumber(amountUsdLydStr) || totals.amount_currency_LYD,
+  //     amount_EUR: parseNumber(amountEurStr) || totals.amount_EUR,
+  //     amount_EUR_LYD: parseNumber(amountEurLydStr) || totals.amount_EUR_LYD,
+  //     remise: totals.remise,
+  //     remise_per: totals.remise_per,
+  //   };
+
+  //   // Force update the editInvoice with the complete snapshot
+  //   setEditInvoice((prev: any) => {
+  //     const updated = { ...prev, ...invoiceSnapshot };
+  //     console.log("Invoice snapshot before issuance:", updated);
+  //     return updated;
+  //   });
+
+  //   // Close totals dialog and notify; then issue invoice number.
+  //   setApprovalGrantedOpen(true);
+  //   onClose();
+
+  //   // Allow React state to flush to parent before issuing.
+  //   setTimeout(() => {
+  //     onUpdate();
+  //   }, 150); // Increased timeout to ensure all state updates are flushed
+  // }, [applyCommentsToInvoice, commitLiveInputsToTotals, onClose, onUpdate, editInvoice, setEditInvoice, totalLydStr, amountLydStr, amountUsdStr, amountUsdLydStr, amountEurStr, amountEurLydStr, totals]);
+
   const handleUpdate = () => {
     if (!validateTotals()) return;
+
+    // Safety: if approval is required, do not proceed to onUpdate (which issues invoice number).
+    if (approvalInfo.approvalNeeded) {
+      setAlertMsg("Discount limit exceeded — approval is required before confirming checkout.");
+      setAlertOpen(true);
+      return;
+    }
 
     // Payments tab: full payment required.
     if (tabIndex === 2) {
@@ -425,6 +568,9 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
         return;
       }
     }
+
+    // Commit latest dialog edits before issuing.
+    commitLiveInputsToTotals();
 
     // Persist updated comments before checkout
     applyCommentsToInvoice();
@@ -525,6 +671,16 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const handleRequestApproval = async () => {
     if (!validateTotals()) return;
 
+    const refId = getApprovalReferenceNumber();
+    if (!refId) {
+      window.alert("Cannot request approval: missing invoice reference.");
+      return;
+    }
+
+    // Persist latest dialog edits before requesting approval.
+    commitLiveInputsToTotals();
+    applyCommentsToInvoice();
+
     try {
       const userStr = localStorage.getItem("user");
       let userName = "";
@@ -547,10 +703,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       const type_request = "Invoice";
       const status = "pending";
       const AutoComment = "Invoice discount exceeded limit";
-      const Refrences_Number =
-        (editInvoice && (editInvoice.num_fact || editInvoice.id_fact)) ||
-        referenceId ||
-        0;
+      const Refrences_Number = refId;
 
       await api.post("/ApprovalRequests/create", {
         request_by,
@@ -559,18 +712,137 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
         status,
         AutoComment,
         Refrences_Number,
-        usr,
         Is_view: false,
       });
 
-      window.alert("Approval request sent successfully.");
-      // After creating the approval request, update totals (same spirit as EditTotalRN)
-      onUpdate();
+      try {
+        localStorage.setItem(getApprovalPendingKey(), JSON.stringify({ refId, ts: Date.now() }));
+      } catch {
+        // ignore
+      }
+      setApprovalPending(true);
+      setApprovalStatus("pending");
+
+      // show waiting UI + prevent issuing invoice now
+      setApprovalWaitOpen(true);
+
+      // optional: close the totals dialog so user can’t try to “Confirm Checkout”
+      // (polling still continues in background because we removed the `open` guard)
+      onClose();
+
     } catch (err) {
       console.error(err);
       window.alert("Failed to send approval request. Please try again.");
     }
   };
+
+  const finalizeAndIssueInvoice = React.useCallback(() => {
+    // Commit live inputs
+    commitLiveInputsToTotals();
+    applyCommentsToInvoice();
+
+    // Check payment
+    const totalLyd0 = normalizeLyd0(Number(totals.total_remise_final_lyd) || 0);
+
+    const paidLydLive =
+      String(amountLydStr ?? "").trim() !== ""
+        ? parseNumber(amountLydStr)
+        : Number(totals.amount_lyd) || 0;
+    const paidUsdLydLive =
+      String(amountUsdLydStr ?? "").trim() !== ""
+        ? parseNumber(amountUsdLydStr)
+        : Number(totals.amount_currency_LYD) || 0;
+    const paidEurLydLive =
+      String(amountEurLydStr ?? "").trim() !== ""
+        ? parseNumber(amountEurLydStr)
+        : Number(totals.amount_EUR_LYD) || 0;
+
+    const sumPaid0 =
+      normalizeLyd0(paidLydLive) +
+      normalizeLyd0(paidUsdLydLive) +
+      normalizeLyd0(paidEurLydLive);
+    const diffLyd = totalLyd0 - sumPaid0;
+
+    if (diffLyd > moneyEps) {
+      window.alert("Payment is insufficient. Please adjust payments.");
+      return;
+    }
+
+    // Then call onUpdate
+    onUpdate();
+  }, [totals, amountLydStr, amountUsdLydStr, amountEurLydStr, paymentType, commitLiveInputsToTotals, applyCommentsToInvoice, onUpdate, normalizeLyd0, parseNumber, moneyEps]);
+
+  const pollApprovalAndProceed = React.useCallback(async () => {
+    const refId = getApprovalReferenceNumber();
+    if (!refId) return;
+    if (approvalPolling) return;
+
+    setApprovalPolling(true);
+    setApprovalStatus("pending");
+
+    const token = localStorage.getItem("token");
+    const started = Date.now();
+    const maxMs = 2 * 60 * 1000;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    try {
+      while (Date.now() - started < maxMs) {
+        try {
+          // Use dedicated endpoint that returns latest request regardless of notification visibility.
+          const res = await api.get(`/ApprovalRequests/byRef/${encodeURIComponent(String(refId))}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            params: { type: "Invoice" },
+          });
+          const match = (res as any)?.data?.data || null;
+          if (match) {
+            const st = String(match.status || "").toLowerCase();
+            if (st === "accepted" || st === "approve" || st === "approved") {
+              setApprovalStatus("approved");
+              setApprovalPending(false);
+              try {
+                localStorage.removeItem(getApprovalPendingKey());
+              } catch {
+                // ignore
+              }
+              // Issue invoice using the same data the user entered in the dialog.
+              setApprovalWaitOpen(false);
+              finalizeAndIssueInvoice();
+              return;
+            }
+            if (st === "refused" || st === "rejected" || st === "deny" || st === "denied") {
+              setApprovalStatus("rejected");
+              setApprovalPending(false);
+              try {
+                localStorage.removeItem(getApprovalPendingKey());
+              } catch {
+                // ignore
+              }
+              window.alert("Discount approval was refused.");
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        await sleep(4000);
+      }
+      setApprovalStatus("timeout");
+      setApprovalPending(true);
+      window.alert("Approval check timed out. Please try again later.");
+    } finally {
+      setApprovalPolling(false);
+    }
+  }, [approvalPolling, finalizeAndIssueInvoice, getApprovalPendingKey, getApprovalReferenceNumber]);
+
+  React.useEffect(() => {
+    if (!approvalInfo.approvalNeeded) return;
+    if (!approvalPending) return;
+    if (approvalStatus === "approved" || approvalStatus === "rejected") return;
+    if (approvalPolling) return;
+    pollApprovalAndProceed();
+  }, [approvalInfo.approvalNeeded, approvalPending, approvalPolling, approvalStatus, pollApprovalAndProceed]);
+
 
   const handleNextTab = () => {
     // Tab 0: require a selected customer (and no client error)
@@ -602,14 +874,15 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   };
 
   return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      maxWidth="lg"
-      fullWidth
-      PaperProps={{ sx: { minWidth: 1100 } }}
-    >
-      <DialogTitle>
+    <>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        maxWidth="lg"
+        fullWidth
+        PaperProps={{ sx: { minWidth: 1100 } }}
+      >
+        <DialogTitle>
         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
             <span>Confirm Checkout</span>
@@ -630,8 +903,8 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             (ID: {SelectedInvoiceNum})
           </span>
         )}
-      </DialogTitle>
-      <DialogContent>
+        </DialogTitle>
+        <DialogContent>
         {/* Alert on top (only show on Order Details and Payments tabs) */}
         {tabIndex !== 0 &&
           (alertOpen ? (
@@ -654,6 +927,18 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             {
               "لقد تجاوزت صلاحياتك في التخفيض انت محتاج اعتماد الان"
             }
+          </Alert>
+        )}
+        {approvalInfo.approvalNeeded && approvalPending && (
+          <Alert
+            severity={approvalStatus === "timeout" ? "error" : "info"}
+            sx={{ mb: 2, whiteSpace: "pre-line" }}
+          >
+            {approvalStatus === "timeout"
+              ? "Approval is still pending (polling timed out). You can try again."
+              : approvalPolling
+                ? "Approval requested. Waiting for approval..."
+                : "Approval requested. Waiting for approval..."}
           </Alert>
         )}
         <Box sx={{ display: "flex", alignItems: "flex-start", mt: 1 }}>
@@ -1394,7 +1679,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                             variant="body2"
                             sx={{ color: "success.main", fontWeight: 700 }}
                           >
-                            Overcharged (Surcharge)
+                            Surcharge
                           </Typography>
                           <Typography
                             variant="body2"
@@ -1436,6 +1721,20 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                   }));
                 }}
               />
+            </Box>
+
+            <Box sx={{ mt: 2 }}>
+              <FormControl component="fieldset">
+                <FormLabel component="legend">Payment Type</FormLabel>
+                <RadioGroup
+                  row
+                  value={paymentType}
+                  onChange={(e) => setPaymentType(e.target.value as "cash" | "bank")}
+                >
+                  <FormControlLabel value="cash" control={<Radio />} label="Cash" />
+                  <FormControlLabel value="bank" control={<Radio />} label="Bank Transfer" />
+                </RadioGroup>
+              </FormControl>
             </Box>
           </Box>
             )}
@@ -1609,8 +1908,8 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
             })()}
           </Box>
         </Box>
-      </DialogContent>
-      <DialogActions sx={{ justifyContent: "space-between" }}>
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: "space-between" }}>
         <Box>
           <Button
             variant="outlined"
@@ -1639,7 +1938,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                 onClick={handleRequestApproval}
                 variant="contained"
                 color="warning"
-                disabled={isSaving}
+                disabled={isSaving || approvalPolling || approvalPending}
               >
                 Request Approval
               </Button>
@@ -1670,15 +1969,51 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
                     normalizeLyd0(paidUsdLydLive) +
                     normalizeLyd0(paidEurLydLive);
                   const diff0 = totalLyd0 - sumPaid0;
-                  // Full payment required: block any mismatch.
-                  return Math.abs(diff0) > moneyEps;
+                  return diff0 > moneyEps;
                 })()}
               >
                 Confirm Checkout
               </Button>
             ))}
+          {tabIndex === 2 && approvalInfo.approvalNeeded && approvalPending && approvalStatus === "timeout" && (
+            <Button
+              onClick={pollApprovalAndProceed}
+              variant="outlined"
+              color="warning"
+              size="small"
+              disabled={approvalPolling}
+            >
+              Retry Approval Check
+            </Button>
+          )}
         </Box>
-      </DialogActions>
+        </DialogActions>
+
+      </Dialog>
+
+      <Dialog
+        open={approvalGrantedOpen}
+        onClose={() => setApprovalGrantedOpen(false)}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <CheckCircleIcon color="success" />
+            <span>Approval Granted</span>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography>
+            Discount approval has been granted. The invoice number will now be issued.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setApprovalGrantedOpen(false)}>
+            OK
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={createCustomerOpen} onClose={() => setCreateCustomerOpen(false)}>
         <DialogTitle>New Customer</DialogTitle>
@@ -1802,7 +2137,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
-    </Dialog>
+    </>
   );
 };
 

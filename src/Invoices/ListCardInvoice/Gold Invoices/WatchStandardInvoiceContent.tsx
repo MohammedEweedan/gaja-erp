@@ -13,6 +13,49 @@ import {
 import { Invoice, Client } from "./PrintInvoiceDialog";
 import axios from "../../../api";
 
+async function convertBlobToPngDataUrl(blob: Blob): Promise<string> {
+  const drawOnCanvas = (img: CanvasImageSource, width: number, height: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width || 1;
+    canvas.height = height || 1;
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.drawImage(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  };
+
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(blob);
+    return drawOnCanvas(bitmap, bitmap.width, bitmap.height);
+  }
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        resolve(drawOnCanvas(img, img.width, img.height));
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(err);
+    };
+    img.src = objectUrl;
+  });
+}
+
+async function convertAvifUrlToPngBase64InBrowser(url: string, token?: string): Promise<string> {
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await fetch(url, { mode: "cors", headers });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch AVIF image (${res.status})`);
+  }
+  const blob = await res.blob();
+  return convertBlobToPngDataUrl(blob);
+}
+
 interface InvoicePrintData {
   invoice: Invoice;
   items: Invoice[];
@@ -62,6 +105,35 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
     const paidEurLyd = (data as any)?.amount_EUR_LYD;
 
     const placeholderImgSrc = "/GJ LOGO.png";
+
+    const convertItemsImagesToBase64 = useCallback(
+      async (urls: string[]): Promise<string[]> => {
+        if (!urls || !urls.length) return [];
+        if (typeof window === "undefined" || typeof fetch !== "function") return urls;
+        const token = localStorage.getItem("token") || undefined;
+        const prepared: string[] = [];
+        for (const raw of urls) {
+          if (!raw) continue;
+          const lower = raw.toLowerCase();
+          if (raw.startsWith("data:")) {
+            prepared.push(raw);
+            continue;
+          }
+          if (lower.includes(".avif")) {
+            try {
+              const converted = await convertAvifUrlToPngBase64InBrowser(raw, token);
+              prepared.push(converted);
+              continue;
+            } catch (err) {
+              console.warn("[InvoiceImages] Failed to convert AVIF", err);
+            }
+          }
+          prepared.push(raw);
+        }
+        return prepared;
+      },
+      []
+    );
 
     const moneyEps = 0.01;
     const normalizeLyd0 = (v: number) => Math.round(Number(v) || 0);
@@ -620,6 +692,62 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
       }
     };
 
+    const round2 = (n: any) => Math.round((Number(n) || 0) * 100) / 100;
+
+const pickNumber = (...values: any[]) => {
+  for (const v of values) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+};
+
+    /** 
+     * Convert any returned upload path into your secure /images/* route.
+     * Works for gold/watch/diamond when the API returns old upload paths.
+     */
+      const normalizeToSecureImagePath = (rawUrl: string): string => {
+        if (!rawUrl) return rawUrl;
+        if (rawUrl.startsWith("data:") || rawUrl.startsWith("blob:")) return rawUrl;
+
+        try {
+          const u = new URL(rawUrl, window.location.origin);
+          const parts = u.pathname.split("/").filter(Boolean);
+          const len = parts.length;
+          if (len >= 3) {
+            const filename = parts[len - 1];
+            const idSeg = parts[len - 2];
+            const mount = parts.slice(0, len - 2).join("/").toLowerCase();
+
+            // GOLD
+            if (
+              mount.includes("uploads/goldpic") ||
+              mount.includes("uploads/opurchases/upload-attachment") ||
+              mount.includes("uploads/purchase")
+            ) {
+              return `/images/gold/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+            }
+
+            // WATCH
+            if (mount.includes("uploads/watchpic")) {
+              return `/images/watch/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+            }
+
+            // DIAMOND (if you have a diamond folder)
+            if (mount.includes("uploads/diamondpic") || mount.includes("uploads/diamond")) {
+              return `/images/diamond/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+            }
+          }
+
+          // already secure
+          if (u.pathname.startsWith("/images/")) return u.pathname;
+
+          return rawUrl;
+        } catch {
+          return rawUrl;
+        }
+      };
+
     const withToken = (rawUrl: string, token: string | null): string => {
       if (!token) return rawUrl;
       try {
@@ -670,7 +798,9 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                 return "";
               })
               .filter(Boolean);
-            if (out.length) return out;
+            if (out.length) {
+              return await convertItemsImagesToBase64(out);
+            }
           } catch {
             /* try next base */
           }
@@ -722,6 +852,8 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               const ids: any[] = [];
               (inv?.ACHATs || []).forEach((a: any) => {
                 if (a?.id_achat) ids.push(a.id_achat);
+                if (a?.ID_ACHAT) ids.push(a.ID_ACHAT);
+                if (a?.Id_Achat) ids.push(a.Id_Achat);
               });
               return ids;
             })
@@ -762,8 +894,14 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               pushId(detail.idAchat);
               pushId(detail.IDACHAT);
               // nested common shapes
-              const nestedA = detail.OriginalAchat || detail.originalAchat || detail.achat || detail.Achat || detail.purchase || detail.Purchase;
-              if (nestedA && typeof nestedA === 'object') {
+              const nestedA =
+                detail.OriginalAchat ||
+                detail.originalAchat ||
+                detail.achat ||
+                detail.Achat ||
+                detail.purchase ||
+                detail.Purchase;
+              if (nestedA && typeof nestedA === "object") {
                 pushId(nestedA.id_achat);
                 pushId(nestedA.ID_ACHAT);
                 pushId(nestedA.idAchat);
@@ -779,10 +917,10 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               });
 
             let fetched = false;
-            console.log('[InvoiceImages] watch candidateIds', candidateIds);
+            console.log("[InvoiceImages] watch candidateIds", candidateIds);
             for (const cid of candidateIds) {
               if (!cid) continue;
-              console.log('[InvoiceImages] watch candidate id_achat', cid);
+              console.log("[InvoiceImages] watch candidate id_achat", cid);
               // Avoid re-fetching if we already have URLs under this cid
               if (imageUrls[cid]) {
                 setImageUrls((prev) => ({ ...prev, [id]: prev[cid] }));
@@ -793,84 +931,77 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
               // Fallback to default watch list if typed returns empty
               if (!urls || urls.length === 0) {
                 try {
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem("token");
                   const fUrl = `${API_BASEImage}/list/${cid}`;
-                  try { console.log('[InvoiceImages:fetch-fallback] GET', fUrl); } catch {}
-                  const r = await axios.get(fUrl, { headers: { Authorization: `Bearer ${token}` } });
-                  if (Array.isArray(r.data) && r.data.length) urls = normalizeImageList(r.data);
-                  try { console.log('[InvoiceImages:fetch-fallback] OK', { url: fUrl, count: Array.isArray(r.data) ? r.data.length : 0 }); } catch {}
+                  try {
+                    console.log("[InvoiceImages:fetch-fallback] GET", fUrl);
+                  } catch {}
+                  const r = await axios.get(fUrl, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (Array.isArray(r.data) && r.data.length) {
+                    const normalized = normalizeImageList(r.data).map(normalizeToSecureImagePath);
+                    if (normalized.length) {
+                      const converted = await convertItemsImagesToBase64(normalized);
+                      urls = converted.length ? converted : normalized;
+                    }
+                  }
+                  try {
+                    console.log("[InvoiceImages:fetch-fallback] OK", {
+                      url: fUrl,
+                      count: Array.isArray(r.data) ? r.data.length : 0,
+                    });
+                  } catch {}
                 } catch {}
               }
               if (urls && urls.length) {
                 // Store under both the picint key and id_achat key for easy lookup later
                 setImageUrls((prev) => ({ ...prev, [id]: urls, [cid]: urls }));
                 fetched = true;
-                console.log('[InvoiceImages] watch fetched', { key: id, id_achat: cid, count: urls.length });
+                console.log("[InvoiceImages] watch fetched", {
+                  key: id,
+                  id_achat: cid,
+                  count: urls.length,
+                });
                 break;
               }
             }
             // If no candidate id_achat found, last resort try the picint (legacy paths)
             if (!fetched) {
-              console.log('[InvoiceImages] watch fallback picint', id);
+              console.log("[InvoiceImages] watch fallback picint", id);
               let urls = await fetchImagesTyped(id, "watch");
               if (!urls || urls.length === 0) {
                 try {
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem("token");
                   const fUrl = `${API_BASEImage}/list/${id}`;
-                  try { console.log('[InvoiceImages:fetch-fallback] GET', fUrl); } catch {}
-                  const r = await axios.get(fUrl, { headers: { Authorization: `Bearer ${token}` } });
-                  if (Array.isArray(r.data) && r.data.length) urls = normalizeImageList(r.data);
-                  try { console.log('[InvoiceImages:fetch-fallback] OK', { url: fUrl, count: Array.isArray(r.data) ? r.data.length : 0 }); } catch {}
+                  try {
+                    console.log("[InvoiceImages:fetch-fallback] GET", fUrl);
+                  } catch {}
+                  const r = await axios.get(fUrl, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (Array.isArray(r.data) && r.data.length) {
+                    const normalized = normalizeImageList(r.data).map(normalizeToSecureImagePath);
+                    const converted = await convertItemsImagesToBase64(normalized);
+                    urls = converted.length ? converted : normalized;
+                  }
+                  try {
+                    console.log("[InvoiceImages:fetch-fallback] OK", {
+                      url: fUrl,
+                      count: Array.isArray(r.data) ? r.data.length : 0,
+                    });
+                  } catch {}
                 } catch {}
               }
               if (urls && urls.length) {
                 setImageUrls((prev) => ({ ...prev, [id]: urls }));
-                console.log('[InvoiceImages] watch fallback picint fetched', { key: id, count: urls.length });
+                console.log("[InvoiceImages] watch fallback picint fetched", {
+                  key: id,
+                  count: urls.length,
+                });
               }
             }
           } else if (isDiamond) {
-            // Try diamond by this id (picint) first
-            let urls = await fetchImagesTyped(Number(id), "diamond");
-            if (!urls || urls.length === 0) {
-              // Fallback: attempt to find any id_achat inside diamond details object
-              const detail = allDiamondDetails[id];
-              const candidateIds: number[] = [];
-              const pushId = (v: any) => {
-                if (v && !isNaN(Number(v))) candidateIds.push(Number(v));
-              };
-              if (detail) {
-                const unwrap =
-                  detail.OriginalAchatDiamond ||
-                  detail.purchaseD ||
-                  detail.OriginalAchat ||
-                  detail;
-                pushId(unwrap?.id_achat);
-                pushId(unwrap?.ID_ACHAT);
-              }
-              // Also scan ACHAT rows referencing this picint
-              pdata
-                .filter((inv) => String(inv.picint) === String(id))
-                .forEach((inv) => {
-                  (inv.ACHATs || []).forEach((a: any) => pushId(a?.id_achat));
-                });
-              for (const cid of candidateIds) {
-                if (cid && !imageUrls[cid]) {
-                  console.log('[InvoiceImages] diamond candidate id_achat', cid);
-                  const u2 = await fetchImagesTyped(cid, "diamond");
-                  if (u2 && u2.length) {
-                    // store under both cid and original id so render fallback works
-                    setImageUrls((prev) => ({ ...prev, [id]: u2, [cid]: u2 }));
-                    urls = u2;
-                    console.log('[InvoiceImages] diamond fetched', { key: id, id_achat: cid, count: u2.length });
-                    break;
-                  }
-                }
-              }
-            } else {
-              // urls is typed (string[] | null); ensure non-null for state shape
-              setImageUrls((prev) => ({ ...prev, [id]: urls || [] }));
-            }
-          } else if (isGold) {
             // Gold images are stored per id_achat. Build candidates and fetch.
             const token = localStorage.getItem("token");
             // Here `id` is expected to already be an id_achat.
@@ -888,12 +1019,17 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                 try {
                   for (const base of IMAGE_BASES) {
                     const gUrl = `${base}/list/gold/${cid}`;
-                    try { console.log('[InvoiceImages:fetch-gold] GET', gUrl); } catch {}
                     try {
-                      const r = await axios.get(gUrl,
-                        { headers: { Authorization: `Bearer ${token}` } });
+                      console.log("[InvoiceImages:fetch-gold] GET", gUrl);
+                    } catch {}
+                    try {
+                      const r = await axios.get(gUrl, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
                       if (Array.isArray(r.data) && r.data.length) {
-                        urls = normalizeImageList(r.data);
+                        const normalized = normalizeImageList(r.data).map(normalizeToSecureImagePath);
+                        const converted = await convertItemsImagesToBase64(normalized);
+                        urls = converted.length ? converted : normalized;
                         break;
                       }
                     } catch {
@@ -902,10 +1038,16 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                     // Fallback to legacy list endpoint if gold route empty
                     try {
                       const legacyUrl = `${base}/list/${cid}`;
-                      try { console.log('[InvoiceImages:fetch-gold-legacy] GET', legacyUrl); } catch {}
-                      const r2 = await axios.get(legacyUrl, { headers: { Authorization: `Bearer ${token}` } });
+                      try {
+                        console.log("[InvoiceImages:fetch-gold-legacy] GET", legacyUrl);
+                      } catch {}
+                      const r2 = await axios.get(legacyUrl, {
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
                       if (Array.isArray(r2.data) && r2.data.length) {
-                        urls = normalizeImageList(r2.data);
+                        const normalized = normalizeImageList(r2.data).map(normalizeToSecureImagePath);
+                        const converted = await convertItemsImagesToBase64(normalized);
+                        urls = converted.length ? converted : normalized;
                         break;
                       }
                     } catch {
@@ -1429,47 +1571,45 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                           >
                             {(() => {
                               const parentInvoice = item._parent;
-                              const rowId = parentInvoice?.picint;
-                              const rowPicintKey =
-                                rowId !== undefined && rowId !== null ? String(rowId) : "";
-                              const rowAchatKey =
-                                item?.id_achat !== undefined && item?.id_achat !== null
-                                  ? String(item.id_achat)
+                              const rowPicint = parentInvoice?.picint ?? item?.picint ?? invoice?.picint;
+                              const rowIdFact =
+                                item?.id_fact ??
+                                parentInvoice?.id_fact ??
+                                invoice?.id_fact ??
+                                invoice?.num_fact;
+                              const rowIdAchatCandidate =
+                                item?.id_achat ??
+                                item?.ID_ACHAT ??
+                                item?.Id_Achat ??
+                                parentInvoice?.id_achat ??
+                                parentInvoice?.ID_ACHAT ??
+                                parentInvoice?.Id_Achat;
+
+                              const makeKey = (v: any) =>
+                                v !== undefined && v !== null && String(v).trim() !== ""
+                                  ? String(v)
                                   : "";
-                              const invPicintKey =
-                                invoice?.picint !== undefined && invoice?.picint !== null
-                                  ? String(invoice.picint)
-                                  : "";
+
                               const isGoldType = typeinv?.toLowerCase().includes("gold");
                               const isWatchType = typeinv?.toLowerCase().includes("watch");
                               const isDiamondType = typeinv?.toLowerCase().includes("diamond");
                               
                               // Prefer the correct key per type; placeholder should only be used when there are truly no URLs.
-                              let urls = [] as string[];
-                              
-                              // For gold/watch/diamond: ONLY use id_achat from the current row to prevent image repetition
-                              if (isGoldType || isWatchType || isDiamondType) {
-                                const rowIdAchat = item?.id_achat;
-                                if (rowIdAchat) {
-                                  const key = String(rowIdAchat);
-                                  urls = imageUrls[key] || [];
-                                  console.log('[InvoiceImages:render]', { 
-                                    type: isGoldType ? 'gold' : isWatchType ? 'watch' : 'diamond',
-                                    rowIdAchat, 
-                                    key, 
-                                    hasUrls: urls.length > 0,
-                                    urlCount: urls.length,
-                                    allKeys: Object.keys(imageUrls)
-                                  });
+                              let urls: string[] = [];
+
+                              const orderedKeys = [
+                                makeKey(rowIdAchatCandidate),
+                                makeKey(rowPicint),
+                                makeKey(rowIdFact),
+                                makeKey(invoice?.picint),
+                                makeKey(invoice?.id_fact ?? invoice?.num_fact),
+                              ].filter(Boolean);
+
+                              for (const key of orderedKeys) {
+                                if (key && imageUrls[key] && imageUrls[key].length) {
+                                  urls = imageUrls[key];
+                                  break;
                                 }
-                              } else {
-                                // Fallback for unknown types
-                                const candidateKeys = [rowAchatKey, rowPicintKey, invPicintKey].filter(Boolean);
-                                urls = Array.from(
-                                  new Set(
-                                    candidateKeys.flatMap((k) => imageUrls[k] || [])
-                                  )
-                                );
                               }
 
                               if (
@@ -1479,7 +1619,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                   hasDiamondData)
                               ) {
                                 const dDet =
-                                  allDiamondDetails[rowId] ||
+                                  allDiamondDetails[rowPicint ?? ""] ||
                                   allDiamondDetails[item.id_achat];
                                 const unwrap =
                                   dDet &&
@@ -1519,7 +1659,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                         return `/images/gold/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
                                       }
                                       if (mount.includes('uploads/watchpic')) {
-                                        return `/images/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                                        return `/images/watch/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
                                       }
                                     }
                                   } catch {}
@@ -1584,7 +1724,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                 try {
                                   console.log('[InvoiceImages:urls]', {
                                     type: isGoldType ? 'gold' : (isWatchType ? 'watch' : 'other'),
-                                    rowPicint: rowId,
+                                    rowPicint,
                                     rowIdAchat: item?.id_achat,
                                     urlsIn: urls,
                                     urlsNormalized: candidateUrls
@@ -1598,7 +1738,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                     : isWatchType
                                       ? "watch"
                                       : "watch";
-                                  const keyId = item?.id_achat ?? rowId ?? invoice?.picint;
+                                  const keyId = item?.id_achat ?? rowPicint ?? invoice?.picint;
                                   const pref = localStorage.getItem(getPreferredImageKey(kind, keyId));
                                   if (pref && candidateUrls.some((u) => String(u) === String(pref))) {
                                     preferredUrl = pref;
@@ -1614,6 +1754,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                   candidateUrls[0];
                                 // Ensure the URL targets the correct API base (preserve /api) when using /images/* routes
                                 const httpsImg = toApiImageAbsolute(imgUrl);
+                                const rowId = parentInvoice?.picint;
                                 const urlWithToken = withToken(httpsImg, token);
                                 try {
                                   console.log('[InvoiceImages:render] img', {
@@ -1650,15 +1791,7 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                     }}
                                   />
                                 );
-                              } else {
-                                try {
-                                  console.log('[InvoiceImages:render] no-image', {
-                                    rowPicint: rowId,
-                                    rowIdAchat: item?.id_achat,
-                                    isGoldType,
-                                    checkedKeys: [rowId, item?.id_achat, invoice?.picint]
-                                  });
-                                } catch {}
+                              } else if (orderedKeys.length) {
                                 return (
                                   <Box
                                     component="img"
@@ -1676,6 +1809,8 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
                                     }}
                                   />
                                 );
+                              } else {
+                                return null;
                               }
                             })()}
                           </TableCell>
@@ -2032,6 +2167,14 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
             }}
           >
             {(() => {
+              const pickNumber = (...values: any[]) => {
+                for (const val of values) {
+                  const num = Number(val);
+                  if (Number.isFinite(num)) return num;
+                }
+                return 0;
+              };
+
               const lyd = Number(amount_lyd) || 0;
               const usd = Number(amount_currency) || 0;
               const eur = Number(amount_EUR) || 0;
@@ -2041,18 +2184,60 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
 
               const supplierType = String(typeinv || "").toLowerCase();
               const isGoldInv = supplierType.includes("gold");
-              const totalUsd = Number(totalAmountUSD) || Number(TotalAmountFinal) || 0;
-              const totalLyd = Number(totalAmountLYD) || 0;
+              const restLydFromInvoice = pickNumber(
+                (invoice as any)?.rest_of_money,
+                (invoice as any)?.rest_of_moneyLYD,
+                (invoice as any)?.rest_of_money_lyd
+              );
+              const restUsdFromInvoice = pickNumber(
+                (invoice as any)?.rest_of_moneyUSD,
+                (invoice as any)?.rest_of_money_usd
+              );
+
+              const totalUsd = pickNumber(
+                invoice?.total_remise_final_after_discount,
+                TotalAmountFinal,
+                invoice?.total_remise_final,
+                totalAmountUSD
+              );
+              const totalLyd = pickNumber(
+                invoice?.total_remise_final,
+                totalAmountLYD,
+                totalAmountUSD
+              );
 
               const usdRate = usd > 0 && usdLyd > 0 ? (usdLyd / usd) : NaN;
 
-              // GOLD: calculate remainder purely in LYD-equivalent.
-              const diffLyd = normalizeLyd0(totalLyd) - normalizeLyd0(paidTotalLydEquiv);
+              const diffLyd = restLydFromInvoice
+                ? normalizeLyd0(restLydFromInvoice)
+                : normalizeLyd0(totalLyd) - normalizeLyd0(paidTotalLydEquiv);
 
-              // NON-GOLD: primary remainder is in USD when possible.
-              // Use amount_currency as the USD paid amount (authoritative), and show LYD-equiv remainder when rate is known.
-              const diffUsd = (Number.isFinite(totalUsd) ? totalUsd : 0) - (Number.isFinite(usd) ? usd : 0);
-              const diffUsd0 = Math.round((Number(diffUsd) || 0) * 100) / 100;
+              const computeDiscountValue = () => {
+                if (restUsdFromInvoice != null) return 0;
+                const netValue = Number(data?.remise) || 0;
+                const netPer = Number(data?.remise_per) || 0;
+                if (netValue < 0) return Math.abs(netValue);
+                if (netPer < 0) {
+                  const base = pickNumber(
+                    invoice?.total_remise_final_after_discount,
+                    TotalAmountFinal,
+                    invoice?.total_remise_final,
+                    totalAmountUSD
+                  );
+                  return Math.abs(netPer) > 0 ? base * (Math.abs(netPer) / 100) : 0;
+                }
+                return 0;
+              };
+
+              const rawDiffUsd = restUsdFromInvoice
+                ? restUsdFromInvoice
+                : (Number.isFinite(totalUsd) ? totalUsd : 0) - (Number.isFinite(usd) ? usd : 0);
+              const discountAdjustment = computeDiscountValue();
+              const diffUsdAdjusted =
+                restUsdFromInvoice != null
+                  ? rawDiffUsd
+                  : rawDiffUsd - discountAdjustment;
+              const diffUsd0 = Math.round((Number(diffUsdAdjusted) || 0) * 100) / 100;
               const hasRemainder = isGoldInv ? diffLyd > moneyEps : diffUsd0 > moneyEps;
               const isPaidInFull = isGoldInv ? Math.abs(diffLyd) <= moneyEps : Math.abs(diffUsd0) <= moneyEps;
               const paidColor = isPaidInFull ? "#2e7d32" : "#d04444ff";

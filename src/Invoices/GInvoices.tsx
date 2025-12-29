@@ -1,7 +1,7 @@
 // GInvoices.tsx
 import { useEffect, useState, useMemo, useCallback } from "react";
 import axios from "../api";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   MaterialReactTable,
   useMaterialReactTable,
@@ -81,6 +81,9 @@ type Invoice = {
   };
   ACHATs?: ACHATs[];
   TYPE_SUPPLIER?: string;
+
+  // NOTE: Getinvoice sometimes returns line-level fields; we keep it loose.
+  desig_art?: string;
 };
 
 type ACHATs = {
@@ -154,7 +157,6 @@ interface Props {
 const GInvoices = (props: Props) => {
   const { Type = "" } = props;
   const [data, setData] = useState<Invoice[]>([]);
-  const [Alldata, setAllData] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [editInvoice, setEditInvoice] = useState<Invoice>(initialInvoiceState);
@@ -233,11 +235,8 @@ const GInvoices = (props: Props) => {
       const uniqueInvoices = res.data.reduce(
         (acc: Invoice[], current: Invoice) => {
           const x = acc.find((item) => item.num_fact === current.num_fact);
-          if (!x) {
-            return acc.concat([current]);
-          } else {
-            return acc;
-          }
+          if (!x) return acc.concat([current]);
+          return acc;
         },
         []
       );
@@ -254,7 +253,7 @@ const GInvoices = (props: Props) => {
       setLoading(false);
       setTimeout(() => setProgress(0), 500);
     }
-  }, [navigate, ps, Type]);
+  }, [navigate, ps, Type, apiUrl]);
 
   useEffect(() => {
     fetchData();
@@ -276,11 +275,10 @@ const GInvoices = (props: Props) => {
           !supplierType ||
           !supplierType.toLowerCase().includes(Type.toLowerCase())
         ) {
-          return; // Skip if no match
+          return;
         }
       }
 
-      // Original grouping logic
       if (i.is_chira) {
         groups["Chira"].push(i);
       } else if (i.IS_WHOLE_SALE) {
@@ -343,7 +341,6 @@ const GInvoices = (props: Props) => {
 
   const handleEdit = (row: Invoice) => {
     setSelectedInvoiceNum(row.num_fact);
-
     setEditInvoice(row);
     setIsEditMode(true);
     setShowInvoiceForm(true);
@@ -354,6 +351,18 @@ const GInvoices = (props: Props) => {
     setShowInvoiceForm(false);
   };
 
+  /**
+   * FIX: "inventory shows 115 but should be 113"
+   * Root cause on UI side is almost always that `/Getinvoice` returns DUPLICATE line rows
+   * (common when the backend JOINs tables and multiplies rows).
+   *
+   * So we MUST de-duplicate line items before counting pieces/qty and summing totals.
+   *
+   * De-dupe strategy:
+   *  - Prefer a stable unique key if present.
+   *  - In your data shape we reliably have `id_art` for line rows.
+   *  - We also include `desig_art` and `qty` into the key as a safety net.
+   */
   const getInvoiceSummary = async (
     num_fact: number
   ): Promise<{
@@ -365,48 +374,56 @@ const GInvoices = (props: Props) => {
     try {
       const token = localStorage.getItem("token");
 
-      // Assuming you need to fetch data first (though Alldata is used later)
       const res = await axios.get<Invoice[]>(`${apiUrl}/Getinvoice`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { ps, num_fact: num_fact },
+        params: { ps, num_fact: num_fact, usr: Cuser || "-1" },
       });
 
-      // Assuming Alldata comes from the response or is defined elsewhere
-      const Alldata = res.data;
-      const items = Alldata.filter((item) => item.num_fact === num_fact);
+      const rows = (res.data || []).filter((r) => r.num_fact === num_fact);
 
-      if (items.length === 0) {
-        return {
-          itemCount: 0,
-          totalQty: 0,
-          SumInv: 0,
-          display: "No items found",
-        };
+      if (rows.length === 0) {
+        return { itemCount: 0, totalQty: 0, SumInv: 0, display: "No items found" };
       }
 
-      const totalQty = items.reduce((sum, item) => sum + (item.qty || 0), 0);
-      const SumInv = items.reduce(
+      // Optional: if your backend returns "returned/cancelled" rows inside Getinvoice,
+      // exclude them here so they don't count as available/sold twice.
+      const filtered = rows.filter((r) => !r.return_chira);
+
+      // De-duplicate
+      const map = new Map<string, Invoice>();
+      for (const r of filtered) {
+        const key = [
+          String(r.id_art ?? ""),
+          String(r.desig_art ?? ""),
+          String(r.qty ?? ""),
+          String(r.TOTAL_INV_FROM_DIAMOND ?? ""),
+        ].join("|");
+
+        // keep first occurrence
+        if (!map.has(key)) map.set(key, r);
+      }
+      const uniqueItems = Array.from(map.values());
+
+      const totalQty = uniqueItems.reduce((sum, item) => sum + (item.qty || 0), 0);
+      const SumInv = uniqueItems.reduce(
         (sum, item) => sum + (item.TOTAL_INV_FROM_DIAMOND || 0),
         0
       );
 
       return {
-        itemCount: items.length,
+        itemCount: uniqueItems.length,
         totalQty,
         SumInv,
         display:
           Type === "gold"
-            ? `${items.length} products | ${totalQty.toFixed(2)}g net | ${Math.round(SumInv).toLocaleString("en")} LYD`
-            : `${items.length} products | ${Math.round(SumInv).toLocaleString("en")} USD`,
+            ? `${uniqueItems.length} products | ${totalQty.toFixed(
+                2
+              )}g net | ${Math.round(SumInv).toLocaleString("en")} LYD`
+            : `${uniqueItems.length} products | ${Math.round(SumInv).toLocaleString("en")} USD`,
       };
     } catch (error) {
       console.error("Error fetching invoice summary:", error);
-      return {
-        itemCount: 0,
-        totalQty: 0,
-        SumInv: 0,
-        display: "Error loading invoice data",
-      };
+      return { itemCount: 0, totalQty: 0, SumInv: 0, display: "Error loading invoice data" };
     }
   };
 
@@ -439,22 +456,16 @@ const GInvoices = (props: Props) => {
           } | null>(null);
 
           useEffect(() => {
+            let mounted = true;
             const fetchSummary = async () => {
-              try {
-                const result = await getInvoiceSummary(row.original.num_fact);
-                setSummary(result);
-              } catch (error) {
-                console.error("Error loading summary:", error);
-                setSummary({
-                  itemCount: 0,
-                  totalQty: 0,
-                  SumInv: 0,
-                  display: "Error loading summary",
-                });
-              }
+              const result = await getInvoiceSummary(row.original.num_fact);
+              if (mounted) setSummary(result);
             };
-
             fetchSummary();
+            return () => {
+              mounted = false;
+            };
+            // eslint-disable-next-line react-hooks/exhaustive-deps
           }, [row.original.num_fact]);
 
           return (
@@ -531,7 +542,8 @@ const GInvoices = (props: Props) => {
         ),
       },
     ],
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [Type]
   );
 
   const table = useMaterialReactTable({
@@ -612,22 +624,21 @@ const GInvoices = (props: Props) => {
             "All Invoices Types"
           )}
         </Typography>
+
         <Box display="flex" gap={2}>
           {selectedGroup && (
-            <>
-              <Button
-                variant="outlined"
-                color="inherit"
-                onClick={() => {
-                  setSelectedGroup(null);
-                  setShowInvoiceForm(false);
-                }}
-                startIcon={<ArrowBack />}
-                sx={{ borderRadius: 3, fontWeight: "bold", px: 3, py: 1 }}
-              >
-                Back
-              </Button>
-            </>
+            <Button
+              variant="outlined"
+              color="inherit"
+              onClick={() => {
+                setSelectedGroup(null);
+                setShowInvoiceForm(false);
+              }}
+              startIcon={<ArrowBack />}
+              sx={{ borderRadius: 3, fontWeight: "bold", px: 3, py: 1 }}
+            >
+              Back
+            </Button>
           )}
         </Box>
       </Box>
@@ -690,9 +701,8 @@ const GInvoices = (props: Props) => {
       ) : (
         <>
           {Type === "gold" && <GNew_I />}
-          {/*Type === 'diamond' && <DNew_I num_fact={selectedInvoiceNum ?? undefined} />*/}
-          /{" "}
-          {/*Type === 'watches' && <WNew_I num_fact={selectedInvoiceNum ?? undefined} />*/}
+          {/* Type === 'diamond' && <DNew_I num_fact={selectedInvoiceNum ?? undefined} /> */}
+          {/* Type === 'watches' && <WNew_I num_fact={selectedInvoiceNum ?? undefined} /> */}
         </>
       )}
     </Box>

@@ -29,7 +29,50 @@ import FileCopyIcon from "@mui/icons-material/FileCopy";
 import PrintInvoiceDialog from "../Invoices/ListCardInvoice/Gold Invoices/PrintInvoiceDialog";
 import ChiraReturnPage from "./ChiraReturnPage";
 import { FileDownload } from "@mui/icons-material";
-// privilege is read directly from localStorage.user
+// Helper function to format date/time with proper timezone handling
+const formatDateTime = (dateString: string | null) => {
+  if (!dateString) return "";
+  
+  try {
+    // Parse the date string and handle timezone properly
+    const date = new Date(dateString);
+    
+    // Check if the date is valid
+    if (isNaN(date.getTime())) return "";
+    
+    // Get the components in UTC to avoid timezone conversion issues
+    let hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes().toString().padStart(2, "0");
+    const ampm = hours >= 12 ? "PM" : "AM";
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    
+    return `${hours}:${minutes} ${ampm}`;
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return "";
+  }
+};
+
+// Helper function to format date with proper timezone handling
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return "";
+  
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "";
+    
+    // Return in DD-MM-YYYY format using UTC to avoid timezone issues
+    const year = date.getUTCFullYear();
+    const month = (date.getUTCMonth() + 1).toString().padStart(2, "0");
+    const day = date.getUTCDate().toString().padStart(2, "0");
+    
+    return `${day}-${month}-${year}`;
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return dateString || "";
+  }
+};
 
 const stripInternalMetaTags = (raw: any): string => {
   let s = String(raw ?? "");
@@ -118,6 +161,62 @@ async function fetchImageListForExport(
 ): Promise<string[]> {
   const token = localStorage.getItem("token");
   const API_BASEImage = "/images";
+  const IMAGE_BASES = (() => {
+    try {
+      const base = (axios as any)?.defaults?.baseURL;
+      if (base) {
+        const u = new URL(base, window.location.origin);
+        const cleanPath = u.pathname.replace(/\/+$/, "");
+        const origin = u.origin;
+        const candidates: string[] = [];
+        if (/\/api$/i.test(cleanPath)) {
+          candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+          candidates.push(`${origin}/images`);
+        } else {
+          candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+          candidates.push(`${origin}/images`);
+        }
+        return Array.from(new Set(candidates.map((s) => s.replace(/\/+$/, ""))));
+      }
+      const o = new URL(window.location.origin);
+      return [`${o.origin}/images`];
+    } catch {
+      return ["/images"];
+    }
+  })();
+  const API_BASEImage_ABS = IMAGE_BASES[0] || "/images";
+  const toApiImageAbsolute = (url: string): string => {
+    try {
+      if (!url) return url;
+      if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+      if (/^https?:\/\//i.test(url) || url.startsWith("//")) return url;
+      if (url.startsWith("/images/") || url.startsWith("/uploads/")) {
+        const root = API_BASEImage_ABS.replace(/\/images\/?$/i, "");
+        return `${root}${url}`;
+      }
+      return new URL(url, window.location.origin).toString();
+    } catch {
+      return url;
+    }
+  };
+  const withToken = (rawUrl: string, token: string | null): string => {
+    if (!token) return rawUrl;
+    try {
+      const u = new URL(rawUrl, window.location.origin);
+      u.searchParams.delete("token");
+      u.searchParams.append("token", token);
+      return u.toString();
+    } catch {
+      if (!rawUrl) return rawUrl;
+      if (/([?&])token=/.test(rawUrl)) return rawUrl;
+      return rawUrl + (rawUrl.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+    }
+  };
+  const normalizeEntryToString = (it: any): string => {
+    if (typeof it === "string") return it;
+    if (it && typeof it === "object") return it.url || it.path || it.href || it.src || "";
+    return "";
+  };
   const t = supplierType?.toLowerCase() || "";
   let typed: "watch" | "diamond" | "gold" | undefined;
   if (t.includes("watch")) typed = "watch";
@@ -137,36 +236,66 @@ async function fetchImageListForExport(
       );
       if (Array.isArray(res.data)) {
         return res.data
-          .map((u: string) => {
-            if (typeof u !== "string") return "";
-            if (
-              u.startsWith("https://system.gaja.ly") ||
-              u.startsWith("http://system.gaja.ly")
-            ) {
-              u =
-                "https://system.gaja.ly" +
-                u.substring(
-                  u.indexOf("system.gaja.ly") + "system.gaja.ly".length
-                );
+          .map((it: any) => {
+            let u = normalizeEntryToString(it);
+            if (!u) return "";
+            if (u.startsWith("images/") || u.startsWith("uploads/")) u = "/" + u;
+            try {
+              const urlObj = new URL(u, window.location.origin);
+              // Reduce to relative path when possible
+              if (urlObj.pathname.startsWith("/api/images/")) {
+                u = urlObj.pathname.replace(/^\/api/, "");
+              } else if (urlObj.pathname.startsWith("/api/uploads/")) {
+                u = urlObj.pathname.replace(/^\/api/, "");
+              } else if (urlObj.pathname.startsWith("/images/") || urlObj.pathname.startsWith("/uploads/")) {
+                u = urlObj.pathname;
+              } else {
+                u = urlObj.toString();
+              }
+            } catch {
+              /* ignore */
             }
-            if (
-              window?.location?.protocol === "https:" &&
-              u.startsWith("http://")
-            ) {
+
+            // Rewrite legacy upload mounts to secure routes
+            try {
+              const t2 = new URL(u, window.location.origin);
+              const parts = t2.pathname.split("/").filter(Boolean);
+              const len = parts.length;
+              if (len >= 3) {
+                const filename = parts[len - 1];
+                const idSeg = parts[len - 2];
+                const mount = parts.slice(0, len - 2).join("/").toLowerCase();
+                if (typed === "gold") {
+                  if (mount.includes("uploads/goldpic") || mount.includes("uploads/opurchases/upload-attachment") || mount.includes("uploads/purchase")) {
+                    u = `/images/gold/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                  }
+                }
+                if (typed === "watch") {
+                  if (mount.includes("uploads/watchpic")) {
+                    u = `/images/watch/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                  }
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+
+            // Normalize watch routes (/images/:id/:file -> /images/watch/:id/:file)
+            if (typed === "watch") {
               try {
-                const after = u.substring("http://".length);
-                u = "https://" + after;
+                const obj = new URL(u, window.location.origin);
+                const parts = obj.pathname.split("/");
+                if (parts.length >= 4 && parts[1] === "images" && parts[2] !== "watch" && /^\d+$/.test(parts[2])) {
+                  obj.pathname = ["", "images", "watch", parts[2], ...parts.slice(3)].join("/");
+                  u = obj.pathname;
+                }
               } catch {
                 /* ignore */
               }
             }
-            if (token) {
-              const urlObj = new URL(u, window.location.origin);
-              urlObj.searchParams.delete("token");
-              urlObj.searchParams.append("token", token);
-              u = urlObj.toString();
-            }
-            return u;
+
+            const abs = toApiImageAbsolute(u);
+            return withToken(abs, token);
           })
           .filter(Boolean);
       }
@@ -231,6 +360,14 @@ const SalesReportsTable = ({
   const [chiraRefreshFlag, setChiraRefreshFlag] = useState(0);
   const printRef = React.useRef(null);
   const [globalFilter, setGlobalFilter] = useState<string>("");
+  const [customerSearch, setCustomerSearch] = useState<string>("");
+  const [sortBy, setSortBy] = useState<
+    "date_created" | "invoice_number" | "invoice_date" | "value"
+  >("invoice_date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortCurrency, setSortCurrency] = useState<"LYD" | "USD" | "EUR">(
+    "USD"
+  );
   const [pageIndex, setPageIndex] = useState(0); // for card pagination
   const [restOnly, setRestOnly] = useState<boolean>(false);
   const [saleKinds, setSaleKinds] = useState<string[]>([]);
@@ -287,6 +424,73 @@ const SalesReportsTable = ({
   }, []);
 
   const API_BASEImage = "/images";
+
+  const IMAGE_BASES = (() => {
+    try {
+      const base = (axios as any)?.defaults?.baseURL;
+      if (base) {
+        const u = new URL(base, window.location.origin);
+        const cleanPath = u.pathname.replace(/\/+$/, "");
+        const origin = u.origin;
+        const candidates: string[] = [];
+        if (/\/api$/i.test(cleanPath)) {
+          candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+          candidates.push(`${origin}/images`);
+        } else {
+          candidates.push(`${origin}${cleanPath}/images`.replace(/\/+$/, ""));
+          candidates.push(`${origin}/images`);
+        }
+        return Array.from(new Set(candidates.map((s) => s.replace(/\/+$/, ""))));
+      }
+      const o = new URL(window.location.origin);
+      return [`${o.origin}/images`];
+    } catch {
+      return ["/images"];
+    }
+  })();
+
+  const API_BASEImage_ABS = IMAGE_BASES[0] || "/images";
+
+  const ensureHttps = (u: string): string => {
+    if (!u) return u;
+    if (window?.location?.protocol === "https:" && u.startsWith("http://")) {
+      try {
+        return "https://" + u.substring("http://".length);
+      } catch {
+        return u;
+      }
+    }
+    return u;
+  };
+
+  const toApiImageAbsolute = (url: string): string => {
+    try {
+      if (!url) return url;
+      if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+      if (/^https?:\/\//i.test(url) || url.startsWith("//")) return ensureHttps(url);
+      if (url.startsWith("/images/") || url.startsWith("/uploads/")) {
+        const root = API_BASEImage_ABS.replace(/\/images\/?$/i, "");
+        return `${root}${url}`;
+      }
+      return ensureHttps(new URL(url, window.location.origin).toString());
+    } catch {
+      return url;
+    }
+  };
+
+  const withToken = (rawUrl: string, token: string | null): string => {
+    if (!token) return rawUrl;
+    try {
+      const u = new URL(rawUrl, window.location.origin);
+      u.searchParams.delete("token");
+      u.searchParams.append("token", token);
+      return u.toString();
+    } catch {
+      if (!rawUrl) return rawUrl;
+      if (/([?&])token=/.test(rawUrl)) return rawUrl;
+      return rawUrl + (rawUrl.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+    }
+  };
   const apiUrlWatches = "/WOpurchases";
   // Raw URL lists per picint/id_achat
   const [imageUrls, setImageUrls] = useState<Record<string, string[]>>({});
@@ -380,18 +584,11 @@ const SalesReportsTable = ({
     if (!id) return;
     if (imageUrls[id] !== undefined) return; // already fetched
     const token = localStorage.getItem("token");
-    const apiOrigin = (() => {
-      try {
-        const base = (axios as any)?.defaults?.baseURL;
-        if (base) {
-          const u = new URL(base, window.location.origin);
-          return u.origin;
-        }
-      } catch {
-        /* ignore */
-      }
-      return window.location.origin;
-    })();
+    const normalizeEntryToString = (it: any): string => {
+      if (typeof it === "string") return it;
+      if (it && typeof it === "object") return it.url || it.path || it.href || it.src || "";
+      return "";
+    };
     const t = supplierType?.toLowerCase() || "";
     let typed: "watch" | "diamond" | "gold" | undefined;
     if (t.includes("watch")) typed = "watch";
@@ -411,33 +608,51 @@ const SalesReportsTable = ({
         });
         if (Array.isArray(res.data)) {
           const list = res.data
-            .map((u: string) => {
-              if (typeof u !== "string") return "";
-              // If backend returns relative paths, anchor them to API origin so the browser can load them.
-              if (u.startsWith("images/") || u.startsWith("uploads/")) {
-                u = "/" + u;
+            .map((it: any) => {
+              let u = normalizeEntryToString(it);
+              if (!u) return "";
+              // Normalize to a stable, base-path-independent form first.
+              if (u.startsWith("images/") || u.startsWith("uploads/")) u = "/" + u;
+              try {
+                const urlObj = new URL(u, window.location.origin);
+                if (urlObj.pathname.startsWith("/api/images/")) {
+                  u = urlObj.pathname.replace(/^\/api/, "");
+                } else if (urlObj.pathname.startsWith("/api/uploads/")) {
+                  u = urlObj.pathname.replace(/^\/api/, "");
+                } else if (urlObj.pathname.startsWith("/images/") || urlObj.pathname.startsWith("/uploads/")) {
+                  u = urlObj.pathname;
+                } else {
+                  // keep absolute url as-is
+                  u = urlObj.toString();
+                }
+              } catch {
+                /* ignore */
               }
-              if (u.startsWith("/images/") || u.startsWith("/uploads/")) {
-                u = apiOrigin.replace(/\/+$/, "") + u;
+
+              // Rewrite legacy upload mounts to secure routes
+              try {
+                const t2 = new URL(u, window.location.origin);
+                const parts = t2.pathname.split("/").filter(Boolean);
+                const len = parts.length;
+                if (len >= 3) {
+                  const filename = parts[len - 1];
+                  const idSeg = parts[len - 2];
+                  const mount = parts.slice(0, len - 2).join("/").toLowerCase();
+                  if (typed === "gold") {
+                    if (mount.includes("uploads/goldpic") || mount.includes("uploads/opurchases/upload-attachment") || mount.includes("uploads/purchase")) {
+                      u = `/images/gold/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                    }
+                  }
+                  if (typed === "watch") {
+                    if (mount.includes("uploads/watchpic")) {
+                      u = `/images/watch/${encodeURIComponent(idSeg)}/${encodeURIComponent(filename)}`;
+                    }
+                  }
+                }
+              } catch {
+                /* ignore */
               }
-              // Some backends may return api-prefixed paths; normalize them to origin
-              if (u.startsWith("/api/images/") || u.startsWith("/api/uploads/")) {
-                u = apiOrigin.replace(/\/+$/, "") + u.replace(/^\/api/, "");
-              }
-              // Force https for system.gaja.ly (handles http or https variants)
-              if (u.includes("system.gaja.ly")) {
-                try {
-                  const afterHost = u.substring(u.indexOf("system.gaja.ly") + "system.gaja.ly".length);
-                  u = `https://system.gaja.ly${afterHost}`;
-                } catch { /* ignore */ }
-              }
-              // Upgrade to https if current page is https
-              if (window?.location?.protocol === "https:" && u.startsWith("http://")) {
-                try {
-                  const after = u.substring("http://".length);
-                  u = "https://" + after;
-                } catch { /* ignore */ }
-              }
+
               // If watch type, rewrite /images/:id/:filename -> /images/watch/:id/:filename
               if (typed === 'watch') {
                 try {
@@ -453,13 +668,8 @@ const SalesReportsTable = ({
                   }
                 } catch { /* ignore */ }
               }
-              if (token) {
-                const urlObj = new URL(u, window.location.origin);
-                urlObj.searchParams.delete("token");
-                urlObj.searchParams.append("token", token);
-                u = urlObj.toString();
-              }
-              return u;
+              const abs = toApiImageAbsolute(ensureHttps(u));
+              return withToken(abs, token);
             })
             .filter(Boolean);
           setImageUrls((prev) => ({ ...prev, [id]: list }));
@@ -477,10 +687,7 @@ const SalesReportsTable = ({
     const blobUrls: string[] = [];
     for (const url of urls) {
       try {
-        const imgUrl =
-          url.startsWith("http") || url.startsWith("/")
-            ? url
-            : `${API_BASEImage}/${url.replace(/^\/+/, "")}`; // url already has ?token
+        const imgUrl = toApiImageAbsolute(ensureHttps(url));
         const resp = await fetch(imgUrl, { method: "GET" });
         if (!resp.ok) continue;
         const blob = await resp.blob();
@@ -545,6 +752,7 @@ const SalesReportsTable = ({
                       type: t,
                       from: periodFrom || undefined,
                       to: periodTo || undefined,
+                      usr: localStorage.getItem("Cuser") || '-1',
                     },
                   })
                 );
@@ -559,6 +767,7 @@ const SalesReportsTable = ({
                     ...(singleType ? { type: singleType } : {}),
                     from: periodFrom || undefined,
                     to: periodTo || undefined,
+                    usr: localStorage.getItem("Cuser") || '-1',
                   },
                 })
               );
@@ -601,6 +810,7 @@ const SalesReportsTable = ({
                 type: t,
                 from: periodFrom || undefined,
                 to: periodTo || undefined,
+                usr: localStorage.getItem("Cuser") || '-1',
               },
             })
           );
@@ -628,6 +838,7 @@ const SalesReportsTable = ({
               ...(singleType ? { type: singleType } : {}),
               from: periodFrom || undefined,
               to: periodTo || undefined,
+              usr: localStorage.getItem("Cuser") || '-1',
             },
           });
           setData(res.data);
@@ -829,8 +1040,17 @@ const SalesReportsTable = ({
         if (typeLower.includes("gold")) {
           weight = achat.qty?.toString() || "";
         }
-        // Prefer achat.picint, then achat.id_achat, then invoice.picint
-        const picint = achat.picint || achat.id_achat || row.picint || "";
+        const idAchat =
+          achat.id_achat ?? achat.ID_ACHAT ?? achat.Id_Achat ?? achat.idAchat ?? "";
+        const picint = achat.picint ?? "";
+        const imageId = (() => {
+          // Gold/watch images are stored under purchase id_achat on the server.
+          if (typeLower.includes("gold") || typeLower.includes("watch")) {
+            return idAchat || achat.picint || row.picint || "";
+          }
+          // Diamonds (and others) often work by picint.
+          return achat.picint || idAchat || row.picint || "";
+        })();
 
         const IS_GIFT = row.IS_GIFT || "";
 
@@ -847,7 +1067,9 @@ const SalesReportsTable = ({
           weight,
           code,
           typeSupplier,
-          picint, // Add picint to product details
+          picint,
+          id_achat: idAchat,
+          imageId,
           IS_GIFT,
           CODE_EXTERNAL: codeExternal,
           // Carry invoice-level selling price so downstream views can access it per detail
@@ -858,7 +1080,7 @@ const SalesReportsTable = ({
     return Array.from(invoiceMap.values());
   }
 
-  // Sort data by date_fact descending
+  // Sort data by date_fact descending using UTC to avoid timezone issues
   const mergedData = mergeRowsByInvoice(data);
   const sortedData = [...mergedData].sort((a, b) => {
     const dateA = new Date(a.date_fact).getTime();
@@ -872,9 +1094,15 @@ const SalesReportsTable = ({
     const queued: { id: number; type?: string }[] = [];
     data.forEach((row: any) => {
       const supplierType = row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER;
-      if (row.picint) queued.push({ id: row.picint, type: supplierType });
+      if (row.picint && String(supplierType || "").toLowerCase().includes("diamond")) {
+        queued.push({ id: row.picint, type: supplierType });
+      }
       (row.ACHATs || []).forEach((a: any) => {
-        const prodId = a.picint || a.id_achat;
+        const t = String(a?.Fournisseur?.TYPE_SUPPLIER || supplierType || "").toLowerCase();
+        const prodId =
+          t.includes("gold") || t.includes("watch")
+            ? a.id_achat || a.ID_ACHAT || a.Id_Achat || a.picint
+            : a.picint || a.id_achat || a.ID_ACHAT || a.Id_Achat;
         if (prodId)
           queued.push({
             id: prodId,
@@ -899,10 +1127,18 @@ const SalesReportsTable = ({
     const pending: { id: number; type?: string }[] = [];
     sortedData.forEach((row: any) => {
       const supplierType = row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER;
-      if (row.picint && imageUrls[row.picint] === undefined)
+      if (
+        row.picint &&
+        String(supplierType || "").toLowerCase().includes("diamond") &&
+        imageUrls[row.picint] === undefined
+      )
         pending.push({ id: row.picint, type: supplierType });
       (row.ACHATs || []).forEach((a: any) => {
-        const prodId = a.picint || a.id_achat;
+        const t = String(a?.Fournisseur?.TYPE_SUPPLIER || supplierType || "").toLowerCase();
+        const prodId =
+          t.includes("gold") || t.includes("watch")
+            ? a.id_achat || a.ID_ACHAT || a.Id_Achat || a.picint
+            : a.picint || a.id_achat || a.ID_ACHAT || a.Id_Achat;
         if (prodId && imageUrls[prodId] === undefined)
           pending.push({
             id: prodId,
@@ -927,25 +1163,25 @@ const SalesReportsTable = ({
     const processed = new Set<string>();
     let globalImageCount = 0;
     let truncated = false;
-    for (const row of sortedData) {
+    for (const row of sortedFilteredData) {
       if (truncated) break;
       if (!row?._productDetails) continue;
       for (const d of row._productDetails) {
         if (truncated) break;
-        const picint = d.picint;
-        if (!picint || processed.has(String(picint))) continue;
-        processed.add(String(picint));
+        const imageId = d.imageId ?? d.id_achat ?? d.picint;
+        if (!imageId || processed.has(String(imageId))) continue;
+        processed.add(String(imageId));
         if (globalImageCount >= EXPORT_MAX_IMAGES) {
           truncated = true;
           break;
         }
-        const blobUrls = imageBlobUrls[picint] || [];
+        const blobUrls = imageBlobUrls[imageId] || [];
         let candidateUrls: string[] = [];
         if (blobUrls.length > 0) candidateUrls = blobUrls;
         else
           candidateUrls =
-            imageUrls[picint] ||
-            (await fetchImageListForExport(picint, d.typeSupplier));
+            imageUrls[imageId] ||
+            (await fetchImageListForExport(Number(imageId), d.typeSupplier));
         const limited = candidateUrls.slice(0, 2);
         const base64List: string[] = [];
         for (const u of limited) {
@@ -959,7 +1195,7 @@ const SalesReportsTable = ({
             globalImageCount++;
           }
         }
-        picintToBase64[picint] = base64List;
+        picintToBase64[String(imageId)] = base64List;
       }
     }
     const logoUrl = "/logo.png";
@@ -1006,22 +1242,13 @@ const SalesReportsTable = ({
                 </thead>
                 <tbody>
         `;
-    sortedData.forEach((row: any) => {
+    sortedFilteredData.forEach((row: any) => {
       const client = row.Client
         ? `${row.Client.client_name || ""}${row.Client.client_name && row.Client.tel_client ? " - " : ""}${row.Client.tel_client || ""}`
         : "";
 
       // Build Invoice Info block (mimics on-screen cell)
-      const created = row.d_time ? new Date(row.d_time) : null;
-      let createdStr = "";
-      if (created) {
-        let hours = created.getHours();
-        const minutes = created.getMinutes().toString().padStart(2, "0");
-        const ampm = hours >= 12 ? "PM" : "AM";
-        hours = hours % 12;
-        hours = hours ? hours : 12;
-        createdStr = `${hours}:${minutes} ${ampm}`;
-      }
+      const createdStr = formatDateTime(row.d_time);
       const user =
         row.Utilisateur && row.Utilisateur.name_user
           ? row.Utilisateur.name_user
@@ -1033,7 +1260,7 @@ const SalesReportsTable = ({
       const usrReceiveChira = row.usr_receive_chira;
       const invoiceInfoHtml = `
                 <div style="font-size:12px;line-height:1.35">
-                    <div><b>Date:</b> <span class="chip">${row.date_fact || ""}</span></div>
+                    <div><b>Date:</b> <span class="chip">${formatDate(row.date_fact) || ""}</span></div>
                     <div><b>Invoice No:</b> <span class="chip">${row.num_fact || ""}</span></div>
                     <div><b>Time:</b> ${createdStr}</div>
                     <div><b>Point Of Sale:</b> ${row.ps || ""}</div>
@@ -1217,24 +1444,24 @@ const SalesReportsTable = ({
     let idx = 1;
     let globalImageCount = 0;
     let truncated = false;
-    const needed: { picint: number; supplierType?: string }[] = [];
-    sortedData.forEach((row: any) =>
+    const needed: { imageId: number; supplierType?: string }[] = [];
+    sortedFilteredData.forEach((row: any) =>
       (row._productDetails || []).forEach((d: any) => {
-        if (d.picint)
-          needed.push({ picint: d.picint, supplierType: d.typeSupplier });
+        const imageId = d.imageId ?? d.id_achat ?? d.picint;
+        if (imageId) needed.push({ imageId: Number(imageId), supplierType: d.typeSupplier });
       })
     );
-    const uniquePicints = Array.from(new Set(needed.map((n) => n.picint)));
-    for (const picint of uniquePicints) {
+    const uniqueImageIds = Array.from(new Set(needed.map((n) => n.imageId)));
+    for (const imageId of uniqueImageIds) {
       if (truncated) break;
-      const pd = needed.find((n) => n.picint === picint);
-      const blobUrls = imageBlobUrls[picint] || [];
+      const pd = needed.find((n) => n.imageId === imageId);
+      const blobUrls = imageBlobUrls[imageId] || [];
       let candidateUrls: string[] = [];
       if (blobUrls.length > 0) candidateUrls = blobUrls;
       else
         candidateUrls =
-          imageUrls[picint] ||
-          (await fetchImageListForExport(picint, pd?.supplierType));
+          imageUrls[imageId] ||
+          (await fetchImageListForExport(imageId, pd?.supplierType));
       const limited = candidateUrls.slice(0, 2);
       const parts: { cid: string; mime: string; base64: string }[] = [];
       for (const raw of limited) {
@@ -1256,7 +1483,7 @@ const SalesReportsTable = ({
           /* skip */
         }
       }
-      picintToCidImages[String(picint)] = parts;
+      picintToCidImages[String(imageId)] = parts;
     }
 
     // 2) Build HTML body that references images by cid
@@ -1305,20 +1532,11 @@ const SalesReportsTable = ({
                 </thead>
                 <tbody>`;
 
-    sortedData.forEach((row: any) => {
+    sortedFilteredData.forEach((row: any) => {
       const client = row.Client
         ? `${row.Client.client_name || ""}${row.Client.client_name && row.Client.tel_client ? " - " : ""}${row.Client.tel_client || ""}`
         : "";
-      const created = row.d_time ? new Date(row.d_time) : null;
-      let createdStr = "";
-      if (created) {
-        let hours = created.getHours();
-        const minutes = created.getMinutes().toString().padStart(2, "0");
-        const ampm = hours >= 12 ? "PM" : "AM";
-        hours = hours % 12;
-        hours = hours ? hours : 12;
-        createdStr = `${hours}:${minutes} ${ampm}`;
-      }
+      const createdStr = formatDateTime(row.d_time);
       const user =
         row.Utilisateur && row.Utilisateur.name_user
           ? row.Utilisateur.name_user
@@ -1330,7 +1548,7 @@ const SalesReportsTable = ({
       const usrReceiveChira = row.usr_receive_chira;
       const invoiceInfoHtml = `
                 <div style="font-size:12px;line-height:1.35">
-                    <div><b>Date:</b> <span class="chip">${row.date_fact || ""}</span></div>
+                    <div><b>Date:</b> <span class="chip">${formatDate(row.date_fact) || ""}</span></div>
                     <div><b>Invoice No:</b> <span class="chip">${row.num_fact || ""}</span></div>
                     <div><b>Time:</b> ${createdStr}</div>
                     <div><b>Point Of Sale:</b> ${row.ps || ""}</div>
@@ -1614,6 +1832,22 @@ const SalesReportsTable = ({
         JSON.stringify(row).toLowerCase().includes(term)
       );
     }
+
+    if (customerSearch) {
+      const term = customerSearch.toLowerCase().trim();
+      base = base.filter((row: any) => {
+        const c = row?.Client || {};
+        const name = String(c.client_name ?? c.name ?? "").toLowerCase();
+        const tel = String(c.tel_client ?? c.phone ?? "").toLowerCase();
+        const id = String(c.id_client ?? c.id ?? "").toLowerCase();
+        return (
+          name.includes(term) ||
+          tel.includes(term) ||
+          id.includes(term) ||
+          String(row?.client ?? "").toLowerCase().includes(term)
+        );
+      });
+    }
     // Multi-select type filter (gold/diamond/watch)
     if (selectedTypes.length > 0 && !selectedTypes.includes("all")) {
       base = base.filter((row) => {
@@ -1677,7 +1911,63 @@ const SalesReportsTable = ({
       });
     }
     return base;
-  }, [sortedData, globalFilter, selectedTypes, saleKinds, paymentStatus, restOnly]);
+  }, [sortedData, globalFilter, customerSearch, selectedTypes, saleKinds, paymentStatus, restOnly]);
+
+  const sortedFilteredData = React.useMemo(() => {
+    const base = [...filteredData];
+
+    const getInvoiceTotalByCurrency = (row: any, ccy: "LYD" | "USD" | "EUR"): number => {
+      if (ccy === "LYD") {
+        return Number(
+          row?.total_remise_final_lyd ??
+            row?.total_remise_final_LYD ??
+            row?.total_remise_final_lyd_sum ??
+            0
+        ) || 0;
+      }
+      if (ccy === "EUR") {
+        return Number(
+          row?.totalAmountEur ??
+            row?.total_amount_eur ??
+            row?.total_remise_final_eur ??
+            0
+        ) || 0;
+      }
+      return Number(row?.total_remise_final ?? 0) || 0;
+    };
+
+    const getCreatedTime = (row: any): number => {
+      const t = row?.d_time || row?.created_at || row?.createdAt;
+      const v = t ? new Date(t).getTime() : NaN;
+      if (Number.isFinite(v)) return v;
+      const d = row?.date_fact ? new Date(row.date_fact).getTime() : NaN;
+      return Number.isFinite(d) ? d : 0;
+    };
+
+    const getInvoiceDate = (row: any): number => {
+      const d = row?.date_fact ? new Date(row.date_fact).getTime() : NaN;
+      return Number.isFinite(d) ? d : 0;
+    };
+
+    const dir = sortDir === "asc" ? 1 : -1;
+
+    base.sort((a: any, b: any) => {
+      if (sortBy === "invoice_number") {
+        const av = Number(a?.num_fact ?? 0) || 0;
+        const bv = Number(b?.num_fact ?? 0) || 0;
+        return (av - bv) * dir;
+      }
+      if (sortBy === "date_created") {
+        return (getCreatedTime(a) - getCreatedTime(b)) * dir;
+      }
+      if (sortBy === "invoice_date") {
+        return (getInvoiceDate(a) - getInvoiceDate(b)) * dir;
+      }
+      // value
+      return (getInvoiceTotalByCurrency(a, sortCurrency) - getInvoiceTotalByCurrency(b, sortCurrency)) * dir;
+    });
+    return base;
+  }, [filteredData, sortBy, sortDir, sortCurrency]);
   // Totals of "rest" fields for the currently filtered dataset
   const totalRestLYD = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
@@ -1807,9 +2097,9 @@ const SalesReportsTable = ({
     };
   }, [filteredData]);
   const [pageSize, setPageSize] = useState<number>(5);
-  const pageCount = Math.max(1, Math.ceil(filteredData.length / pageSize));
+  const pageCount = Math.max(1, Math.ceil(sortedFilteredData.length / pageSize));
   const safePageIndex = Math.min(pageIndex, pageCount - 1);
-  const pagedData = filteredData.slice(
+  const pagedData = sortedFilteredData.slice(
     safePageIndex * pageSize,
     safePageIndex * pageSize + pageSize
   );
@@ -1817,23 +2107,14 @@ const SalesReportsTable = ({
   // Reset to first page when filters or search change
   useEffect(() => {
     setPageIndex(0);
-  }, [globalFilter, selectedTypes, periodFrom, periodTo, selectedPs, saleKinds, paymentStatus]);
+  }, [globalFilter, customerSearch, sortBy, sortDir, sortCurrency, selectedTypes, periodFrom, periodTo, selectedPs, saleKinds, paymentStatus]);
 
   // ---- CARD RENDERER (replaces table row) ----
   const renderInvoiceCard = (row: any) => {
-    const date = row.date_fact || "";
+    const date = formatDate(row.date_fact) || "";
     const num = row.num_fact || "";
-    const created = row.d_time ? new Date(row.d_time) : null;
+    const createdStr = formatDateTime(row.d_time);
     const ps = row.ps || "";
-    let createdStr = "";
-    if (created) {
-      let hours = created.getHours();
-      const minutes = created.getMinutes().toString().padStart(2, "0");
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12;
-      hours = hours ? hours : 12;
-      createdStr = `${hours}:${minutes} ${ampm}`;
-    }
     const user =
       row.Utilisateur && row.Utilisateur.name_user
         ? row.Utilisateur.name_user
@@ -2380,9 +2661,9 @@ const SalesReportsTable = ({
                       }}
                     >
                       {items.map((d: any, idx: number) => {
-                        const productPicint = d.picint;
-                        const productBlobUrls = productPicint
-                          ? imageBlobUrls[productPicint] || []
+                        const productImageId = d.imageId ?? d.id_achat ?? d.picint;
+                        const productBlobUrls = productImageId
+                          ? imageBlobUrls[productImageId] || []
                           : [];
                         const invoiceIdForLine =
                           d.id_fact || row.id_fact || row.num_fact;
@@ -2480,8 +2761,8 @@ const SalesReportsTable = ({
                               ) : (
                                 (() => {
                                   // Fallback: show first raw URL while blob is still loading (or if blob fetch failed)
-                                  const productRawUrls = productPicint
-                                    ? imageUrls[productPicint] || []
+                                  const productRawUrls = productImageId
+                                    ? imageUrls[productImageId] || []
                                     : [];
                                   const first = (productRawUrls[0] || "").trim();
                                   if (first) {
@@ -3093,6 +3374,58 @@ const SalesReportsTable = ({
             onChange={(e) => setGlobalFilter(e.target.value)}
             sx={{ minWidth: 260 }}
           />
+
+          <TextField
+            label="Customer (name / ID / phone)"
+            size="small"
+            value={customerSearch}
+            onChange={(e) => setCustomerSearch(e.target.value)}
+            sx={{ minWidth: 260 }}
+          />
+
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel id="sort-by-label">Sort By</InputLabel>
+            <Select
+              labelId="sort-by-label"
+              value={sortBy}
+              label="Sort By"
+              onChange={(e) => setSortBy(e.target.value as any)}
+            >
+              <MenuItem value="invoice_date">Invoice Date</MenuItem>
+              <MenuItem value="date_created">Date Created</MenuItem>
+              <MenuItem value="invoice_number">Invoice Number</MenuItem>
+              <MenuItem value="value">Value</MenuItem>
+            </Select>
+          </FormControl>
+
+          {sortBy === "value" && (
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <InputLabel id="sort-currency-label">Currency</InputLabel>
+              <Select
+                labelId="sort-currency-label"
+                value={sortCurrency}
+                label="Currency"
+                onChange={(e) => setSortCurrency(e.target.value as any)}
+              >
+                <MenuItem value="LYD">LYD</MenuItem>
+                <MenuItem value="USD">USD</MenuItem>
+                <MenuItem value="EUR">EUR</MenuItem>
+              </Select>
+            </FormControl>
+          )}
+
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <InputLabel id="sort-dir-label">Order</InputLabel>
+            <Select
+              labelId="sort-dir-label"
+              value={sortDir}
+              label="Order"
+              onChange={(e) => setSortDir(e.target.value as any)}
+            >
+              <MenuItem value="desc">High to Low / Newest</MenuItem>
+              <MenuItem value="asc">Low to High / Oldest</MenuItem>
+            </Select>
+          </FormControl>
 
           <Box
             sx={{

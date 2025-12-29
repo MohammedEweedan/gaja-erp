@@ -382,7 +382,8 @@ const toApiImageAbsolute = (url: string): string => {
       const root = `${u.origin}${cleanPath}`;
       return `${root}${url}`;
     }
-    return `${window.location.origin}${url}`;
+
+      return `${window.location.origin}${url}`;
   } catch {
     return url;
   }
@@ -933,6 +934,43 @@ const DNew_I = () => {
   };
 
   const [datainv, setDatainv] = useState<Invoice[]>([]);
+
+  // Memoized calculations for cart totals display
+  const goldWeightTotal = React.useMemo(() => {
+    if (!Array.isArray(datainv)) return 0;
+    return datainv.reduce((sum: number, item: any) => {
+      if (item?.IS_GIFT) return sum;
+      const supplierType = String(
+        item?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || ""
+      ).toLowerCase();
+      if (!supplierType.includes("gold")) return sum;
+      const weight = Number(item?.qty ?? item?.Weight ?? 0);
+      if (!Number.isFinite(weight)) return sum;
+      return sum + weight;
+    }, 0);
+  }, [datainv]);
+
+  const diamondItemCount = React.useMemo(() => {
+    if (!Array.isArray(datainv)) return 0;
+    return datainv.reduce((count: number, item: any) => {
+      if (item?.IS_GIFT) return count;
+      const supplierType = String(
+        item?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || ""
+      ).toLowerCase();
+      return supplierType.includes("diamond") ? count + 1 : count;
+    }, 0);
+  }, [datainv]);
+
+  const watchItemCount = React.useMemo(() => {
+    if (!Array.isArray(datainv)) return 0;
+    return datainv.reduce((count: number, item: any) => {
+      if (item?.IS_GIFT) return count;
+      const supplierType = String(
+        item?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || ""
+      ).toLowerCase();
+      return supplierType.includes("watch") ? count + 1 : count;
+    }, 0);
+  }, [datainv]);
 
   const [issuedInvoicesOpen, setIssuedInvoicesOpen] = useState(false);
   const [issuedInvoicesLoading, setIssuedInvoicesLoading] = useState(false);
@@ -2575,10 +2613,16 @@ const DNew_I = () => {
             usr: Cuser,
             ps: ps,
             customer: editInvoice.client,
+            tel_client: (editInvoice as any).tel_client || editInvoice.Client?.tel_client || "",
             sm: editInvoice.SourceMark,
             is_chira: editInvoice.is_chira,
             IS_WHOLE_SALE: editInvoice.IS_WHOLE_SALE,
             COMMENT: editInvoice.COMMENT ?? "",
+            // Ensure all essential fields are included
+            date_fact: editInvoice.date_fact || new Date().toISOString().split('T')[0],
+            mode_fact: editInvoice.mode_fact || "Debitor",
+            phone_client: (editInvoice as any).phone_client || editInvoice.Client?.tel_client || "",
+            accept_discount: editInvoice.accept_discount ?? false,
           },
           {
             headers: { Authorization: `Bearer ${token}` },
@@ -5515,70 +5559,35 @@ const DNew_I = () => {
                   return null;
                 })()}
               </Box>
-              <Box sx={{ mb: 1, p: 1, borderTop: "1px solid #eee" }}>
-                {/* Diamond (USD) */}
-                {(() => {
-                  const diamondTotal = getFinalTotal(datainv, "diamond");
-                  return diamondTotal > 0 ? (
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Typography
-                        variant="body2"
-                        sx={{ color: "deepskyblue", fontWeight: 700 }}
-                      >
-                        Diamond:{" "}
-                        {diamondTotal.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        USD
-                      </Typography>
-                      <Button
-                        variant="text"
-                        color="primary"
-                        size="small"
-                        startIcon={
-                          <span role="img" aria-label="edit">
-                            ✏️
-                          </span>
-                        }
-                        sx={{ minWidth: 32, p: 0.5, ml: 1, borderRadius: 1 }}
-                        onClick={handleOpenTotalsDialog}
-                        disabled={datainv.length === 0}
-                      ></Button>
-                    </Box>
-                  ) : null;
-                })()}
-                {/* Watch (USD) */}
-                {(() => {
-                  const watchTotal = getFinalTotal(datainv, "watch");
-                  return watchTotal > 0 ? (
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <Typography
-                        variant="body2"
-                        sx={{ color: "orange", fontWeight: 700 }}
-                      >
-                        Watch:{" "}
-                        {watchTotal.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        USD
-                      </Typography>
-                    </Box>
-                  ) : null;
-                })()}
+              <Box
+                sx={{
+                  mb: 1,
+                  p: 1,
+                  borderTop: "1px solid #eee",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 0.5,
+                }}
+              >
+                {goldWeightTotal > 0 ? (
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Gold Weight: {goldWeightTotal.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    g
+                  </Typography>
+                ) : null}
+                {diamondItemCount > 0 ? (
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Diamond Items: {diamondItemCount}
+                  </Typography>
+                ) : null}
+                {watchItemCount > 0 ? (
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    Watch Items: {watchItemCount}
+                  </Typography>
+                ) : null}
               </Box>
               {!canPrint ? (
                 <Button

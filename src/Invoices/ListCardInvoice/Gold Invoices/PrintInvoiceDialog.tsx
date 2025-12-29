@@ -48,6 +48,7 @@ export type Invoice = {
   total_remise: number;
   qty: number;
   total_remise_final: number;
+  total_remise_final_after_discount?: number;
   currency: string;
   picint: number;
   ACHATs?: ACHATs[];
