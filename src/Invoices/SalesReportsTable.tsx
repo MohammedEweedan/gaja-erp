@@ -167,14 +167,6 @@ const toFiniteNumber = (value: any): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const pickNumber = (...values: any[]): number | null => {
-  for (const val of values) {
-    const num = toFiniteNumber(val);
-    if (num !== null) return num;
-  }
-  return null;
-};
-
 const PS_CODE_LOOKUP: Record<string, string> = {
   "0": "P0",
   "1": "P1",
@@ -428,10 +420,90 @@ async function fetchImageListForExport(
 const MONEY_EPS = 0.01;
 
 const normalizeMoney = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
+const clamp0 = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
+
+const pickNumber = (...values: any[]): number => {
+  for (const val of values) {
+    const num = toFiniteNumber(val);
+    if (num !== null) return num;
+  }
+  return 0;
+};
+
+const pickFromKeys = (obj: any, keys: string[]): number => {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) {
+      return Number(v);
+    }
+  }
+  return 0;
+};
+
+const isAbsUrl = (u: string) => /^https?:\/\//i.test(u || "");
+const BASE_URL: string = ""; // optionally: api.defaults.baseURL
+const buildFileUrl = (maybeUrl?: string) => {
+  const u = String(maybeUrl || "").trim();
+  if (!u) return "";
+  if (isAbsUrl(u)) return u;
+  if (!BASE_URL) return u;
+  return `${BASE_URL.replace(/\/$/, "")}/${u.replace(/^\//, "")}`;
+};
+
+function ImageWithFallback({
+  src,
+  alt,
+  size = 52,
+  onClick,
+}: {
+  src?: string | null;
+  alt?: string;
+  size?: number;
+  onClick?: () => void;
+}) {
+  const [bad, setBad] = React.useState(false);
+
+  const realSrc = !src || bad ? FALLBACK_IMG : src;
+
+  return (
+    <Box
+      sx={{
+        width: size,
+        height: size,
+        borderRadius: 2,
+        overflow: "hidden",
+        flexShrink: 0,
+        bgcolor: "#f1f5f9",
+        cursor: onClick ? "pointer" : "default",
+        border: "1px solid #e2e8f0",
+      }}
+      onClick={onClick}
+      title={onClick ? "Open image" : undefined}
+    >
+      <img
+        src={realSrc}
+        alt={alt || "item"}
+        width={size}
+        height={size}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        onError={() => setBad(true)}
+      />
+    </Box>
+  );
+}
+
+const toNum = (x: any) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 
 const normTypeKey = (t: any) => String(t || "").toLowerCase().trim();
 
 const makeImgKey = (type: any, id: any) => `${normTypeKey(type)}:${String(id ?? "")}`;
+
+const resolveTypeFromSupplierType = (supplierType: any): "gold" | "diamond" | "watches" => {
+  const t = String(supplierType || "").toLowerCase();
+  if (t.includes("watch")) return "watches";
+  if (t.includes("gold")) return "gold";
+  return "diamond";
+};
 
 // Inline placeholder (no network)
 // ---------- Helpers ----------
@@ -443,6 +515,17 @@ const FALLBACK_ITEM_IMAGE =
     <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#888" font-family="Arial" font-size="14">
       No Image
     </text>
+  </svg>
+`);
+
+const FALLBACK_IMG =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(`
+  <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">
+    <rect width="100%" height="100%" fill="#f1f5f9"/>
+    <path d="M28 78l16-18 14 14 10-12 24 28H28z" fill="#94a3b8"/>
+    <circle cx="44" cy="44" r="8" fill="#94a3b8"/>
+    <text x="50%" y="92%" text-anchor="middle" font-size="10" fill="#64748b" font-family="Arial">No image</text>
   </svg>
 `);
 
@@ -503,107 +586,76 @@ type InvoicePaySummary = {
 };
 
 const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
-  const supplier = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
+  const supplierType = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
+  const isGold = supplierType.includes("gold");
+  const isClosed = !!row?.IS_OK;
 
-  // totals (as stored by backend)
+  // -----------------------------
+  // TOTALS (DON'T REUSE LYD TOTAL AS USD!)
+  // -----------------------------
   const totalLyd = Number(row?.total_remise_final_lyd ?? row?.total_remise_final_LYD ?? 0) || 0;
-  const totalUsd = Number(row?.total_remise_final ?? 0) || 0;
-  const totalEur = Number(row?.totalAmountEur ?? row?.total_amount_eur ?? 0) || 0;
 
+  // These MUST come from real USD/EUR-total fields (or be 0).
+  // Add/remove candidates to match your backend names.
+  const totalUsdCandidate = pickNumber(
+    row?.total_usd,
+    row?.totalAmountUsd,
+    row?.total_amount_usd,
+    row?.total_remise_final_usd,
+    row?.total_currency_usd,
+    row?.total_remise_final // <-- keep LAST as legacy fallback
+  ) ?? 0;
+
+  const totalEurCandidate = pickNumber(
+    row?.total_eur,
+    row?.totalAmountEur,
+    row?.total_amount_eur,
+    row?.total_remise_final_eur,
+    row?.total_EUR
+  ) ?? 0;
+
+  // PAID
   const paidLyd = Number(row?.amount_lyd ?? 0) || 0;
   const paidUsd = Number(row?.amount_currency ?? 0) || 0;
   const paidUsdLyd = Number(row?.amount_currency_LYD ?? 0) || 0;
   const paidEur = Number(row?.amount_EUR ?? 0) || 0;
   const paidEurLyd = Number(row?.amount_EUR_LYD ?? 0) || 0;
 
+  // REST (backend)
   const restLydBackend = Number(row?.rest_of_money ?? row?.rest_of_moneyLYD ?? row?.rest_of_money_lyd ?? 0) || 0;
   const restUsdBackend = Number(row?.rest_of_moneyUSD ?? row?.rest_of_money_usd ?? 0) || 0;
   const restEurBackend = Number(row?.rest_of_moneyEUR ?? row?.rest_of_money_eur ?? 0) || 0;
   const restUsdLydBackend = Number(row?.rest_of_moneyUSD_LYD ?? row?.rest_of_money_usd_lyd ?? 0) || 0;
   const restEurLydBackend = Number(row?.rest_of_moneyEUR_LYD ?? row?.rest_of_money_eur_lyd ?? 0) || 0;
 
-  const supplierType = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
-  const isGold = supplierType.includes("gold");
-  const isClosed = !!row?.IS_OK;
+  // ✅ Guard: if "total_remise_final" is just duplicating LYD total (common on gold),
+  // and there is no USD activity, treat USD total as 0.
+  const looksLikeDupedUsdTotal =
+    Math.abs(totalUsdCandidate - totalLyd) <= 0.5 && paidUsd <= MONEY_EPS && restUsdBackend <= MONEY_EPS;
 
-  let remainingLyd = 0;
-  let remainingUsd = 0;
-  let remainingEur = 0;
-  let remainingUsdLyd = 0;
-  let remainingEurLyd = 0;
+  const totalUsd = looksLikeDupedUsdTotal ? 0 : totalUsdCandidate;
+  const totalEur = totalEurCandidate;
 
-  if (isGold) {
-    // ✅ Gold remainder is LYD (use backend rest first)
-    const computed = Math.max(0, totalLyd - (paidLyd + paidUsdLyd + paidEurLyd));
-    remainingLyd = restLydBackend > MONEY_EPS ? restLydBackend : computed;
-
-    // don’t show USD/EUR remainder for gold invoices
-    remainingUsd = 0;
-    remainingEur = 0;
-    remainingUsdLyd = 0;
-    remainingEurLyd = 0;
-  } else {
-    // ✅ Non-gold: USD/EUR remainders (use backend rest first)
-    const computedUsd = Math.max(0, totalUsd - paidUsd);
-    const computedEur = Math.max(0, totalEur - paidEur);
-
-    remainingUsd = restUsdBackend > MONEY_EPS ? restUsdBackend : computedUsd;
-    remainingEur = restEurBackend > MONEY_EPS ? restEurBackend : computedEur;
-
-    remainingUsdLyd = restUsdLydBackend > MONEY_EPS ? restUsdLydBackend : 0;
-    remainingEurLyd = restEurLydBackend > MONEY_EPS ? restEurLydBackend : 0;
-
-    // rarely used, but keep LYD remainder if backend provides it
-    remainingLyd = restLydBackend > MONEY_EPS ? restLydBackend : 0;
-  }
-
-  const isFullyPaid =
-    remainingLyd <= MONEY_EPS &&
-    remainingUsd <= MONEY_EPS &&
-    remainingEur <= MONEY_EPS;
-
+  // -----------------------------
+  // REMAINING
+  // -----------------------------
   let remLyd = 0, remUsd = 0, remEur = 0, remUsdLyd = 0, remEurLyd = 0;
 
   if (isGold) {
-    // Gold invoice total is LYD; USD/EUR payments contribute via LYD equivalents
-    const computed = Math.max(0, totalLyd - (paidLyd + paidUsdLyd + paidEurLyd));
-    remLyd = restLydBackend > MONEY_EPS ? restLydBackend : computed;
+    const computedLyd = Math.max(0, totalLyd - (paidLyd + paidUsdLyd + paidEurLyd));
 
-    // Gold should NOT show “remaining USD/EUR” (invoice isn't denominated in USD/EUR)
+    // Prefer backend remainder if it exists (because it is the recorded invoice state)
+    remLyd = restLydBackend > MONEY_EPS ? restLydBackend : computedLyd;
+
+    // GOLD: USD/EUR are NOT invoice buckets. Hide them.
     remUsd = 0;
     remEur = 0;
     remUsdLyd = 0;
     remEurLyd = 0;
-  } else {
-    // Watch/Diamond invoice total is USD (and may also track EUR total as separate)
-    const computedUsd = Math.max(0, totalUsd - paidUsd);
-    const computedEur = Math.max(0, totalEur - paidEur);
-
-    remUsd = restUsdBackend > MONEY_EPS ? restUsdBackend : computedUsd;
-    remEur = restEurBackend > MONEY_EPS ? restEurBackend : computedEur;
-
-    // Use backend LYD equivalents when available; else derive from paid ratio
-    if (remUsd > MONEY_EPS) {
-      remUsdLyd = restUsdLydBackend > MONEY_EPS
-        ? restUsdLydBackend
-        : (paidUsd > MONEY_EPS && paidUsdLyd > MONEY_EPS ? remUsd * (paidUsdLyd / paidUsd) : 0);
-    }
-    if (remEur > MONEY_EPS) {
-      remEurLyd = restEurLydBackend > MONEY_EPS
-        ? restEurLydBackend
-        : (paidEur > MONEY_EPS && paidEurLyd > MONEY_EPS ? remEur * (paidEurLyd / paidEur) : 0);
-    }
-
-    // LYD isn't a “total currency” here; keep remainingLYD at backend rest if present (rare), else 0
-    remLyd = restLydBackend > MONEY_EPS ? restLydBackend : 0;
   }
 
-  const isPartial =
-    !isFullyPaid && (
-      remLyd > MONEY_EPS ||
-      remUsd > MONEY_EPS ||
-      remEur > MONEY_EPS
-    );
+  const isFullyPaid = remLyd <= MONEY_EPS && remUsd <= MONEY_EPS && remEur <= MONEY_EPS;
+  const isPartial = !isFullyPaid && (remLyd > MONEY_EPS || remUsd > MONEY_EPS || remEur > MONEY_EPS);
 
   return {
     isGold,
@@ -640,49 +692,6 @@ const extractDateFromFilename = (filename: string): number => {
 // You should already have something like these states:
 /// const [imageUrls, setImageUrls] = React.useState<Record<string, string[]>>({});
 /// const [imageBlobUrls, setImageBlobUrls] = React.useState<Record<string, string[]>>({});
-
-// --------- Queue images to fetch (restore old behavior + fix watch IDs) ----------
-const buildImageQueue = React.useCallback((rows: any[]) => {
-  const queued: { type: string; id: number }[] = [];
-
-  for (const row of rows || []) {
-    const imgType = resolveImageType(row);
-
-    // GOLD: restore original behavior (use id_achat)
-    if (imgType === "gold") {
-      const goldId = row?.ACHATs?.[0]?.id_achat ?? row?.id_achat ?? row?.ID_ACHAT;
-      if (goldId) queued.push({ type: "gold", id: Number(goldId) });
-      continue;
-    }
-
-    // WATCH: restore typical watch identifiers (picint / id_art)
-    if (imgType === "watches") {
-      const watchId =
-        row?.picint ??
-        row?.PICINT ??
-        row?.id_art ??
-        row?.ID_ART ??
-        row?._productDetails?.[0]?.picint ??
-        row?._productDetails?.[0]?.id_art;
-
-      if (watchId) queued.push({ type: "watches", id: Number(watchId) });
-      continue;
-    }
-
-    // DIAMOND / other: keep typical art id
-    const diaId = row?.id_art ?? row?.ID_ART ?? row?.picint ?? row?.PICINT;
-    if (diaId) queued.push({ type: imgType, id: Number(diaId) });
-  }
-
-  // de-dupe
-  const seen = new Set<string>();
-  return queued.filter((q) => {
-    const k = makeImgKey(q.type, q.id);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
-}, []);
 
 const getNamePriorityFromUrl = (url: string): number => {
   try {
@@ -744,6 +753,7 @@ const SalesReportsTable = ({
   const [closePayEurLydStr, setClosePayEurLydStr] = useState("");
   const [closeError, setCloseError] = useState<string>("");
   const [closeMakeCashVoucher, setCloseMakeCashVoucher] = useState(false);
+  const [itemImageCache, setItemImageCache] = React.useState<Record<string, string>>({});
   // Trigger refresh after closing an invoice
   const [invoiceRefreshFlag, setInvoiceRefreshFlag] = useState(0);
   const [chiraDialogOpen, setChiraDialogOpen] = useState(false);
@@ -765,6 +775,49 @@ const SalesReportsTable = ({
   const [paymentStatus, setPaymentStatus] = useState<
     "all" | "paid" | "unpaid" | "partial"
   >("all");
+
+  // --------- Queue images to fetch (restore old behavior + fix watch IDs) ----------
+  const buildImageQueue = React.useCallback((rows: any[]) => {
+    const queued: { type: string; id: number }[] = [];
+
+    for (const row of rows || []) {
+      const imgType = resolveImageType(row);
+
+      // GOLD: restore original behavior (use id_achat)
+      if (imgType === "gold") {
+        const goldId = row?.ACHATs?.[0]?.id_achat ?? row?.id_achat ?? row?.ID_ACHAT;
+        if (goldId) queued.push({ type: "gold", id: Number(goldId) });
+        continue;
+      }
+
+      // WATCH: restore typical watch identifiers (picint / id_art)
+      if (imgType === "watches") {
+        const watchId =
+          row?.picint ??
+          row?.PICINT ??
+          row?.id_art ??
+          row?.ID_ART ??
+          row?._productDetails?.[0]?.picint ??
+          row?._productDetails?.[0]?.id_art;
+
+        if (watchId) queued.push({ type: "watches", id: Number(watchId) });
+        continue;
+      }
+
+      // DIAMOND / other: keep typical art id
+      const diaId = row?.id_art ?? row?.ID_ART ?? row?.picint ?? row?.PICINT;
+      if (diaId) queued.push({ type: imgType, id: Number(diaId) });
+    }
+
+    // de-dupe
+    const seen = new Set<string>();
+    return queued.filter((q) => {
+      const k = makeImgKey(q.type, q.id);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, []);
 
   const navigate = useNavigate();
 
@@ -1075,40 +1128,37 @@ const fetchImages = useCallback(async (id: number, supplierType?: string) => {
 // ---------- Fetch images (KEEP YOUR EXISTING ENDPOINTS) ----------
 // IMPORTANT: keep your old endpoint + params EXACTLY.
 // Only change how you STORE & KEY the results.
-const fetchImagesForQueue = React.useCallback(async (queue: { type: string; id: number }[]) => {
-  for (const q of queue) {
-    const key = makeImgKey(q.type, q.id);
+const fetchImagesForQueue = React.useCallback(
+  async (queue: { type: string; id: number }[]) => {
+    for (const q of queue) {
+      const key = makeImgKey(q.type, q.id);
 
-    // already have something stored? skip
-    if ((imageBlobUrls?.[key] && imageBlobUrls[key].length) || (imageUrls?.[key] && imageUrls[key].length)) {
-      continue;
+      // already have something stored? skip
+      if (
+        (imageBlobUrls?.[key] && imageBlobUrls[key].length) ||
+        (imageUrls?.[key] && imageUrls[key].length)
+      ) {
+        continue;
+      }
+
+      try {
+        const res = await axios.get("/files/GetImages", {
+          params: { Type: q.type, Id: q.id },
+        });
+
+        const urlsArray: string[] = Array.isArray(res.data)
+          ? res.data.filter(Boolean)
+          : [];
+
+        setImageUrls((prev) => ({ ...prev, [key]: urlsArray }));
+      } catch {
+        // store empty so we don't spam requests
+        setImageUrls((prev) => ({ ...prev, [key]: [] }));
+      }
     }
-
-    try {
-      // ---- PUT YOUR OLD IMAGE FETCH HERE ----
-      // Example pattern (replace with your existing working call):
-      //
-      // const res = await axios.get("/files/GetImages", { params: { Type: q.type, Id: q.id } });
-      // const urlsArray = Array.isArray(res.data) ? res.data : [];
-      //
-      // Or if you fetch blobs:
-      // const blobRes = await axios.get("/files/Download", { params: { Type: q.type, Id: q.id }, responseType: "blob" });
-      // const blobUrl = URL.createObjectURL(blobRes.data);
-
-      const res = await axios.get("/files/GetImages", {
-        params: { Type: q.type, Id: q.id },
-      });
-
-      const urlsArray: string[] = Array.isArray(res.data) ? res.data.filter(Boolean) : [];
-
-      // Store with consistent key (type:id)
-      setImageUrls((prev) => ({ ...prev, [key]: urlsArray }));
-    } catch (e) {
-      // store empty so we don't spam requests
-      setImageUrls((prev) => ({ ...prev, [key]: [] }));
-    }
-  }
-}, [imageBlobUrls, imageUrls]);
+  },
+  [imageBlobUrls, imageUrls]
+);
 
 // Simplify the blob URL conversion - don't use blobs, use direct URLs
 useEffect(() => {
@@ -1152,7 +1202,7 @@ useEffect(() => {
 }, [imageUrls, imageBlobUrls]);
 
   // Helper to fetch image as blob and store object URL
-  const fetchImageBlobs = async (picint: number, urls: string[]) => {
+  const fetchImageBlobs = async (key: string, urls: string[]) => {
     const blobUrls: string[] = [];
     for (const url of urls) {
       try {
@@ -1164,21 +1214,20 @@ useEffect(() => {
         blobUrls.push(blobUrl);
         createdBlobUrlsRef.current.push(blobUrl);
       } catch {
-        // skip if failed
+        // skip
       }
     }
-    setImageBlobUrls((prev) => ({ ...prev, [picint]: blobUrls }));
+    setImageBlobUrls((prev) => ({ ...prev, [key]: blobUrls }));
   };
 
-  // Fetch blobs for protected images when imageUrls changes
   useEffect(() => {
-    Object.entries(imageUrls).forEach(([picint, urls]) => {
-      if (urls.length > 0 && !imageBlobUrls[picint]) {
-        fetchImageBlobs(Number(picint), urls);
+    Object.entries(imageUrls).forEach(([key, urls]) => {
+      if (urls.length > 0 && !imageBlobUrls[key]) {
+        fetchImageBlobs(key, urls);
       }
     });
     // eslint-disable-next-line
-  }, [imageUrls]); // Remove imageBlobUrls from dependencies
+  }, [imageUrls]);
 
   // Cleanup created blob URLs on unmount only. We track created URLs in a ref
   // to avoid revoking active object URLs when imageBlobUrls updates incrementally
@@ -1769,6 +1818,133 @@ useEffect(() => {
     // eslint-disable-next-line
   }, [sortedData]);
 
+  const closeInvoicePaymentSource = React.useMemo(() => {
+    if (Array.isArray(closeInvoiceRows) && closeInvoiceRows.length > 0) {
+      const serverRow = closeInvoiceRows.find(
+        (row) => row && typeof row === "object"
+      );
+      if (!closeInvoice) return serverRow || null;
+      if (!serverRow) return closeInvoice;
+      return { ...closeInvoice, ...serverRow };
+    }
+    return closeInvoice;
+  }, [closeInvoice, closeInvoiceRows]);
+
+  const closeLines: any[] =
+    closeInvoice?.Details ||
+    closeInvoice?.details ||
+    closeInvoice?.FactureDetails ||
+    closeInvoice?.facture_details ||
+    closeInvoice?.items ||
+    [];
+
+  const getItemImageFetchTarget = React.useCallback((line: any) => {
+    // WATCH
+    const w =
+      line?.Watch ||
+      line?.watch ||
+      line?.OriginalAchatWatch ||
+      line?.DistributionPurchase?.OriginalAchatWatch ||
+      null;
+
+    if (w?.id_watch || w?.Id_watch || w?.id) {
+      return { type: "watches" as const, id: Number(w?.id_watch ?? w?.Id_watch ?? w?.id) };
+    }
+
+    // DIAMOND
+    const d = line?.Diamond || line?.diamond || line?.OriginalDiamond || null;
+    if (d?.id_diamond || d?.Id_diamond || d?.id) {
+      return { type: "diamond" as const, id: Number(d?.id_diamond ?? d?.Id_diamond ?? d?.id) };
+    }
+
+    // GOLD
+    const g =
+      line?.Gold ||
+      line?.gold ||
+      line?.OriginalAchatGold ||
+      line?.DistributionPurchase?.OriginalAchatGold ||
+      null;
+
+    if (g?.id_gold || g?.Id_gold || g?.id) {
+      return { type: "gold" as const, id: Number(g?.id_gold ?? g?.Id_gold ?? g?.id) };
+    }
+
+    // fallback: sometimes the line itself has an id
+    const anyId = line?.id || line?.id_item || line?.id_fact_details;
+    if (anyId) return { type: "gold" as const, id: Number(anyId) }; // harmless fallback
+
+    return null;
+  }, []);
+
+  const getLineQty = React.useCallback((l: any) => {
+    const v =
+      Number(l?.qty ?? l?.qte ?? l?.quantity ?? l?.Qte ?? l?.QTY ?? l?.Count ?? l?.count ?? 0) || 0;
+
+    // sometimes gold uses weight as quantity-like
+    const w = Number(l?.weight ?? l?.poids ?? l?.Weight ?? 0) || 0;
+
+    // prefer qty if present, else weight if present, else 1
+    if (v > 0) return v;
+    if (w > 0) return w;
+    return 1;
+  }, []);
+  const getLineUnitPrice = React.useCallback((l: any) => {
+    // common unit fields
+    const unitCandidates = [
+      l?.unit_price,
+      l?.UnitPrice,
+      l?.prix_unitaire,
+      l?.prixUnit,
+      l?.price,
+      l?.Price,
+      l?.SellingPrice,
+      l?.sell_price,
+      l?.total_price_unit,
+    ];
+
+    for (const c of unitCandidates) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return normalizeMoney(n);
+    }
+
+    // if only total exists, derive by qty
+    const qty = getLineQty(l);
+    const total = getLineTotal(l);
+    if (qty > 0 && total > 0) return normalizeMoney(total / qty);
+
+    return 0;
+  }, [getLineQty]);
+  
+  const getLineTotal = React.useCallback((l: any) => {
+    const totalCandidates = [
+      l?.total,
+      l?.Total,
+      l?.total_price,
+      l?.TotalPrice,
+      l?.prix_total,
+      l?.montant,
+      l?.amount,
+      l?.Amount,
+      // watch/gold/diamond common totals
+      l?.Total_Price_LYD,
+      l?.total_remise_final_lyd,
+      l?.total_remise_final_LYD,
+      l?.line_total_lyd,
+    ];
+
+    for (const c of totalCandidates) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return normalizeMoney(n);
+    }
+
+    // fallback = qty * unit
+    const qty = getLineQty(l);
+    const unit = Number(l?.unit_price ?? l?.prix_unitaire ?? l?.price ?? 0) || 0;
+    if (qty > 0 && unit > 0) return normalizeMoney(qty * unit);
+
+    return 0;
+  }, [getLineQty]);
+
   // Build styled HTML with embedded images for export (used by HTML and Excel exports)
   async function generateExportHtml(): Promise<string> {
     // On-demand image conversion with global cap.
@@ -1788,8 +1964,20 @@ useEffect(() => {
           truncated = true;
           break;
         }
-        const blobUrls = imageBlobUrls[imageId] || [];
+        const imgType = resolveTypeFromSupplierType(d.typeSupplier);
+        const imgKey = makeImgKey(imgType, imageId);
+
+        const blobUrls = imageBlobUrls[imgKey] || imageBlobUrls[String(imageId)] || [];
         let candidateUrls: string[] = [];
+
+        if (blobUrls.length > 0) candidateUrls = blobUrls;
+        else {
+          candidateUrls =
+            imageUrls[imgKey] ||
+            imageUrls[String(imageId)] ||
+            (await fetchImageListForExport(Number(imageId), d.typeSupplier));
+        }
+
         if (blobUrls.length > 0) candidateUrls = blobUrls;
         else
           candidateUrls =
@@ -2761,6 +2949,23 @@ useEffect(() => {
   const paySummary = computeInvoicePaySummary(row);
   const headerBg = getHeaderBgByStatus(paySummary);
 
+  const eps = MONEY_EPS;
+
+  // Remaining must be: total - paid (per currency)
+  const remaining = {
+    lyd: Math.max(0, normalizeMoney(paySummary.remaining?.lyd || 0)),
+    usd: Math.max(0, normalizeMoney(paySummary.remaining?.usd || 0)),
+    eur: Math.max(0, normalizeMoney(paySummary.remaining?.eur || 0)),
+  };
+
+  const remainingUsdLyd = Math.max(0, normalizeMoney(paySummary.remaining?.usdLyd || 0));
+  const remainingEurLyd = Math.max(0, normalizeMoney(paySummary.remaining?.eurLyd || 0));
+
+  const fullyPaidNow =
+    remaining.lyd <= eps &&
+    remaining.usd <= eps &&
+    remaining.eur <= eps;
+
   // OPTIONAL: readable label
   const statusLabel = !paySummary.isClosed
     ? "Open"
@@ -3019,37 +3224,37 @@ useEffect(() => {
             )}
 
             {/* PAID */}
-            {(paySummary.paid.lyd > MONEY_EPS) && (
+            {(paySummary.paid.lyd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Paid (LYD)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#10b981' }}>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (LYD)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.lyd)} LYD
                 </Typography>
               </Box>
             )}
 
-            {(paySummary.paid.usd > MONEY_EPS) && (
+            {(paySummary.paid.usd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Paid (USD)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#10b981' }}>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (USD)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.usd)} USD
                 </Typography>
-                {(paySummary.paid.usdLyd > MONEY_EPS) && (
-                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+                {(paySummary.paid.usdLyd > eps) && (
+                  <Typography sx={{ fontSize: 12, color: "#64748b" }}>
                     ≈ {formatWholeAmount(paySummary.paid.usdLyd)} LYD
                   </Typography>
                 )}
               </Box>
             )}
 
-            {(paySummary.paid.eur > MONEY_EPS) && (
+            {(paySummary.paid.eur > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Paid (EUR)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 800, color: '#10b981' }}>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (EUR)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.eur)} EUR
                 </Typography>
-                {(paySummary.paid.eurLyd > MONEY_EPS) && (
-                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>
+                {(paySummary.paid.eurLyd > eps) && (
+                  <Typography sx={{ fontSize: 12, color: "#64748b" }}>
                     ≈ {formatWholeAmount(paySummary.paid.eurLyd)} LYD
                   </Typography>
                 )}
@@ -3057,45 +3262,45 @@ useEffect(() => {
             )}
 
             {/* REMAINING */}
-            {(paySummary.remaining.lyd > MONEY_EPS) && (
+            {(remaining.lyd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Remaining (LYD)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 900, color: '#ef4444' }}>
-                  {formatWholeAmount(paySummary.remaining.lyd)} LYD
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Remaining Amount (LYD)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#ef4444" }}>
+                  {formatWholeAmount(remaining.lyd)} LYD
                 </Typography>
               </Box>
             )}
 
-            {(paySummary.remaining.usd > MONEY_EPS) && (
+            {(remaining.usd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Remaining (USD)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 900, color: '#ef4444' }}>
-                  {formatWholeAmount(paySummary.remaining.usd)} USD
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Remaining (USD)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#ef4444" }}>
+                  {formatWholeAmount(remaining.usd)} USD
                 </Typography>
-                {(paySummary.remaining.usdLyd > MONEY_EPS) && (
-                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>
-                    ≈ {formatWholeAmount(paySummary.remaining.usdLyd)} LYD
+                {(remainingUsdLyd > eps) && (
+                  <Typography sx={{ fontSize: 12, color: "#64748b" }}>
+                    ≈ {formatWholeAmount(remainingUsdLyd)} LYD
                   </Typography>
                 )}
               </Box>
             )}
 
-            {(paySummary.remaining.eur > MONEY_EPS) && (
+            {(remaining.eur > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: '#64748b' }}>Remaining (EUR)</Typography>
-                <Typography sx={{ fontSize: 16, fontWeight: 900, color: '#ef4444' }}>
-                  {formatWholeAmount(paySummary.remaining.eur)} EUR
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Remaining (EUR)</Typography>
+                <Typography sx={{ fontSize: 16, fontWeight: 900, color: "#ef4444" }}>
+                  {formatWholeAmount(remaining.eur)} EUR
                 </Typography>
-                {(paySummary.remaining.eurLyd > MONEY_EPS) && (
-                  <Typography sx={{ fontSize: 12, color: '#64748b' }}>
-                    ≈ {formatWholeAmount(paySummary.remaining.eurLyd)} LYD
+                {(remainingEurLyd > eps) && (
+                  <Typography sx={{ fontSize: 12, color: "#64748b" }}>
+                    ≈ {formatWholeAmount(remainingEurLyd)} LYD
                   </Typography>
                 )}
               </Box>
             )}
 
             {/* If fully paid show a clean badge */}
-            {paySummary.isClosed && paySummary.isFullyPaid && (
+            {paySummary.isClosed && fullyPaidNow && (
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                 <Chip
                   label="✅ Fully Paid"
@@ -3126,8 +3331,19 @@ useEffect(() => {
             >
               {details.map((d: any, idx: number) => {
                 const productImageId = d.imageId ?? d.id_achat ?? d.picint ?? d.id_art ?? d.ID_ART;
-                const productBlobUrls = productImageId ? (imageBlobUrls[productImageId] || []) : [];
-                const productRawUrls = productImageId ? (imageUrls[productImageId] || []) : [];
+
+                const imgType = resolveTypeFromSupplierType(d.typeSupplier);
+                const imgKey = productImageId ? makeImgKey(imgType, productImageId) : "";
+
+                const productBlobUrls =
+                  (imgKey && imageBlobUrls[imgKey]) ||
+                  (productImageId != null ? imageBlobUrls[String(productImageId)] : []) ||
+                  [];
+
+                const productRawUrls =
+                  (imgKey && imageUrls[imgKey]) ||
+                  (productImageId != null ? imageUrls[String(productImageId)] : []) ||
+                  [];
 
                 // Choose only THIS item’s image; otherwise fallback.
                 const primaryImg = productBlobUrls[0] || productRawUrls[0] || FALLBACK_ITEM_IMAGE;
@@ -3361,29 +3577,43 @@ useEffect(() => {
   }, []);
 
   const getUsdRate = React.useCallback(() => {
-    const inv = closeInvoice;
+    const inv = closeInvoicePaymentSource;
     if (!inv) return NaN;
     const usd = Number(inv?.amount_currency) || 0;
-    const usdLyd = Number(inv?.amount_currency_LYD) || 0;
+    const usdLyd =
+      Number(
+        inv?.amount_currency_LYD ??
+          inv?.amount_currency_lyd ??
+          inv?.paid_currency_LYD ??
+          inv?.paid_currency_lyd ??
+          0
+      ) || 0;
     if (usd > 0 && usdLyd > 0) {
       const r = usdLyd / usd;
       return Number.isFinite(r) && r > 0 ? r : NaN;
     }
-    const r = Number(inv?.rate);
+    const r = Number(inv?.rate_usd ?? inv?.rate ?? inv?.USD_Rate);
     return Number.isFinite(r) && r > 0 ? r : NaN;
-  }, [closeInvoice]);
+  }, [closeInvoicePaymentSource]);
 
   const getEurRate = React.useCallback(() => {
-    const inv = closeInvoice;
+    const inv = closeInvoicePaymentSource;
     if (!inv) return NaN;
     const eur = Number(inv?.amount_EUR) || 0;
-    const eurLyd = Number(inv?.amount_EUR_LYD) || 0;
+    const eurLyd =
+      Number(
+        inv?.amount_EUR_LYD ??
+          inv?.amount_EUR_lyd ??
+          inv?.paid_EUR_LYD ??
+          inv?.paid_EUR_lyd ??
+          0
+      ) || 0;
     if (eur > 0 && eurLyd > 0) {
       const r = eurLyd / eur;
       return Number.isFinite(r) && r > 0 ? r : NaN;
     }
     return NaN;
-  }, [closeInvoice]);
+  }, [closeInvoicePaymentSource]);
 
   const convertItemsImagesToBase64 = useCallback(
     async (urls: string[]): Promise<string[]> => {
@@ -3456,6 +3686,35 @@ useEffect(() => {
     }
   };
 
+  const getItemImageUrl = React.useCallback(
+    (line: any) => {
+      // 1) direct url fields if they exist
+      const direct =
+        line?.pic ||
+        line?.image ||
+        line?.img ||
+        line?.photo ||
+        line?.Watch?.watchpic ||
+        line?.Watch?.pic ||
+        line?.Gold?.goldpic ||
+        line?.Diamond?.diamondpic ||
+        line?.DistributionPurchase?.OriginalAchatWatch?.watchpic ||
+        line?.DistributionPurchase?.OriginalAchatGold?.goldpic ||
+        "";
+
+      const directNorm = direct ? normalizeToSecureImagePath(String(direct)) : "";
+
+      if (directNorm) return directNorm;
+
+      // 2) cached fetched image (base64 usually)
+      const t = getItemImageFetchTarget(line);
+      if (!t) return "";
+      const cached = itemImageCache[`${t.type}:${t.id}`];
+      return cached || "";
+    },
+    [getItemImageFetchTarget, itemImageCache, normalizeToSecureImagePath]
+  );
+
   const fetchImagesTyped = useCallback(async (
     id: number | string,
     type: "watches" | "diamond" | "gold"
@@ -3491,56 +3750,262 @@ useEffect(() => {
     return null;
   }, [IMAGE_BASES, convertItemsImagesToBase64]);
 
-  const closeTotals = React.useMemo(() => {
-    const inv = closeInvoice;
-    if (!inv) {
-      return {
-        totalLyd: 0,
-        paidLydEquiv: 0,
-        remainingLyd: 0,
-        recorded: { lyd: 0, usd: 0, eur: 0, usdLyd: 0, eurLyd: 0 },
-      };
+  const prefetchCloseLineImages = React.useCallback(async (lines: any[]) => {
+    const targets = (lines || [])
+      .map(getItemImageFetchTarget)
+      .filter(Boolean) as { type: "watches" | "diamond" | "gold"; id: number }[];
+
+    if (!targets.length) return;
+
+    // don’t refetch what we already have
+    const toFetch = targets.filter((t) => !itemImageCache[`${t.type}:${t.id}`]);
+    if (!toFetch.length) return;
+
+    for (const t of toFetch) {
+      try {
+        const imgs = await fetchImagesTyped(t.id, t.type);
+        const first = Array.isArray(imgs) && imgs.length ? imgs[0] : null;
+        if (first) {
+          setItemImageCache((prev) => ({ ...prev, [`${t.type}:${t.id}`]: first }));
+        } else {
+          // store empty so we don't spam requests
+          setItemImageCache((prev) => ({ ...prev, [`${t.type}:${t.id}`]: "" }));
+        }
+      } catch {
+        setItemImageCache((prev) => ({ ...prev, [`${t.type}:${t.id}`]: "" }));
+      }
     }
-    const totalLyd = normalizeMoney(Number(inv?.total_remise_final_lyd ?? inv?.total_remise_final_LYD ?? 0) || 0);
-    const recordedLyd = normalizeMoney(Number(inv?.amount_lyd ?? 0) || 0);
-    const recordedUsd = Number(inv?.amount_currency ?? 0) || 0;
-    const recordedUsdLyd = normalizeMoney(Number(inv?.amount_currency_LYD ?? 0) || 0);
-    const recordedEur = Number(inv?.amount_EUR ?? 0) || 0;
-    const recordedEurLyd = normalizeMoney(Number(inv?.amount_EUR_LYD ?? 0) || 0);
-    const paidLydEquiv = normalizeMoney(recordedLyd + recordedUsdLyd + recordedEurLyd);
-    const remainingLyd = Math.max(0, normalizeMoney(totalLyd - paidLydEquiv));
+  }, [fetchImagesTyped, getItemImageFetchTarget, itemImageCache]);
+
+  React.useEffect(() => {
+    if (!closeDialogOpen) return;
+    prefetchCloseLineImages(closeLines);
+  }, [closeDialogOpen, closeLines, prefetchCloseLineImages]);
+
+  const closeTotals = React.useMemo(() => {
+  const inv: any = closeInvoicePaymentSource;
+  console.log(inv)
+  if (!inv) {
     return {
-      totalLyd,
-      paidLydEquiv,
-      remainingLyd,
-      recorded: { lyd: recordedLyd, usd: recordedUsd, eur: recordedEur, usdLyd: recordedUsdLyd, eurLyd: recordedEurLyd },
+      invoice: { lyd: 0, usd: 0, eur: 0 },
+      recorded: { lyd: 0, usd: 0, eur: 0, usdLyd: 0, eurLyd: 0 },
+      remaining: { lyd: 0, usd: 0, eur: 0 },
+      remainingLyd: 0,
+      totalLyd: 0,
     };
-  }, [closeInvoice]);
+  }
+
+  // Invoice totals (try multiple spellings)
+  let invoiceLyd = normalizeMoney(
+    pickFromKeys(inv, [
+      "total_remise_final_lyd",
+      "total_remise_final_LYD",
+      "total_lyd",
+      "totalAmountLYD",
+    ])
+  );
+
+  const invoiceUsd = normalizeMoney(
+    pickFromKeys(inv, [
+      "total_usd",
+      "total_USD",
+      "total_currency_usd",
+      "totalAmountUsd",
+      "total_amount_usd",
+      "total_remise_final_usd",
+    ])
+  );
+
+  const invoiceEur = normalizeMoney(
+    pickFromKeys(inv, [
+      "total_eur",
+      "total_EUR",
+      "total_currency_eur",
+      "totalAmountEur",
+      "total_amount_eur",
+      "total_remise_final_eur",
+    ])
+  );
+
+  // Recorded
+  const recordedLyd = normalizeMoney(
+    pickFromKeys(inv, ["amount_lyd", "amount_LYD", "paid_lyd", "paid_LYD"])
+  );
+
+  let recordedUsd = normalizeMoney(pickFromKeys(inv, ["amount_usd", "amount_currency", "paid_usd", "paid_currency"]));
+  let recordedEur = normalizeMoney(pickFromKeys(inv, ["amount_eur", "amount_EUR", "paid_eur", "paid_EUR"]));
+
+  // fallback: single currency field + devise/currency
+  const maybeOneCurrency = normalizeMoney(pickFromKeys(inv, ["amount_currency", "Amount_currency", "paid_currency"]));
+  const cur = String(inv?.devise || inv?.currency || inv?.Currency || "").toUpperCase();
+  if (maybeOneCurrency > 0) {
+    if (!recordedUsd && cur === "USD") recordedUsd = maybeOneCurrency;
+    if (!recordedEur && cur === "EUR") recordedEur = maybeOneCurrency;
+  }
+
+  const usdRate = Number.isFinite(getUsdRate?.()) ? Number(getUsdRate()) : 0;
+  const eurRate = Number.isFinite(getEurRate?.()) ? Number(getEurRate()) : 0;
+
+  if (invoiceLyd <= MONEY_EPS) {
+    if (invoiceUsd > MONEY_EPS && usdRate > 0) {
+      invoiceLyd = normalizeMoney(invoiceUsd * usdRate);
+    } else if (invoiceEur > MONEY_EPS && eurRate > 0) {
+      invoiceLyd = normalizeMoney(invoiceEur * eurRate);
+    }
+  }
+
+  const recordedUsdLydExplicit =
+    toFiniteNumber(inv?.amount_currency_LYD) ??
+    toFiniteNumber(inv?.amount_currency_lyd) ??
+    toFiniteNumber(inv?.paid_currency_LYD) ??
+    toFiniteNumber(inv?.paid_currency_lyd) ??
+    null;
+  const recordedEurLydExplicit =
+    toFiniteNumber(inv?.amount_EUR_LYD) ??
+    toFiniteNumber(inv?.amount_EUR_lyd) ??
+    toFiniteNumber(inv?.paid_EUR_LYD) ??
+    toFiniteNumber(inv?.paid_EUR_lyd) ??
+    null;
+
+  const recordedUsdLyd = normalizeMoney(
+    recordedUsdLydExplicit !== null
+      ? recordedUsdLydExplicit
+      : recordedUsd * (usdRate > 0 ? usdRate : 0)
+  );
+  const recordedEurLyd = normalizeMoney(
+    recordedEurLydExplicit !== null
+      ? recordedEurLydExplicit
+      : recordedEur * (eurRate > 0 ? eurRate : 0)
+  );
+
+  const remainingUsdBackend = toFiniteNumber(
+    inv?.rest_of_moneyUSD ?? inv?.rest_of_money_usd
+  );
+  const remainingEurBackend = toFiniteNumber(
+    inv?.rest_of_moneyEUR ?? inv?.rest_of_money_eur
+  );
+  const remainingLydBackend = toFiniteNumber(
+    inv?.rest_of_money ?? inv?.rest_of_moneyLYD ?? inv?.rest_of_money_lyd
+  );
+
+  // ✅ Remaining per currency (cannot exceed invoice totals)
+  const remainingUsd =
+    remainingUsdBackend !== null && remainingUsdBackend > MONEY_EPS
+      ? clamp0(normalizeMoney(remainingUsdBackend))
+      : clamp0(normalizeMoney(invoiceUsd - recordedUsd));
+  const remainingEur =
+    remainingEurBackend !== null && remainingEurBackend > MONEY_EPS
+      ? clamp0(normalizeMoney(remainingEurBackend))
+      : clamp0(normalizeMoney(invoiceEur - recordedEur));
+
+  // ✅ Remaining LYD is LYD invoice minus LYD + equivalents (prefer backend remainder when present)
+  const remainingLyd =
+    remainingLydBackend !== null && remainingLydBackend >= 0
+      ? clamp0(normalizeMoney(remainingLydBackend))
+      : clamp0(
+          normalizeMoney(
+            invoiceLyd - (recordedLyd + recordedUsdLyd + recordedEurLyd)
+          )
+        );
+
+  return {
+    invoice: { lyd: invoiceLyd, usd: invoiceUsd, eur: invoiceEur },
+    recorded: { lyd: recordedLyd, usd: recordedUsd, eur: recordedEur, usdLyd: recordedUsdLyd, eurLyd: recordedEurLyd },
+    remaining: { lyd: remainingLyd, usd: remainingUsd, eur: remainingEur },
+    remainingLyd,
+    totalLyd: invoiceLyd,
+  };
+}, [closeInvoicePaymentSource, getUsdRate, getEurRate]);
+
+  const closePayNow = React.useMemo(() => {
+  const payLyd = normalizeMoney(parseAmt(closePayLydStr));
+  const payUsd = normalizeMoney(parseAmt(closePayUsdStr));
+  const payUsdLyd = normalizeMoney(parseAmt(closePayUsdLydStr));
+  const payEur = normalizeMoney(parseAmt(closePayEurStr));
+  const payEurLyd = normalizeMoney(parseAmt(closePayEurLydStr));
+
+  const payNowLydEquiv = normalizeMoney(payLyd + payUsdLyd + payEurLyd);
+
+  return { payLyd, payUsd, payUsdLyd, payEur, payEurLyd, payNowLydEquiv };
+}, [closePayLydStr, closePayUsdStr, closePayUsdLydStr, closePayEurStr, closePayEurLydStr]);
 
   const closeEntered = React.useMemo(() => {
     const lyd = normalizeMoney(parseAmt(closePayLydStr));
-    const usd = parseAmt(closePayUsdStr);
+    const usd = normalizeMoney(parseAmt(closePayUsdStr));
     const usdLyd = normalizeMoney(parseAmt(closePayUsdLydStr));
-    const eur = parseAmt(closePayEurStr);
+    const eur = normalizeMoney(parseAmt(closePayEurStr));
     const eurLyd = normalizeMoney(parseAmt(closePayEurLydStr));
-    const totalLydEquiv = normalizeMoney(lyd + usdLyd + eurLyd);
-    return { lyd, usd, usdLyd, eur, eurLyd, totalLydEquiv };
-  }, [closePayEurLydStr, closePayEurStr, closePayLydStr, closePayUsdLydStr, closePayUsdStr]);
 
-  // Close invoice validation: entered amount should not exceed what was recorded at invoice creation.
-  // Allow partial payment (less than recorded) or exact match, but never overpayment (more than recorded).
-  const lydDiff = closeEntered.lyd - closeTotals.recorded.lyd;
-  const usdDiff = closeEntered.usd - closeTotals.recorded.usd;
-  const eurDiff = closeEntered.eur - closeTotals.recorded.eur;
+    const totalLydEquiv = normalizeMoney(lyd + usdLyd + eurLyd);
+    const usdEquivMissing = usd > MONEY_EPS && usdLyd <= MONEY_EPS;
+    const eurEquivMissing = eur > MONEY_EPS && eurLyd <= MONEY_EPS;
+
+    return {
+      pay: { lyd, usd, eur, usdLyd, eurLyd },
+      lyd,
+      usd,
+      usdLyd,
+      eur,
+      eurLyd,
+      totalLydEquiv,
+      usdEquivMissing,
+      eurEquivMissing,
+    };
+  }, [
+    closePayLydStr,
+    closePayUsdStr,
+    closePayUsdLydStr,
+    closePayEurStr,
+    closePayEurLydStr,
+    parseAmt,
+  ]);
+
+  const closeUsdEquivMissing = closeEntered.usdEquivMissing;
+  const closeEurEquivMissing = closeEntered.eurEquivMissing;
+
+  const { usdDiff, eurDiff, lydDiff, closeMismatch, closeIsOverpay } = React.useMemo(() => {
+    // compare what user enters AGAINST REMAINING (not against recorded)
+    const usdDiff = normalizeMoney(closeTotals.recorded.usd - closeEntered.pay.usd);
+    const eurDiff = normalizeMoney(closeTotals.recorded.eur - closeEntered.pay.eur);
+    const lydDiff = normalizeMoney(closeTotals.recorded.lyd - closeEntered.totalLydEquiv);
+
+    const closeMismatch =
+      Math.abs(usdDiff) > 0.01 || Math.abs(eurDiff) > 0.01 || Math.abs(lydDiff) > 0.01;
+
+    // overpay = entered more than remaining → diff becomes negative
+    const closeIsOverpay = usdDiff < -0.01 || eurDiff < -0.01 || lydDiff < -0.01;
+
+    return { usdDiff, eurDiff, lydDiff, closeMismatch, closeIsOverpay };
+  }, [closeTotals, closeEntered]);
+
+  const alreadyPaid = closeTotals.recorded;
+
+  const paidAfter = React.useMemo(() => {
+    return {
+      lyd: normalizeMoney(alreadyPaid.lyd + closeEntered.pay.lyd),
+      usd: normalizeMoney(alreadyPaid.usd + closeEntered.pay.usd),
+      usdLyd: normalizeMoney(alreadyPaid.usdLyd + closeEntered.pay.usdLyd),
+      eur: normalizeMoney(alreadyPaid.eur + closeEntered.pay.eur),
+      eurLyd: normalizeMoney(alreadyPaid.eurLyd + closeEntered.pay.eurLyd),
+    };
+  }, [alreadyPaid, closeEntered]);
+
+  const invoiceTotals = closeTotals.invoice;
+
+  const remainingAfter = React.useMemo(() => {
+    // remaining is invoice totals - paid totals (per currency)
+    return {
+      lyd: clamp0(normalizeMoney(invoiceTotals.lyd - (paidAfter.lyd + paidAfter.usdLyd + paidAfter.eurLyd))),
+      usd: clamp0(normalizeMoney(invoiceTotals.usd - paidAfter.usd)),
+      eur: clamp0(normalizeMoney(invoiceTotals.eur - paidAfter.eur)),
+    };
+  }, [invoiceTotals, paidAfter]);
   
   // Check for overpayment: entered > recorded in any currency
-  const closeIsOverpay = lydDiff > moneyEps || usdDiff > moneyEps || eurDiff > moneyEps;
-  const closeIsRemainder = lydDiff < -moneyEps || usdDiff < -moneyEps || eurDiff < -moneyEps;
-  const closeMismatch = Math.abs(lydDiff) > moneyEps || Math.abs(usdDiff) > moneyEps || Math.abs(eurDiff) > moneyEps;
+  const closeIsRemainder = React.useMemo(() => {
+    return closeEntered.totalLydEquiv + 0.01 < closeTotals.remainingLyd;
+  }, [closeEntered.totalLydEquiv, closeTotals.remainingLyd]);
   
-  const closeUsdEquivMissing = closeEntered.usd > moneyEps && closeEntered.usdLyd <= moneyEps;
-  const closeEurEquivMissing = closeEntered.eur > moneyEps && closeEntered.eurLyd <= moneyEps;
-
   const closeCustomerDisplay = React.useMemo(() => {
     const inv = closeInvoice;
     if (!inv) return "";
@@ -3576,14 +4041,18 @@ useEffect(() => {
     return String(fallback || "").trim();
   }, [closeInvoice]);
 
-  // Remaining/remainder after reconciliation per currency.
-  const closeOverpayNow = { lyd: lydDiff, usd: usdDiff, eur: eurDiff };
-  const closeIsOverpayNow = closeIsOverpay;
-  const closeRemainingAfter = {
-    lyd: Math.max(0, normalizeMoney(closeTotals.recorded.lyd - closeEntered.lyd)),
-    usd: Math.max(0, closeTotals.recorded.usd - closeEntered.usd),
-    eur: Math.max(0, closeTotals.recorded.eur - closeEntered.eur),
-  };
+  const closeIsFullyPaidNow =
+    remainingAfter.lyd <= moneyEps &&
+    remainingAfter.usd <= moneyEps &&
+    remainingAfter.eur <= moneyEps;
+  
+  const closeRemainingAfter = React.useMemo(() => {
+    return {
+      lyd: clamp0(normalizeMoney(closeTotals.remaining.lyd - closeEntered.totalLydEquiv)),
+      usd: clamp0(normalizeMoney(closeTotals.remaining.usd - closeEntered.pay.usd)),
+      eur: clamp0(normalizeMoney(closeTotals.remaining.eur - closeEntered.pay.eur)),
+    };
+  }, [closeTotals.remaining, closeEntered]);
 
   const handleConfirmCloseInvoice = async () => {
     const inv = closeInvoice;
@@ -3591,7 +4060,7 @@ useEffect(() => {
     setCloseError("");
 
     console.log("[Close Invoice] Validation check:", {
-      closeIsOverpayNow,
+      closeIsOverpay,
       lydDiff,
       usdDiff,
       eurDiff,
@@ -3600,7 +4069,7 @@ useEffect(() => {
     });
 
     // Allow remainder, but never allow overpayment.
-    if (closeIsOverpayNow) {
+    if (closeIsOverpay) {
       console.error("[Close Invoice] Overpayment detected!");
       setCloseError("Overpayment detected. Reduce the entered amount.");
       return;
@@ -3631,11 +4100,11 @@ useEffect(() => {
     setCloseLoading(true);
     try {
       // For issued invoices, update payment amounts on each invoice row directly
-      const nextAmountLyd = normalizeMoney(Number(closeEntered.lyd) || 0);
-      const nextAmountUsd = normalizeMoney(Number(closeEntered.usd) || 0);
-      const nextAmountUsdLyd = normalizeMoney(Number(closeEntered.usdLyd) || 0);
-      const nextAmountEur = normalizeMoney(Number(closeEntered.eur) || 0);
-      const nextAmountEurLyd = normalizeMoney(Number(closeEntered.eurLyd) || 0);
+      const nextAmountLyd = paidAfter.lyd;
+      const nextAmountUsd = paidAfter.usd;
+      const nextAmountUsdLyd = paidAfter.usdLyd;
+      const nextAmountEur = paidAfter.eur;
+      const nextAmountEurLyd = paidAfter.eurLyd;
 
       console.log("[Close Invoice] Updating payment amounts on invoice rows...");
       
@@ -3697,296 +4166,204 @@ useEffect(() => {
     <Box sx={{ mt: 4 }}>
       <React.Fragment>
         {/* Filters row */}
-        <Box
-          sx={{
-            display: "flex",
-            alignItems: "center",
-            mb: 2,
-            gap: 2,
-            flexWrap: "wrap",
-          }}
-        >
-          <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel id="type-select-label">Type</InputLabel>
-            <Select
-              labelId="type-select-label"
-              multiple
-              value={selectedTypes}
-              label="Type"
-              onChange={(e) =>
-                setSelectedTypes(
-                  typeof e.target.value === "string"
-                    ? e.target.value.split(",")
-                    : (e.target.value as string[])
-                )
-              }
-              renderValue={(selected) => (
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                  {(selected as string[]).map((value) => (
-                    <Chip key={value} label={typeOptions.find(o => o.value === value)?.label || value} size="small" />
-                  ))}
-                </Box>
-              )}
+        <Card sx={{ mb: 2, borderRadius: 2, boxShadow: 1 }}>
+          <CardContent sx={{ p: 2 }}>
+            <Box
+              sx={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 2,
+                alignItems: "center",
+              }}
             >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="gold">Gold</MenuItem>
-              <MenuItem value="diamond">Diamond</MenuItem>
-              <MenuItem value="watches">Watch</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel id="sale-kind-label">Invoice classification</InputLabel>
-            <Select
-              labelId="sale-kind-label"
-              multiple
-              value={saleKinds}
-              label="Invoice classification"
-              onChange={(e) =>
-                setSaleKinds(
-                  typeof e.target.value === "string"
-                    ? e.target.value.split(",")
-                    : (e.target.value as string[])
-                )
-              }
-              renderValue={(selected) => (
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-                  {(selected as string[]).map((value) => (
-                    <Chip key={value} label={value} size="small" />
-                  ))}
-                </Box>
-              )}
-            >
-              <MenuItem value="All">All</MenuItem>
-              <MenuItem value="Chira">Chira</MenuItem>
-              <MenuItem value="Gift">Gift</MenuItem>
-              <MenuItem value="Wholesale">Wholesale</MenuItem>
-              <MenuItem value="Normal">Normal Sale</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="ps-select-label">Point of Sale</InputLabel>
-            <Select
-              labelId="ps-select-label"
-              value={selectedPs}
-              label="Point of Sale"
-              onChange={(e) => setSelectedPs(e.target.value as string)}
-              disabled={isUser}
-            >
-              <MenuItem value="all">All</MenuItem>
-              {psOptions.map((opt) => (
-                <MenuItem key={opt.Id_point} value={String(opt.Id_point)}>
-                  {opt.name_point}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+              {/* Type */}
+              <Box sx={{ flex: "1 1 220px", minWidth: 220, maxWidth: { md: 320 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="type-select-label">Type</InputLabel>
+                  <Select
+                    labelId="type-select-label"
+                    multiple
+                    value={selectedTypes}
+                    label="Type"
+                    onChange={(e) =>
+                      setSelectedTypes(
+                        typeof e.target.value === "string"
+                          ? e.target.value.split(",")
+                          : (e.target.value as string[])
+                      )
+                    }
+                    renderValue={(selected) => (
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                        {(selected as string[]).map((value) => (
+                          <Chip
+                            key={value}
+                            label={typeOptions.find((o) => o.value === value)?.label || value}
+                            size="small"
+                          />
+                        ))}
+                      </Box>
+                    )}
+                  >
+                    <MenuItem value="all">All</MenuItem>
+                    <MenuItem value="gold">Gold</MenuItem>
+                    <MenuItem value="diamond">Diamond</MenuItem>
+                    <MenuItem value="watches">Watch</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
 
-          <TextField
-            label="From"
-            type="date"
-            size="small"
-            sx={{ width: 140 }}
-            value={periodFrom}
-            onChange={(e) => setPeriodFrom(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-          <TextField
-            label="To"
-            type="date"
-            size="small"
-            sx={{ width: 140 }}
-            value={periodTo}
-            onChange={(e) => setPeriodTo(e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="payment-status-label">Payment status</InputLabel>
-            <Select
-              labelId="payment-status-label"
-              value={paymentStatus}
-              label="Payment status"
-              onChange={(e) => setPaymentStatus(e.target.value as any)}
-            >
-              <MenuItem value="all">All</MenuItem>
-              <MenuItem value="paid">Paid</MenuItem>
-              <MenuItem value="unpaid">Unpaid</MenuItem>
-              <MenuItem value="partial">Partially paid</MenuItem>
-            </Select>
-          </FormControl>
+              {/* Invoice classification */}
+              <Box sx={{ flex: "1 1 260px", minWidth: 240, maxWidth: { md: 360 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="sale-kind-label">Invoice classification</InputLabel>
+                  <Select
+                    labelId="sale-kind-label"
+                    multiple
+                    value={saleKinds}
+                    label="Invoice classification"
+                    onChange={(e) =>
+                      setSaleKinds(
+                        typeof e.target.value === "string"
+                          ? e.target.value.split(",")
+                          : (e.target.value as string[])
+                      )
+                    }
+                    renderValue={(selected) => (
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+                        {(selected as string[]).map((value) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
+                      </Box>
+                    )}
+                  >
+                    <MenuItem value="All">All</MenuItem>
+                    <MenuItem value="Chira">Chira</MenuItem>
+                    <MenuItem value="Gift">Gift</MenuItem>
+                    <MenuItem value="Wholesale">Wholesale</MenuItem>
+                    <MenuItem value="Normal">Normal Sale</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
 
-          {/* Rows-per-page selector moved to footer */}
+              {/* PS */}
+              <Box sx={{ flex: "1 1 220px", minWidth: 220, maxWidth: { md: 320 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="ps-select-label">Point of Sale</InputLabel>
+                  <Select
+                    labelId="ps-select-label"
+                    value={selectedPs}
+                    label="Point of Sale"
+                    onChange={(e) => setSelectedPs(e.target.value as string)}
+                    disabled={isUser}
+                  >
+                    <MenuItem value="all">All</MenuItem>
+                    {psOptions.map((opt) => (
+                      <MenuItem key={opt.Id_point} value={String(opt.Id_point)}>
+                        {opt.name_point}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
 
-          <Button
-            variant="contained"
-            color="info"
-            sx={{ ml: 2, fontWeight: 600, boxShadow: 2 }}
-            onClick={exportTableToHtml}
-            startIcon={<FileDownload />}
-          >
-            HTML
-          </Button>
-          <Button
-            variant="contained"
-            color="success"
-            sx={{ fontWeight: 600, boxShadow: 2 }}
-            onClick={exportTableToExcel}
-            startIcon={<FileCopyIcon />}
-          >
-            Excel
-          </Button>
-        </Box>
+              {/* Payment Status */}
+              <Box sx={{ flex: "1 1 220px", minWidth: 220, maxWidth: { md: 320 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="payment-status-label">Payment status</InputLabel>
+                  <Select
+                    labelId="payment-status-label"
+                    value={paymentStatus}
+                    label="Payment status"
+                    onChange={(e) => setPaymentStatus(e.target.value as any)}
+                  >
+                    <MenuItem value="all">All</MenuItem>
+                    <MenuItem value="paid">Paid</MenuItem>
+                    <MenuItem value="unpaid">Unpaid</MenuItem>
+                    <MenuItem value="partial">Partially paid</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
 
-        {/* Global Search + Rest Totals */}
-        <Box
-          sx={{
-            mb: 2,
-            display: "flex",
-            gap: 2,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <TextField
-            label="Search in all data"
-            size="small"
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            sx={{ minWidth: 260 }}
-          />
+              {/* Dates */}
+              <Box sx={{ flex: "1 1 160px", minWidth: 160, maxWidth: { md: 220 } }}>
+                <TextField
+                  label="From"
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={periodFrom}
+                  onChange={(e) => setPeriodFrom(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Box>
 
-          <TextField
-            label="Customer (name / ID / phone)"
-            size="small"
-            value={customerSearch}
-            onChange={(e) => setCustomerSearch(e.target.value)}
-            sx={{ minWidth: 260 }}
-          />
+              <Box sx={{ flex: "1 1 160px", minWidth: 160, maxWidth: { md: 220 } }}>
+                <TextField
+                  label="To"
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={periodTo}
+                  onChange={(e) => setPeriodTo(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Box>
 
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel id="sort-by-label">Sort By</InputLabel>
-            <Select
-              labelId="sort-by-label"
-              value={sortBy}
-              label="Sort By"
-              onChange={(e) => setSortBy(e.target.value as any)}
-            >
-              <MenuItem value="invoice_date">Invoice Date</MenuItem>
-              <MenuItem value="date_created">Date Created</MenuItem>
-              <MenuItem value="invoice_number">Invoice Number</MenuItem>
-              <MenuItem value="value">Value</MenuItem>
-            </Select>
-          </FormControl>
+              {/* Search */}
+              <Box sx={{ flex: "2 1 280px", minWidth: 240 }}>
+                <TextField
+                  label="Search in all data"
+                  size="small"
+                  fullWidth
+                  value={globalFilter}
+                  onChange={(e) => setGlobalFilter(e.target.value)}
+                />
+              </Box>
 
-          {sortBy === "value" && (
-            <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="sort-currency-label">Currency</InputLabel>
-              <Select
-                labelId="sort-currency-label"
-                value={sortCurrency}
-                label="Currency"
-                onChange={(e) => setSortCurrency(e.target.value as any)}
+              <Box sx={{ flex: "2 1 320px", minWidth: 260 }}>
+                <TextField
+                  label="Customer (name / ID / phone)"
+                  size="small"
+                  fullWidth
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                />
+              </Box>
+
+              {/* Export Buttons */}
+              <Box
+                sx={{
+                  flex: "1 1 360px",
+                  minWidth: 280,
+                  marginLeft: { md: "auto" },
+                }}
               >
-                <MenuItem value="LYD">LYD</MenuItem>
-                <MenuItem value="USD">USD</MenuItem>
-                <MenuItem value="EUR">EUR</MenuItem>
-              </Select>
-            </FormControl>
-          )}
-
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel id="sort-dir-label">Order</InputLabel>
-            <Select
-              labelId="sort-dir-label"
-              value={sortDir}
-              label="Order"
-              onChange={(e) => setSortDir(e.target.value as any)}
-            >
-              <MenuItem value="desc">High to Low / Newest</MenuItem>
-              <MenuItem value="asc">Low to High / Oldest</MenuItem>
-            </Select>
-          </FormControl>
-
-          <Box
-            sx={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 1,
-              flexWrap: "wrap",
-              borderRadius: 1,
-              p: 1,
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ fontWeight: "bold" }}>
-              Total unpaid:
-            </Typography>
-            <Box sx={{ display: "flex", flexDirection: "row", gap: 1.5, alignItems: "flex-start", flexWrap: "wrap" }}>
-              {totalRestLYD !== 0 && (() => {
-                const s = splitMoney2(totalRestLYD);
-                return (
-                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
-                    <Typography variant="subtitle2" sx={{ color: "#6a1b9a", fontWeight: 700 }}>
-                      LYD {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Typography>
-                  </Box>
-                );
-              })()}
-              {totalRestUSD !== 0 && (() => {
-                const s = splitMoney2(totalRestUSD);
-                return (
-                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
-                    <Typography variant="subtitle2" sx={{ color: "#1976d2", fontWeight: 700 }}>
-                      USD {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Typography>
-                  </Box>
-                );
-              })()}
-              {totalRestEUR !== 0 && (() => {
-                const s = splitMoney2(totalRestEUR);
-                return (
-                  <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: 120 }}>
-                    <Typography variant="subtitle2" sx={{ color: "#388e3c", fontWeight: 700 }}>
-                      EUR {Number(s.base).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </Typography>
-                  </Box>
-                );
-              })()}
+                <Box sx={{ display: "flex", gap: 1.5 }}>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    color="info"
+                    onClick={exportTableToHtml}
+                    startIcon={<FileDownload />}
+                    sx={{ fontWeight: 700 }}
+                  >
+                    HTML
+                  </Button>
+                  <Button
+                    fullWidth
+                    variant="contained"
+                    color="success"
+                    onClick={exportTableToExcel}
+                    startIcon={<FileCopyIcon />}
+                    sx={{ fontWeight: 700 }}
+                  >
+                    Excel
+                  </Button>
+                </Box>
+              </Box>
             </Box>
-            {totalRestLYD === 0 && totalRestUSD === 0 && totalRestEUR === 0 && (
-              <Typography variant="body2" sx={{ color: "#888" }}>
-                No outstanding payments
-              </Typography>
-            )}
-          </Box>
-
-          <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
-            Invoice Count: {summaryStats.invoiceCount}
-          </Typography>
-          <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
-            Item Count:{" "}
-            {summaryStats.itemCount}
-          </Typography>
-          {summaryStats.totalWeight !== 0 && (
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold", ml: 2 }}>
-              Total Weight (gram): {formatNumber(summaryStats.totalWeight)}
-            </Typography>
-          )}
-          {summaryStats.totalGold !== 0 && (
-            <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
-              Total (gold): {formatNumber(summaryStats.totalGold)} LYD
-            </Typography>
-          )}
-          {summaryStats.totalDiamond !== 0 && (
-            <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
-              Total (diamond): {formatNumber(summaryStats.totalDiamond)} USD
-            </Typography>
-          )}
-          {summaryStats.totalWatch !== 0 && (
-            <Typography variant="subtitle2" sx={{ fontWeight: "bold", ml: 2 }}>
-              Total (watches): {formatNumber(summaryStats.totalWatch)} USD
-            </Typography>
-          )}
-        </Box>
+          </CardContent>
+        </Card>
 
         {/* Cards container */}
         <Box id="export-table-container">
@@ -4183,38 +4560,41 @@ useEffect(() => {
               {/* Invoice Summary */}
               <Box>
                 <Typography variant="h6" sx={{ mb: 2 }}>Invoice Summary</Typography>
-                <Grid container spacing={2}>
-                  <Grid>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                  <Box sx={{ minWidth: 200 }}>
                     <Typography variant="body2" color="textSecondary">Customer</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', minWidth: 200 }}>
+                    <Typography variant="h6" sx={{ fontWeight: "bold" }}>
                       {closeCustomerDisplay || "—"}
                     </Typography>
-                  </Grid>
-                  <Grid>
+                  </Box>
+
+                  <Box sx={{ minWidth: 140 }}>
                     <Typography variant="body2" color="textSecondary">Invoice #</Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h5" sx={{ fontWeight: "bold" }}>
                       {closeInvoice?.num_fact}
                     </Typography>
-                  </Grid>
-                  <Grid>
+                  </Box>
+
+                  <Box sx={{ minWidth: 180 }}>
                     <Typography variant="body2" color="textSecondary">Total (LYD)</Typography>
-                    <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h5" sx={{ fontWeight: "bold" }}>
                       {formatWholeAmount(closeTotals.totalLyd)}
                     </Typography>
-                  </Grid>
-                  <Grid>
-                    <Typography variant="body2" color="textSecondary">Remaining (LYD)</Typography>
+                  </Box>
+
+                  <Box sx={{ minWidth: 220 }}>
+                    <Typography variant="body2" color="textSecondary">Remaining</Typography>
                     <Typography
                       variant="h5"
-                      sx={{
-                        fontWeight: 'bold',
-                        color: closeTotals.remainingLyd > 0 ? 'error.main' : 'success.main',
-                      }}
+                      sx={{ fontWeight: "bold", color: closeTotals.remainingLyd > 0 ? "error.main" : "success.main" }}
                     >
-                      {formatWholeAmount(closeTotals.remainingLyd)}
+                      LYD {formatWholeAmount(closeTotals.remainingLyd)}
                     </Typography>
-                  </Grid>
-                </Grid>
+                    <Typography variant="body2" color="textSecondary">
+                      USD {formatWholeAmount(closeTotals.remaining.usd)} · EUR {formatWholeAmount(closeTotals.remaining.eur)}
+                    </Typography>
+                  </Box>
+                </Box>
               </Box>
 
               <Divider />
@@ -4279,123 +4659,194 @@ useEffect(() => {
               {/* Payment Inputs */}
               <Box>
                 <Typography variant="h6" sx={{ mb: 2 }}>Amounts received</Typography>
-                <Grid container spacing={2}>
                   {/* LYD column */}
-                  <Grid>
-                    <Box sx={{ minWidth: 220 }}>
-                      <TextField
-                        label="Pay now (LYD)"
-                        value={closePayLydStr}
-                        onChange={(e) => setClosePayLydStr(e.target.value)}
-                        onBlur={() => {
-                          const v = parseAmt(closePayLydStr);
-                          setClosePayLydStr(v ? String(normalizeMoney(v)) : "");
-                        }}
-                        size="small"
-                        fullWidth
-                        inputMode="decimal"
-                        inputProps={{ pattern: "[0-9.,-]*" }}
-                        helperText="Enter amount in LYD"
-                      />
-                    </Box>
-                  </Grid>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                  <Box sx={{ minWidth: 220, flex: "1 1 220px" }}>
+                    <TextField
+                      label="Pay now (LYD)"
+                      value={closePayLydStr}
+                      onChange={(e) => setClosePayLydStr(e.target.value)}
+                      onBlur={() => {
+                        const v = parseAmt(closePayLydStr);
+                        setClosePayLydStr(v ? String(normalizeMoney(v)) : "");
+                      }}
+                      size="small"
+                      fullWidth
+                      inputMode="decimal"
+                      inputProps={{ pattern: "[0-9.,-]*" }}
+                      helperText="Enter amount in LYD"
+                    />
+                  </Box>
 
-                  {/* USD column: main + LYD equiv underneath */}
-                  <Grid>
-                    <Box sx={{ minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
-                      <TextField
-                        label="Pay now (USD)"
-                        value={closePayUsdStr}
-                        onChange={(e) => setClosePayUsdStr(e.target.value)}
-                        onBlur={() => {
-                          const usd = parseAmt(closePayUsdStr);
-                          const r = getUsdRate();
-                          setClosePayUsdStr(usd ? String(normalizeMoney(usd)) : "");
-                          if (
-                            usd > 0 &&
-                            (!parseAmt(closePayUsdLydStr) || parseAmt(closePayUsdLydStr) <= 0) &&
-                            Number.isFinite(r) &&
-                            r > 0
-                          ) {
-                            setClosePayUsdLydStr(String(normalizeMoney(usd * r)));
-                          }
-                        }}
-                        size="small"
-                        fullWidth
-                        inputMode="decimal"
-                        inputProps={{ pattern: "[0-9.,-]*" }}
-                        helperText="USD amount"
-                      />
-                      <TextField
-                        label="USD equiv (LYD)"
-                        value={closePayUsdLydStr}
-                        size="small"
-                        fullWidth
-                        inputMode="decimal"
-                        inputProps={{ pattern: "[0-9.,-]*" }}
-                        InputProps={{ readOnly: true }}
-                        helperText="LYD equivalent for USD (auto)"
-                      />
-                    </Box>
-                  </Grid>
+                  <Box sx={{ minWidth: 220, flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 1 }}>
+                    <TextField
+                      label="Pay now (USD)"
+                      value={closePayUsdStr}
+                      onChange={(e) => setClosePayUsdStr(e.target.value)}
+                      onBlur={() => {
+                        const usd = parseAmt(closePayUsdStr);
+                        const r = getUsdRate();
+                        setClosePayUsdStr(usd ? String(normalizeMoney(usd)) : "");
+                        if (
+                          usd > 0 &&
+                          (!parseAmt(closePayUsdLydStr) || parseAmt(closePayUsdLydStr) <= 0) &&
+                          Number.isFinite(r) &&
+                          r > 0
+                        ) {
+                          setClosePayUsdLydStr(String(normalizeMoney(usd * r)));
+                        }
+                      }}
+                      size="small"
+                      fullWidth
+                      inputMode="decimal"
+                      inputProps={{ pattern: "[0-9.,-]*" }}
+                      helperText="USD amount"
+                    />
+                    <TextField
+                      label="USD equiv (LYD)"
+                      value={closePayUsdLydStr}
+                      size="small"
+                      fullWidth
+                      InputProps={{ readOnly: true }}
+                      helperText="LYD equivalent for USD (auto)"
+                    />
+                  </Box>
 
-                  {/* EUR column: main + LYD equiv underneath */}
-                  <Grid>
-                    <Box sx={{ minWidth: 220, display: "flex", flexDirection: "column", gap: 1 }}>
-                      <TextField
-                        label="Pay now (EUR)"
-                        value={closePayEurStr}
-                        onChange={(e) => setClosePayEurStr(e.target.value)}
-                        onBlur={() => {
-                          const eur = parseAmt(closePayEurStr);
-                          const r = getEurRate();
-                          setClosePayEurStr(eur ? String(normalizeMoney(eur)) : "");
-                          if (
-                            eur > 0 &&
-                            (!parseAmt(closePayEurLydStr) || parseAmt(closePayEurLydStr) <= 0) &&
-                            Number.isFinite(r) &&
-                            r > 0
-                          ) {
-                            setClosePayEurLydStr(String(normalizeMoney(eur * r)));
-                          }
-                        }}
-                        size="small"
-                        fullWidth
-                        inputMode="decimal"
-                        inputProps={{ pattern: "[0-9.,-]*" }}
-                        helperText="EUR amount"
-                      />
-                      <TextField
-                        label="EUR equiv (LYD)"
-                        value={closePayEurLydStr}
-                        size="small"
-                        fullWidth
-                        inputMode="decimal"
-                        inputProps={{ pattern: "[0-9.,-]*" }}
-                        InputProps={{ readOnly: true }}
-                        helperText="LYD equivalent for EUR (auto)"
-                      />
-                    </Box>
-                  </Grid>
-                </Grid>
+                  <Box sx={{ minWidth: 220, flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 1 }}>
+                    <TextField
+                      label="Pay now (EUR)"
+                      value={closePayEurStr}
+                      onChange={(e) => setClosePayEurStr(e.target.value)}
+                      onBlur={() => {
+                        const eur = parseAmt(closePayEurStr);
+                        const r = getEurRate();
+                        setClosePayEurStr(eur ? String(normalizeMoney(eur)) : "");
+                        if (
+                          eur > 0 &&
+                          (!parseAmt(closePayEurLydStr) || parseAmt(closePayEurLydStr) <= 0) &&
+                          Number.isFinite(r) &&
+                          r > 0
+                        ) {
+                          setClosePayEurLydStr(String(normalizeMoney(eur * r)));
+                        }
+                      }}
+                      size="small"
+                      fullWidth
+                      inputMode="decimal"
+                      inputProps={{ pattern: "[0-9.,-]*" }}
+                      helperText="EUR amount"
+                    />
+                    <TextField
+                      label="EUR equiv (LYD)"
+                      value={closePayEurLydStr}
+                      size="small"
+                      fullWidth
+                      InputProps={{ readOnly: true }}
+                      helperText="LYD equivalent for EUR (auto)"
+                    />
+                  </Box>
+                </Box>
               </Box>
 
               <Divider />
               {/* Validation */}
               <Box>
                 <Typography variant="h6" sx={{ mb: 2 }}>Validation</Typography>
-                <Grid container spacing={2}>
-                  <Grid>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
+                  <Box sx={{ minWidth: 260 }}>
                     <Typography variant="body2" color="textSecondary">Entered Total (LYD equiv)</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', color: closeMismatch ? 'error.main' : 'textPrimary' }}>{closeEntered.totalLydEquiv.toLocaleString()}</Typography>
-                  </Grid>
-                  <Grid>
-                    <Typography variant="body2" color="textSecondary">Comparison to Recorded</Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 'bold', color: closeMismatch ? (closeIsOverpay ? 'error.main' : 'warning.main') : 'success.main' }}>
-                      {closeMismatch ? `${closeIsOverpay ? "Overpayment" : "Remainder"}: ${Math.abs(lydDiff) > 0.01 ? `LYD ${Math.abs(lydDiff).toLocaleString()}` : ''} ${Math.abs(usdDiff) > 0.01 ? `USD ${Math.abs(usdDiff).toLocaleString()}` : ''} ${Math.abs(eurDiff) > 0.01 ? `EUR ${Math.abs(eurDiff).toLocaleString()}` : ''}`.trim() : "Match"}
+                    <Typography
+                      variant="h6"
+                      sx={{ fontWeight: "bold", color: closeMismatch ? "error.main" : "text.primary" }}
+                    >
+                      LYD {formatWholeAmount(closeEntered.totalLydEquiv)}
                     </Typography>
-                  </Grid>
-                </Grid>
+                  </Box>
+
+                  <Box sx={{ minWidth: 360 }}>
+                    <Typography variant="body2" color="textSecondary">Comparison to Remaining</Typography>
+                    <Typography
+                      variant="h6"
+                      sx={{
+                        fontWeight: "bold",
+                        color: closeMismatch ? (closeIsOverpay ? "error.main" : "warning.main") : "success.main",
+                      }}
+                    >
+                      {closeMismatch
+                        ? `${closeIsOverpay ? "Overpayment" : "Remainder"}: ` +
+                          `${Math.abs(lydDiff) > 0.01 ? `LYD ${formatWholeAmount(Math.abs(lydDiff))} ` : ""}` +
+                          `${Math.abs(usdDiff) > 0.01 ? `USD ${formatWholeAmount(Math.abs(usdDiff))} ` : ""}` +
+                          `${Math.abs(eurDiff) > 0.01 ? `EUR ${formatWholeAmount(Math.abs(eurDiff))}` : ""}`.trim()
+                        : "Match"}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+              <Divider />
+              <Box>
+                <Typography variant="h6" sx={{ mb: 2 }}>Items</Typography>
+
+                {
+                closeLines.length === 0 ? (
+                  <Typography variant="body2" color="textSecondary">No items found.</Typography>
+                ) : (
+                  <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+                    {closeLines.map((l, idx) => {
+                      const name =
+                        l?.designation ||
+                        l?.name ||
+                        l?.Product?.name ||
+                        l?.Watch?.name ||
+                        l?.Diamond?.name ||
+                        l?.Gold?.name ||
+                        `Item ${idx + 1}`;
+
+                      const img = getItemImageUrl(l);
+                      const qty = getLineQty(l);
+                      const unit = getLineUnitPrice(l);
+                      const total = getLineTotal(l);
+
+                      return (
+                        <Card key={l?.id || l?.id_fact_details || idx} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+                          <Box sx={{ display: "flex", gap: 1.5, alignItems: "center" }}>
+                            <ImageWithFallback
+                              src={img}
+                              alt={name}
+                              size={52}
+                              onClick={() => {
+                                // keep your existing big image dialog behavior
+                                const srcToOpen = img || "";
+                                if (!srcToOpen) return;
+                                setImageDialogUrl(srcToOpen);
+                                setImageDialogOpen(true);
+                              }}
+                            />
+
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography sx={{ fontWeight: 800 }} noWrap>
+                                {name}
+                              </Typography>
+
+                              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                                <Typography variant="body2" color="textSecondary">
+                                  Qty: {qty}
+                                </Typography>
+
+                                <Typography variant="body2" color="textSecondary">
+                                  Unit: {unit > 0 ? formatWholeAmount(unit) : "—"}
+                                </Typography>
+
+                                <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                                  Line: {total > 0 ? formatWholeAmount(total) : "—"}
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </Box>
+                        </Card>
+                      );
+                    })}
+                    </Box>
+                )}
               </Box>
             </Box>
           </DialogContent>
@@ -4407,7 +4858,7 @@ useEffect(() => {
               variant="contained"
               color="error"
               onClick={handleConfirmCloseInvoice}
-              disabled={closeLoading || closeIsOverpayNow || closeUsdEquivMissing || closeEurEquivMissing}
+              disabled={closeLoading || closeIsOverpay || closeUsdEquivMissing || closeEurEquivMissing}
             >
               {closeLoading ? "Closing..." : "Close Invoice"}
             </Button>

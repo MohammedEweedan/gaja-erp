@@ -2615,6 +2615,7 @@ const DNew_I = () => {
   };
 
   const handleTotalsDialogUpdate = async () => {
+    alert("I am here");
     try {
       // ensure latest USD rate before totals update
       try { await fetchLastUsdRate(); } catch { }
@@ -2624,7 +2625,6 @@ const DNew_I = () => {
         const token = localStorage.getItem("token");
 
         // Determine invoice destination flags
-
         await axios.put(
           `/invoices/UpdateTotals/0`,
           {
@@ -2655,7 +2655,7 @@ const DNew_I = () => {
           {
             headers: { Authorization: `Bearer ${token}` },
           }
-        );
+        ).catch((error) => { console.error(error); });
         // After totals update, persist COMMENT to all current invoice rows (num_fact=0 for this ps+usr)
         try {
           const commentVal = editInvoice.COMMENT ?? "";

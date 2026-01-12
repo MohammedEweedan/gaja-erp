@@ -233,6 +233,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
   const commitLiveInputsToTotals = React.useCallback(() => {
     // Commit any in-progress string edits so issuance uses what the user typed.
     // Only commit when user has a non-empty value (so we don't overwrite existing values with 0).
+    alert("**********************" + editInvoice.client)
     const setIfPresent = (field: string, raw: string) => {
       const s = String(raw ?? "").trim();
       if (s === "") return;
@@ -252,8 +253,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       setEditInvoice((prev: any) => ({
         ...prev,
         // Ensure customer details are preserved
-        client: prev?.client || null,
-        Client: prev?.Client || null,
+        customer: editInvoice.client,
         tel_client: prev?.tel_client || "",
         // Ensure payment details are preserved
         amount_lyd: parseNumber(amountLydStr) || prev?.amount_lyd || 0,
@@ -829,7 +829,7 @@ const InvoiceTotalsDialog: React.FC<InvoiceTotalsDialogProps> = ({
       }
       setApprovalStatus("timeout");
       setApprovalPending(true);
-      window.alert("Approval check timed out. Please try again later.");
+      window.alert("Approval is still pending (polling timed out). You can try reaching out to management or try again later.");
     } finally {
       setApprovalPolling(false);
     }
