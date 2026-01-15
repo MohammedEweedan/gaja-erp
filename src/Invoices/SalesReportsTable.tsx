@@ -22,6 +22,7 @@ import {
   Grid,
   Tooltip,
   IconButton,
+  Collapse,
 } from "@mui/material";
 import axios from "../api";
 import LockIcon from "@mui/icons-material/Lock";
@@ -32,6 +33,8 @@ import { Link as RouterLink } from 'react-router-dom';
 import FileCopyIcon from "@mui/icons-material/FileCopy";
 import FileDownload from "@mui/icons-material/FileDownload";
 import EditIcon from "@mui/icons-material/Edit";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 
 import PrintInvoiceDialog from "../Invoices/ListCardInvoice/Gold Invoices/PrintInvoiceDialog";
 import ChiraReturnPage from "./ChiraReturnPage";
@@ -145,8 +148,9 @@ const formatWholeAmount = (value: any, opts?: { allowNegative?: boolean }) => {
   const raw = Number(value);
   if (!Number.isFinite(raw)) return "0";
   const normalized = opts?.allowNegative ? raw : Math.max(0, raw);
-  const rounded = normalized >= 0 ? Math.ceil(normalized) : Math.ceil(normalized);
-  return rounded.toLocaleString(undefined, {
+  // Remove decimals without changing the integer part (truncate toward 0).
+  const whole = Math.trunc(normalized);
+  return whole.toLocaleString(undefined, {
     maximumFractionDigits: 0,
     minimumFractionDigits: 0,
   });
@@ -433,9 +437,11 @@ const pickNumber = (...values: any[]): number => {
 const pickFromKeys = (obj: any, keys: string[]): number => {
   for (const k of keys) {
     const v = obj?.[k];
-    if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) {
-      return Number(v);
-    }
+    if (v === undefined || v === null || v === "") continue;
+    // Some endpoints return formatted numbers like "1,234.50". Handle that.
+    const raw = typeof v === "string" ? v.replace(/,/g, "").trim() : v;
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
   }
   return 0;
 };
@@ -580,6 +586,10 @@ type InvoicePaySummary = {
   paid: { lyd: number; usd: number; eur: number; usdLyd: number; eurLyd: number };
   remaining: { lyd: number; usd: number; eur: number; usdLyd: number; eurLyd: number };
 
+  // Optional: show discount/surcharge breakdown when available
+  totalBase?: { lyd: number; usd: number; eur: number };
+  adjustment?: { lyd: number; usd: number; eur: number };
+
   // for status
   isFullyPaid: boolean;
   isPartial: boolean;
@@ -593,7 +603,7 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
   // -----------------------------
   // TOTALS (DON'T REUSE LYD TOTAL AS USD!)
   // -----------------------------
-  const totalLyd = Number(row?.total_remise_final_lyd ?? row?.total_remise_final_LYD ?? 0) || 0;
+  const totalLydRaw = Number(row?.total_remise_final_lyd ?? row?.total_remise_final_LYD ?? 0) || 0;
 
   // These MUST come from real USD/EUR-total fields (or be 0).
   // Add/remove candidates to match your backend names.
@@ -602,8 +612,7 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
     row?.totalAmountUsd,
     row?.total_amount_usd,
     row?.total_remise_final_usd,
-    row?.total_currency_usd,
-    row?.total_remise_final // <-- keep LAST as legacy fallback
+    row?.total_currency_usd
   ) ?? 0;
 
   const totalEurCandidate = pickNumber(
@@ -621,20 +630,52 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
   const paidEur = Number(row?.amount_EUR ?? 0) || 0;
   const paidEurLyd = Number(row?.amount_EUR_LYD ?? 0) || 0;
 
-  // REST (backend)
-  const restLydBackend = Number(row?.rest_of_money ?? row?.rest_of_moneyLYD ?? row?.rest_of_money_lyd ?? 0) || 0;
-  const restUsdBackend = Number(row?.rest_of_moneyUSD ?? row?.rest_of_money_usd ?? 0) || 0;
-  const restEurBackend = Number(row?.rest_of_moneyEUR ?? row?.rest_of_money_eur ?? 0) || 0;
-  const restUsdLydBackend = Number(row?.rest_of_moneyUSD_LYD ?? row?.rest_of_money_usd_lyd ?? 0) || 0;
-  const restEurLydBackend = Number(row?.rest_of_moneyEUR_LYD ?? row?.rest_of_money_eur_lyd ?? 0) || 0;
+  const paidLydEquiv = n2(paidLyd + paidUsdLyd + paidEurLyd);
 
-  // ✅ Guard: if "total_remise_final" is just duplicating LYD total (common on gold),
-  // and there is no USD activity, treat USD total as 0.
-  const looksLikeDupedUsdTotal =
-    Math.abs(totalUsdCandidate - totalLyd) <= 0.5 && paidUsd <= MONEY_EPS && restUsdBackend <= MONEY_EPS;
+  // REST (backend) - use toFiniteNumber to handle formatted strings like "1,200"
+  const restLydBackend =
+    toFiniteNumber(row?.rest_of_money ?? row?.rest_of_moneyLYD ?? row?.rest_of_money_lyd) ?? 0;
+  const restUsdBackend = toFiniteNumber(row?.rest_of_moneyUSD ?? row?.rest_of_money_usd) ?? 0;
+  const restEurBackend = toFiniteNumber(row?.rest_of_moneyEUR ?? row?.rest_of_money_eur) ?? 0;
+  const restUsdLydBackend = toFiniteNumber(row?.rest_of_moneyUSD_LYD ?? row?.rest_of_money_usd_lyd) ?? 0;
+  const restEurLydBackend = toFiniteNumber(row?.rest_of_moneyEUR_LYD ?? row?.rest_of_money_eur_lyd) ?? 0;
 
-  const totalUsd = looksLikeDupedUsdTotal ? 0 : totalUsdCandidate;
-  const totalEur = totalEurCandidate;
+  // Base totals before discount/surcharge (best effort)
+  const totalBaseLyd = Number(row?.total_remise ?? row?.total_lyd ?? row?.totalAmountLYD ?? 0) || 0;
+  const totalBaseUsd = Number(row?.total_usd ?? row?.totalAmountUsd ?? row?.total_amount_usd ?? 0) || 0;
+  const totalBaseEur = Number(row?.total_eur ?? row?.totalAmountEur ?? row?.total_amount_eur ?? 0) || 0;
+
+  // Adjustment (discount or surcharge) in LYD (best effort)
+  const remiseValue = Number(row?.remise ?? 0) || 0;
+  const remisePerValue = Number(row?.remise_per ?? 0) || 0;
+  const adjustedFromPer = totalBaseLyd > 0 && remisePerValue ? (totalBaseLyd * remisePerValue) / 100 : 0;
+  const adjustmentLyd = n2(remiseValue > 0 ? -remiseValue : remisePerValue > 0 ? -adjustedFromPer : 0);
+
+  // Totals per currency (do NOT infer USD/EUR totals from LYD totals)
+  let totalLyd = totalLydRaw;
+  let totalUsd = totalUsdCandidate;
+  let totalEur = totalEurCandidate;
+
+  // Some invoices (especially Chira) come with missing totals (0) but have payments.
+  // Infer totals from paid + rest fields.
+  const hasAnyTotal = totalLyd > MONEY_EPS || totalUsd > MONEY_EPS || totalEur > MONEY_EPS;
+  if (!hasAnyTotal) {
+    // If rest_of_money equals paid LYD-equivalent (common backend bug), treat it as TOTAL not remaining.
+    const restLooksLikePaid = restLydBackend > MONEY_EPS && Math.abs(n2(restLydBackend) - paidLydEquiv) <= 1;
+    if (restLooksLikePaid) {
+      totalLyd = paidLydEquiv;
+    } else {
+      totalLyd = n2(paidLydEquiv + (restLydBackend > MONEY_EPS ? restLydBackend : 0));
+    }
+
+    // Infer USD/EUR totals only from their own fields if present
+    if (paidUsd > MONEY_EPS || restUsdBackend > MONEY_EPS) {
+      totalUsd = n2(paidUsd + (restUsdBackend > MONEY_EPS ? restUsdBackend : 0));
+    }
+    if (paidEur > MONEY_EPS || restEurBackend > MONEY_EPS) {
+      totalEur = n2(paidEur + (restEurBackend > MONEY_EPS ? restEurBackend : 0));
+    }
+  }
 
   // -----------------------------
   // REMAINING
@@ -643,15 +684,35 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
 
   if (isGold) {
     const computedLyd = Math.max(0, totalLyd - (paidLyd + paidUsdLyd + paidEurLyd));
+    // rest_of_money is unreliable for gold (often 1 LYD or discount). Only trust it if it matches computed.
+    const useRestLyd =
+      restLydBackend > MONEY_EPS &&
+      Math.abs(n2(restLydBackend) - n2(computedLyd)) <= 1; // tolerate rounding + backend truncation
+    remLyd = useRestLyd ? restLydBackend : computedLyd;
 
-    // Prefer backend remainder if it exists (because it is the recorded invoice state)
-    remLyd = restLydBackend > MONEY_EPS ? restLydBackend : computedLyd;
+    // User request: show backend rest fields for USD/EUR too when present.
+    // If backend fields are empty, fall back to computed per-currency remaining.
+    const computedUsd = Math.max(0, totalUsd - paidUsd);
+    const computedEur = Math.max(0, totalEur - paidEur);
+    remUsd = restUsdBackend > MONEY_EPS ? restUsdBackend : computedUsd;
+    remEur = restEurBackend > MONEY_EPS ? restEurBackend : computedEur;
+    remUsdLyd = restUsdLydBackend;
+    remEurLyd = restEurLydBackend;
+  } else {
+    // Non-gold (diamond/watches): remaining is per-currency face value.
+    // Prefer backend rest fields when present, otherwise compute from totals - paid.
+    const computedLyd = Math.max(0, totalLyd - paidLyd);
+    const computedUsd = Math.max(0, totalUsd - paidUsd);
+    const computedEur = Math.max(0, totalEur - paidEur);
 
-    // GOLD: USD/EUR are NOT invoice buckets. Hide them.
-    remUsd = 0;
-    remEur = 0;
-    remUsdLyd = 0;
-    remEurLyd = 0;
+    // If rest_of_money is equal to paid LYD-equivalent (backend bug), don't treat it as remaining.
+    const restLooksLikePaid = restLydBackend > MONEY_EPS && Math.abs(n2(restLydBackend) - paidLydEquiv) <= 1;
+    remLyd = restLooksLikePaid ? 0 : restLydBackend > MONEY_EPS ? restLydBackend : computedLyd;
+    remUsd = restUsdBackend > MONEY_EPS ? restUsdBackend : computedUsd;
+    remEur = restEurBackend > MONEY_EPS ? restEurBackend : computedEur;
+
+    remUsdLyd = restUsdLydBackend;
+    remEurLyd = restEurLydBackend;
   }
 
   const isFullyPaid = remLyd <= MONEY_EPS && remUsd <= MONEY_EPS && remEur <= MONEY_EPS;
@@ -663,6 +724,8 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
     total: { lyd: totalLyd, usd: totalUsd, eur: totalEur },
     paid: { lyd: paidLyd, usd: paidUsd, eur: paidEur, usdLyd: paidUsdLyd, eurLyd: paidEurLyd },
     remaining: { lyd: remLyd, usd: remUsd, eur: remEur, usdLyd: remUsdLyd, eurLyd: remEurLyd },
+    totalBase: { lyd: totalBaseLyd, usd: totalBaseUsd, eur: totalBaseEur },
+    adjustment: { lyd: adjustmentLyd, usd: 0, eur: 0 },
     isFullyPaid,
     isPartial,
   };
@@ -740,6 +803,8 @@ const SalesReportsTable = ({
   const [periodTo, setPeriodTo] = useState(currentDate);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [detailsData] = useState<any>(null);
+  const [showTopSummaryDetails, setShowTopSummaryDetails] = useState(false);
+  const [cardsPerRow, setCardsPerRow] = useState<number>(1);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
@@ -2151,7 +2216,7 @@ useEffect(() => {
       }
       const amountsHtml = `
                 <div style='font-size:12px;line-height:1.4'>
-                    ${total ? `<div><b style='color:#1976d2'>Total Invoice:</b> ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${isGold ? "LYD" : "USD"} ${pricePerG ? `<span style='margin-left:8px;color:#388e3c;font-weight:600'>Price/g: ${pricePerG}</span>` : ""}</div>` : ""}
+              ${total ? `<div><b style='color:#1976d2'>Total Invoice:</b> ${formatWholeAmount(total)} ${isGold ? "LYD" : "USD"} ${pricePerG ? `<span style='margin-left:8px;color:#388e3c;font-weight:600'>Price/g: ${pricePerG}</span>` : ""}</div>` : ""}
                     ${row.remise > 0 ? `<div><b style='color:#d32f2f'>Discount Value:</b> ${Number(row.remise).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
                     ${row.remise_per > 0 ? `<div><b style='color:#d32f2f'>Discount %:</b> ${Number(row.remise_per).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
                     ${row.amount_lyd ? `<div><b>LYD Due:</b> ${Number(row.amount_lyd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
@@ -2176,15 +2241,15 @@ useEffect(() => {
                 <tfoot>
                     <tr style="background:#e3f2fd;font-weight:bold;">
                         <td colspan="5" style="text-align:right;">Total Gold:</td>
-                        <td colspan="3" style="text-align:left; color:#1976d2;">${formatNumber(totalGold)} LYD</td>
+                      <td colspan="3" style="text-align:left; color:#1976d2;">${formatWholeAmount(totalGold)} LYD</td>
                     </tr>
                     <tr style="background:#e3f2fd;font-weight:bold;">
                         <td colspan="5" style="text-align:right;">Total Diamond:</td>
-                        <td colspan="3" style="text-align:left; color:#1976d2;">${formatNumber(totalDiamond)} USD</td>
+                      <td colspan="3" style="text-align:left; color:#1976d2;">${formatWholeAmount(totalDiamond)} USD</td>
                     </tr>
                     <tr style="background:#e3f2fd;font-weight:bold;">
                         <td colspan="5" style="text-align:right;">Total Watch:</td>
-                        <td colspan="3" style="text-align:left; color:#1976d2;">${formatNumber(totalWatch)} USD</td>
+                      <td colspan="3" style="text-align:left; color:#1976d2;">${formatWholeAmount(totalWatch)} USD</td>
                     </tr>
                     ${truncated ? `<tr><td colspan='8' style='text-align:center;font-size:12px;color:#d32f2f;'>Image export truncated after ${globalImageCount} images (max ${EXPORT_MAX_IMAGES}).</td></tr>` : ""}
                 </tfoot>
@@ -2437,7 +2502,7 @@ useEffect(() => {
       }
       const amountsHtml = `
                 <div style='font-size:12px;line-height:1.4'>
-                    ${total ? `<div><b style='color:#1976d2'>Total Invoice:</b> ${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${isGold ? "LYD" : "USD"} ${pricePerG ? `<span style='margin-left:8px;color:#388e3c;font-weight:600'>Price/g: ${pricePerG}</span>` : ""}</div>` : ""}
+              ${total ? `<div><b style='color:#1976d2'>Total Invoice:</b> ${formatWholeAmount(total)} ${isGold ? "LYD" : "USD"} ${pricePerG ? `<span style='margin-left:8px;color:#388e3c;font-weight:600'>Price/g: ${pricePerG}</span>` : ""}</div>` : ""}
                     ${row.remise > 0 ? `<div><b style='color:#d32f2f'>Discount Value:</b> ${Number(row.remise).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
                     ${row.remise_per > 0 ? `<div><b style='color:#d32f2f'>Discount %:</b> ${Number(row.remise_per).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
                     ${row.amount_lyd ? `<div><b>LYD Due:</b> ${Number(row.amount_lyd).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>` : ""}
@@ -2777,6 +2842,75 @@ useEffect(() => {
     });
     return base;
   }, [filteredData, sortBy, sortDir, sortCurrency]);
+
+  const topSummary = React.useMemo(() => {
+    return filteredData.reduce(
+      (acc, row) => {
+        const supplierType = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
+        const typeKey: "gold" | "diamond" | "watches" | "other" = supplierType.includes("gold")
+          ? "gold"
+          : supplierType.includes("diamond")
+            ? "diamond"
+            : supplierType.includes("watch")
+              ? "watches"
+              : "other";
+
+        const s = computeInvoicePaySummary(row);
+        acc.sales.lyd = normalizeMoney(acc.sales.lyd + (s.total?.lyd || 0));
+        acc.sales.usd = normalizeMoney(acc.sales.usd + (s.total?.usd || 0));
+        acc.sales.eur = normalizeMoney(acc.sales.eur + (s.total?.eur || 0));
+
+        acc.unpaid.lyd = normalizeMoney(acc.unpaid.lyd + (s.remaining?.lyd || 0));
+        acc.unpaid.usd = normalizeMoney(acc.unpaid.usd + (s.remaining?.usd || 0));
+        acc.unpaid.eur = normalizeMoney(acc.unpaid.eur + (s.remaining?.eur || 0));
+
+        acc.byType[typeKey].sales.lyd = normalizeMoney(acc.byType[typeKey].sales.lyd + (s.total?.lyd || 0));
+        acc.byType[typeKey].sales.usd = normalizeMoney(acc.byType[typeKey].sales.usd + (s.total?.usd || 0));
+        acc.byType[typeKey].sales.eur = normalizeMoney(acc.byType[typeKey].sales.eur + (s.total?.eur || 0));
+
+        acc.byType[typeKey].unpaid.lyd = normalizeMoney(acc.byType[typeKey].unpaid.lyd + (s.remaining?.lyd || 0));
+        acc.byType[typeKey].unpaid.usd = normalizeMoney(acc.byType[typeKey].unpaid.usd + (s.remaining?.usd || 0));
+        acc.byType[typeKey].unpaid.eur = normalizeMoney(acc.byType[typeKey].unpaid.eur + (s.remaining?.eur || 0));
+
+        const detailsArr: any[] = Array.isArray(row?._productDetails) ? row._productDetails : [];
+        acc.byType[typeKey].itemsSold += detailsArr.length;
+
+        // Total grams sold (gold): sum qty across all achats on the invoice
+        if (supplierType.includes("gold")) {
+          const achats: any[] = Array.isArray(row?.ACHATs) ? row.ACHATs : [];
+          for (const a of achats) {
+            const q = toFiniteNumber(a?.qty);
+            if (q !== null && q > 0) acc.totalGoldGrams += q;
+          }
+        }
+
+        return acc;
+      },
+      {
+        sales: { lyd: 0, usd: 0, eur: 0 },
+        unpaid: { lyd: 0, usd: 0, eur: 0 },
+        totalGoldGrams: 0,
+        byType: {
+          gold: { sales: { lyd: 0, usd: 0, eur: 0 }, unpaid: { lyd: 0, usd: 0, eur: 0 }, itemsSold: 0 },
+          diamond: { sales: { lyd: 0, usd: 0, eur: 0 }, unpaid: { lyd: 0, usd: 0, eur: 0 }, itemsSold: 0 },
+          watches: { sales: { lyd: 0, usd: 0, eur: 0 }, unpaid: { lyd: 0, usd: 0, eur: 0 }, itemsSold: 0 },
+          other: { sales: { lyd: 0, usd: 0, eur: 0 }, unpaid: { lyd: 0, usd: 0, eur: 0 }, itemsSold: 0 },
+        },
+      } as {
+        sales: { lyd: number; usd: number; eur: number };
+        unpaid: { lyd: number; usd: number; eur: number };
+        totalGoldGrams: number;
+        byType: Record<
+          "gold" | "diamond" | "watches" | "other",
+          {
+            sales: { lyd: number; usd: number; eur: number };
+            unpaid: { lyd: number; usd: number; eur: number };
+            itemsSold: number;
+          }
+        >;
+      }
+    );
+  }, [filteredData, normalizeMoney]);
   // Totals of "rest" fields for the currently filtered dataset
   const totalRestLYD = React.useMemo(() => {
     return filteredData.reduce((sum, row) => {
@@ -3784,7 +3918,7 @@ useEffect(() => {
 
   const closeTotals = React.useMemo(() => {
   const inv: any = closeInvoicePaymentSource;
-  console.log(inv)
+   
   if (!inv) {
     return {
       invoice: { lyd: 0, usd: 0, eur: 0 },
@@ -3800,8 +3934,12 @@ useEffect(() => {
     pickFromKeys(inv, [
       "total_remise_final_lyd",
       "total_remise_final_LYD",
+      "totalAmountLyd",
+      "total_amount_lyd",
       "total_lyd",
-      "totalAmountLYD",
+      "total_LYD",
+      // sometimes totals are only stored in the generic field
+      "total_remise_final",
     ])
   );
 
@@ -3964,17 +4102,21 @@ useEffect(() => {
   const closeEurEquivMissing = closeEntered.eurEquivMissing;
 
   const { usdDiff, eurDiff, lydDiff, closeMismatch, closeIsOverpay } = React.useMemo(() => {
+    const usdTol = 0.01;
+    const eurTol = 0.01;
+    // Business rule: if LYD remainder is < 1, treat it as 0 (rounding)
+    const lydTol = 1;
+
     // compare what user enters AGAINST REMAINING (not against recorded)
     const usdDiff = normalizeMoney(closeTotals.recorded.usd - closeEntered.pay.usd);
     const eurDiff = normalizeMoney(closeTotals.recorded.eur - closeEntered.pay.eur);
-    const lydDiff = normalizeMoney(closeTotals.recorded.lyd - closeEntered.totalLydEquiv);
+    // LYD comparison is based on invoice Total (LYD) vs Entered Total (LYD equiv)
+    const lydDiff = normalizeMoney(closeTotals.totalLyd - closeEntered.totalLydEquiv);
 
     const closeMismatch =
-      Math.abs(usdDiff) > 0.01 || Math.abs(eurDiff) > 0.01 || Math.abs(lydDiff) > 0.01;
-
+      Math.abs(usdDiff) > usdTol || Math.abs(eurDiff) > eurTol || Math.abs(lydDiff) > lydTol;
     // overpay = entered more than remaining → diff becomes negative
-    const closeIsOverpay = usdDiff < -0.01 || eurDiff < -0.01 || lydDiff < -0.01;
-
+    const closeIsOverpay = usdDiff < -usdTol || eurDiff < -eurTol || lydDiff < -lydTol;
     return { usdDiff, eurDiff, lydDiff, closeMismatch, closeIsOverpay };
   }, [closeTotals, closeEntered]);
 
@@ -3994,10 +4136,15 @@ useEffect(() => {
 
   const remainingAfter = React.useMemo(() => {
     // remaining is invoice totals - paid totals (per currency)
+    const lyd = clamp0(
+      normalizeMoney(invoiceTotals.lyd - (paidAfter.lyd + paidAfter.usdLyd + paidAfter.eurLyd))
+    );
+    const usd = clamp0(normalizeMoney(invoiceTotals.usd - paidAfter.usd));
+    const eur = clamp0(normalizeMoney(invoiceTotals.eur - paidAfter.eur));
     return {
-      lyd: clamp0(normalizeMoney(invoiceTotals.lyd - (paidAfter.lyd + paidAfter.usdLyd + paidAfter.eurLyd))),
-      usd: clamp0(normalizeMoney(invoiceTotals.usd - paidAfter.usd)),
-      eur: clamp0(normalizeMoney(invoiceTotals.eur - paidAfter.eur)),
+      lyd: lyd < 1 ? 0 : lyd,
+      usd,
+      eur,
     };
   }, [invoiceTotals, paidAfter]);
   
@@ -4047,10 +4194,13 @@ useEffect(() => {
     remainingAfter.eur <= moneyEps;
   
   const closeRemainingAfter = React.useMemo(() => {
+    const lyd = clamp0(normalizeMoney(closeTotals.remaining.lyd - closeEntered.totalLydEquiv));
+    const usd = clamp0(normalizeMoney(closeTotals.remaining.usd - closeEntered.pay.usd));
+    const eur = clamp0(normalizeMoney(closeTotals.remaining.eur - closeEntered.pay.eur));
     return {
-      lyd: clamp0(normalizeMoney(closeTotals.remaining.lyd - closeEntered.totalLydEquiv)),
-      usd: clamp0(normalizeMoney(closeTotals.remaining.usd - closeEntered.pay.usd)),
-      eur: clamp0(normalizeMoney(closeTotals.remaining.eur - closeEntered.pay.eur)),
+      lyd: lyd < 1 ? 0 : lyd,
+      usd,
+      eur,
     };
   }, [closeTotals.remaining, closeEntered]);
 
@@ -4099,52 +4249,82 @@ useEffect(() => {
 
     setCloseLoading(true);
     try {
-      // For issued invoices, update payment amounts on each invoice row directly
-      const nextAmountLyd = paidAfter.lyd;
-      const nextAmountUsd = paidAfter.usd;
-      const nextAmountUsdLyd = paidAfter.usdLyd;
-      const nextAmountEur = paidAfter.eur;
-      const nextAmountEurLyd = paidAfter.eurLyd;
+      // IMPORTANT:
+      // On close, do NOT update USD/EUR payment fields (they can be duplicated by SUM across invoice rows).
+      // Only persist IS_OK + remainders, via CloseNF so backend performs the update once.
 
-      console.log("[Close Invoice] Updating payment amounts on invoice rows...");
-      
-      // Update payment amounts on all rows of this invoice
-      if (closeInvoiceRows && closeInvoiceRows.length > 0) {
-        for (const row of closeInvoiceRows) {
-          try {
-            await axios.put(
-              `/invoices/Update/${row.id_fact}`,
-              {
-                amount_lyd: nextAmountLyd,
-                amount_currency: nextAmountUsd,
-                amount_currency_LYD: nextAmountUsdLyd,
-                amount_EUR: nextAmountEur,
-                amount_EUR_LYD: nextAmountEurLyd,
-              },
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              }
-            );
-          } catch (rowErr: any) {
-            console.warn(`[Close Invoice] Failed to update row ${row.id_fact}:`, rowErr);
-            // Continue with other rows even if one fails
-          }
-        }
-        console.log("[Close Invoice] Payment amounts updated on all invoice rows");
-      } else {
-        console.warn("[Close Invoice] No invoice rows found to update");
-      }
+      // Persist remainder based on invoice totals minus what user entered now.
+      // This avoids relying on any backend-stored "remaining" fields which may be 0/empty.
+      const clamp0 = (n: number) => (Number.isFinite(n) ? Math.max(0, n) : 0);
+
+      // IMPORTANT: equivalents may still be empty if the user didn't blur the input.
+      // Compute them here so remainder is persisted correctly.
+      const enteredPayLyd = clamp0(normalizeMoney(closeEntered.pay.lyd));
+      const enteredPayUsd = clamp0(normalizeMoney(closeEntered.pay.usd));
+      const enteredPayEur = clamp0(normalizeMoney(closeEntered.pay.eur));
+
+      const usdRate = Number.isFinite(getUsdRate?.()) ? Number(getUsdRate()) : 0;
+      const eurRate = Number.isFinite(getEurRate?.()) ? Number(getEurRate()) : 0;
+
+      const enteredPayUsdLyd = clamp0(
+        normalizeMoney(
+          closeEntered.pay.usdLyd > MONEY_EPS
+            ? closeEntered.pay.usdLyd
+            : enteredPayUsd > MONEY_EPS && usdRate > 0
+              ? enteredPayUsd * usdRate
+              : 0
+        )
+      );
+
+      const enteredPayEurLyd = clamp0(
+        normalizeMoney(
+          closeEntered.pay.eurLyd > MONEY_EPS
+            ? closeEntered.pay.eurLyd
+            : enteredPayEur > MONEY_EPS && eurRate > 0
+              ? enteredPayEur * eurRate
+              : 0
+        )
+      );
+
+      const enteredTotalLydEquiv = clamp0(
+        normalizeMoney(enteredPayLyd + enteredPayUsdLyd + enteredPayEurLyd)
+      );
+      const nextRestLyd = (() => {
+        const v = clamp0(normalizeMoney(closeTotals.totalLyd - enteredTotalLydEquiv));
+        return v < 1 ? 0 : v;
+      })();
+      const nextRestUsd = clamp0(normalizeMoney(closeTotals.invoice.usd - enteredPayUsd));
+      const nextRestEur = clamp0(normalizeMoney(closeTotals.invoice.eur - enteredPayEur));
+
+      const closeParams = {
+        ps: psParam,
+        usr: usrParam,
+        num_fact: numFactParam,
+        MakeCashVoucher: String(!!closeMakeCashVoucher),
+        Type: String(inv?.type ?? inv?.Type ?? ""),
+        rest_of_money: nextRestLyd,
+        rest_of_moneyUSD: nextRestUsd,
+        rest_of_moneyEUR: nextRestEur,
+      };
 
       // Close invoice (triggers GL)
       console.log("[Close Invoice] Calling CloseNF endpoint...");
-      const closeRes = await axios.get(`/invoices/CloseNF`, {
-        params: {
-          ps: psParam,
-          usr: usrParam,
-          num_fact: numFactParam,
-          MakeCashVoucher: String(!!closeMakeCashVoucher),
-          Type: String(inv?.type ?? inv?.Type ?? ""),
+      console.log("[Close Invoice] Totals vs Entered:", {
+        invoice: closeTotals.invoice,
+        totalLyd: closeTotals.totalLyd,
+        entered: {
+          lyd: enteredPayLyd,
+          usd: enteredPayUsd,
+          usdLyd: enteredPayUsdLyd,
+          eur: enteredPayEur,
+          eurLyd: enteredPayEurLyd,
         },
+        enteredTotalLydEquiv,
+        computedRest: { lyd: nextRestLyd, usd: nextRestUsd, eur: nextRestEur },
+      });
+      console.log("[Close Invoice] CloseNF params:", closeParams);
+      const closeRes = await axios.get(`/invoices/CloseNF`, {
+        params: closeParams,
         headers: { Authorization: `Bearer ${token}` },
       });
       console.log("[Close Invoice] CloseNF response:", closeRes.data);
@@ -4339,6 +4519,23 @@ useEffect(() => {
                 }}
               >
                 <Box sx={{ display: "flex", gap: 1.5 }}>
+                  <FormControl size="small" sx={{ minWidth: 160 }}>
+                    <InputLabel id="cards-per-row-label">Cards / Row</InputLabel>
+                    <Select
+                      labelId="cards-per-row-label"
+                      value={cardsPerRow}
+                      label="Cards / Row"
+                      onChange={(e) => {
+                        const v = Number(e.target.value) || 1;
+                        setCardsPerRow(Math.min(4, Math.max(1, v)));
+                      }}
+                    >
+                      <MenuItem value={1}>1</MenuItem>
+                      <MenuItem value={2}>2</MenuItem>
+                      <MenuItem value={3}>3</MenuItem>
+                      <MenuItem value={4}>4</MenuItem>
+                    </Select>
+                  </FormControl>
                   <Button
                     fullWidth
                     variant="contained"
@@ -4365,6 +4562,86 @@ useEffect(() => {
           </CardContent>
         </Card>
 
+        <Card sx={{ mb: 2, borderRadius: 2, boxShadow: 1 }}>
+          <CardContent sx={{ p: 2 }}>
+            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start" }}>
+              <Box sx={{ minWidth: 220 }}>
+                <Typography variant="body2" color="textSecondary">Total gold grams sold</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  {formatNumber(topSummary.totalGoldGrams)} g
+                </Typography>
+              </Box>
+
+              <Box sx={{ minWidth: 260 }}>
+                <Typography variant="body2" color="textSecondary">Sales</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                  LYD {formatWholeAmount(topSummary.sales.lyd)}
+                </Typography>
+                {(topSummary.sales.usd > MONEY_EPS || topSummary.sales.eur > MONEY_EPS) && (
+                  <Typography variant="body2" color="textSecondary">
+                    USD {formatWholeAmount(topSummary.sales.usd)} • EUR {formatWholeAmount(topSummary.sales.eur)}
+                  </Typography>
+                )}
+              </Box>
+
+              <Box sx={{ minWidth: 260 }}>
+                <Typography variant="body2" color="textSecondary">Unpaid totals</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800, color: topSummary.unpaid.lyd > MONEY_EPS ? "error.main" : "text.primary" }}>
+                  LYD {formatWholeAmount(topSummary.unpaid.lyd)}
+                </Typography>
+                {(topSummary.unpaid.usd > MONEY_EPS || topSummary.unpaid.eur > MONEY_EPS) && (
+                  <Typography variant="body2" color="textSecondary">
+                    USD {formatWholeAmount(topSummary.unpaid.usd)} • EUR {formatWholeAmount(topSummary.unpaid.eur)}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+
+            <Box sx={{ mt: 1.5, display: "flex", justifyContent: "flex-end" }}>
+              <Button
+                size="small"
+                variant="text"
+                onClick={() => setShowTopSummaryDetails((v) => !v)}
+                startIcon={showTopSummaryDetails ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                sx={{ textTransform: "none", fontWeight: 700 }}
+              >
+                {showTopSummaryDetails ? "Hide breakdown" : "Show breakdown"}
+              </Button>
+            </Box>
+
+            <Collapse in={showTopSummaryDetails} timeout="auto" unmountOnExit>
+              <Box sx={{ mt: 1.5 }}>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                  Items sold (Gold / Diamond / Watches)
+                </Typography>
+                <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>
+                  {topSummary.byType.gold.itemsSold} / {topSummary.byType.diamond.itemsSold} / {topSummary.byType.watches.itemsSold}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Gold sales: LYD {formatWholeAmount(topSummary.byType.gold.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.gold.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.gold.sales.eur)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Diamond sales: LYD {formatWholeAmount(topSummary.byType.diamond.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.diamond.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.diamond.sales.eur)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Watches sales: LYD {formatWholeAmount(topSummary.byType.watches.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.watches.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.watches.sales.eur)}
+                </Typography>
+                <Box sx={{ mt: 1 }}>
+                  <Typography variant="body2" color="textSecondary">
+                    Unpaid — Gold: LYD {formatWholeAmount(topSummary.byType.gold.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.gold.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.gold.unpaid.eur)}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Unpaid — Diamond: LYD {formatWholeAmount(topSummary.byType.diamond.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.diamond.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.diamond.unpaid.eur)}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary">
+                    Unpaid — Watches: LYD {formatWholeAmount(topSummary.byType.watches.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.watches.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.watches.unpaid.eur)}
+                  </Typography>
+                </Box>
+              </Box>
+            </Collapse>
+          </CardContent>
+        </Card>
+
         {/* Cards container */}
         <Box id="export-table-container">
           {loading ? (
@@ -4373,8 +4650,12 @@ useEffect(() => {
             <>
               <Box
                 sx={{
-                  display: "flex",
-                  flexDirection: "column",
+                  display: "grid",
+                  gridTemplateColumns: {
+                    xs: "repeat(1, minmax(0, 1fr))",
+                    sm: `repeat(${Math.min(cardsPerRow, 2)}, minmax(0, 1fr))`,
+                    md: `repeat(${cardsPerRow}, minmax(0, 1fr))`,
+                  },
                   gap: 3,
                   pb: 1,
                 }}
@@ -4388,68 +4669,62 @@ useEffect(() => {
               )}
 
               {/* Pagination controls */}
-              {pageCount > 1 && (
-                <Box
-                  sx={{
-                    mt: 2,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 2,
-                  }}
-                >
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={safePageIndex === 0}
-                    onClick={() =>
-                      setPageIndex((prev) => Math.max(0, prev - 1))
-                    }
-                  >
-                    Prev
-                  </Button>
-                  <Typography sx={{ fontSize: 13 }}>
-                    Page {safePageIndex + 1} of {pageCount}
-                  </Typography>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={safePageIndex >= pageCount - 1}
-                    onClick={() =>
-                      setPageIndex((prev) => Math.min(pageCount - 1, prev + 1))
-                    }
-                  >
-                    Next
-                  </Button>
-
-                  {/* Rows-per-page selector placed next to pagination controls */}
-                  <FormControl size="small" sx={{ minWidth: 160, ml: 2 }}>
-                    <InputLabel id="rows-per-page-label">
-                      Rows / Page
-                    </InputLabel>
-                    <Select
-                      labelId="rows-per-page-label"
-                      value={pageSize}
-                      label="Rows / Page"
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        // support 'All' expressed as a numeric value already computed
-                        const v = Number(raw) || 1;
-                        setPageSize(v);
-                        setPageIndex(0);
-                      }}
+              <Box
+                sx={{
+                  mt: 2,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 2,
+                  flexWrap: "wrap",
+                }}
+              >
+                {pageCount > 1 && (
+                  <>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={safePageIndex === 0}
+                      onClick={() => setPageIndex((prev) => Math.max(0, prev - 1))}
                     >
-                      <MenuItem value={5}>5</MenuItem>
-                      <MenuItem value={10}>10</MenuItem>
-                      <MenuItem value={50}>50</MenuItem>
-                      <MenuItem value={100}>100</MenuItem>
-                      <MenuItem value={Math.max(1, filteredData.length)}>
-                        All
-                      </MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-              )}
+                      Prev
+                    </Button>
+                    <Typography sx={{ fontSize: 13 }}>
+                      Page {safePageIndex + 1} of {pageCount}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      disabled={safePageIndex >= pageCount - 1}
+                      onClick={() => setPageIndex((prev) => Math.min(pageCount - 1, prev + 1))}
+                    >
+                      Next
+                    </Button>
+                  </>
+                )}
+
+                {/* Rows-per-page selector stays visible even when there is only 1 page */}
+                <FormControl size="small" sx={{ minWidth: 160 }}>
+                  <InputLabel id="rows-per-page-label">Rows / Page</InputLabel>
+                  <Select
+                    labelId="rows-per-page-label"
+                    value={pageSize}
+                    label="Rows / Page"
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const v = Number(raw) || 1;
+                      setPageSize(v);
+                      setPageIndex(0);
+                    }}
+                  >
+                    <MenuItem value={5}>5</MenuItem>
+                    <MenuItem value={10}>10</MenuItem>
+                    <MenuItem value={50}>50</MenuItem>
+                    <MenuItem value={100}>100</MenuItem>
+                    <MenuItem value={Math.max(1, filteredData.length)}>All</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
             </>
           )}
         </Box>
@@ -4774,7 +5049,7 @@ useEffect(() => {
                     >
                       {closeMismatch
                         ? `${closeIsOverpay ? "Overpayment" : "Remainder"}: ` +
-                          `${Math.abs(lydDiff) > 0.01 ? `LYD ${formatWholeAmount(Math.abs(lydDiff))} ` : ""}` +
+                          `${Math.abs(lydDiff) > 1 ? `LYD ${formatWholeAmount(Math.abs(lydDiff))} ` : ""}` +
                           `${Math.abs(usdDiff) > 0.01 ? `USD ${formatWholeAmount(Math.abs(usdDiff))} ` : ""}` +
                           `${Math.abs(eurDiff) > 0.01 ? `EUR ${formatWholeAmount(Math.abs(eurDiff))}` : ""}`.trim()
                         : "Match"}

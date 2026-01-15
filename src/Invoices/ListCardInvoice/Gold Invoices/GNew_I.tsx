@@ -2614,99 +2614,105 @@ const DNew_I = () => {
     }
   };
 
-  const handleTotalsDialogUpdate = async () => {
-    alert("I am here");
-    try {
-      // ensure latest USD rate before totals update
-      try { await fetchLastUsdRate(); } catch { }
-      try { await fetchGoldSpot(); } catch { }
-      setIsSaving(true);
-      try {
-        const token = localStorage.getItem("token");
+  const persistTotalsOnly = async () => {
+    // ensure latest USD rate before totals update
+    try { await fetchLastUsdRate(); } catch { }
+    try { await fetchGoldSpot(); } catch { }
 
-        // Determine invoice destination flags
-        await axios.put(
-          `/invoices/UpdateTotals/0`,
-          {
-            total_remise_final: totalsDialog.total_remise_final,
-            total_remise_final_lyd: totalsDialog.total_remise_final_lyd,
-            amount_currency: totalsDialog.amount_currency,
-            amount_lyd: totalsDialog.amount_lyd,
-            amount_EUR: totalsDialog.amount_EUR,
-            amount_currency_LYD: totalsDialog.amount_currency_LYD,
-            amount_EUR_LYD: totalsDialog.amount_EUR_LYD,
-            remise: totalsDialog.remise,
-            remise_per: totalsDialog.remise_per,
-            num_fact: 0,
-            usr: Cuser,
-            ps: ps,
-            customer: editInvoice.client,
-            tel_client: (editInvoice as any).tel_client || editInvoice.Client?.tel_client || "",
-            sm: editInvoice.SourceMark,
-            is_chira: editInvoice.is_chira,
-            IS_WHOLE_SALE: editInvoice.IS_WHOLE_SALE,
-            COMMENT: editInvoice.COMMENT ?? "",
-            // Ensure all essential fields are included
-            date_fact: editInvoice.date_fact || new Date().toISOString().split('T')[0],
-            mode_fact: editInvoice.mode_fact || "Debitor",
-            phone_client: (editInvoice as any).phone_client || editInvoice.Client?.tel_client || "",
-            accept_discount: editInvoice.accept_discount ?? false,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        ).catch((error) => { console.error(error); });
-        // After totals update, persist COMMENT to all current invoice rows (num_fact=0 for this ps+usr)
-        try {
-          const commentVal = editInvoice.COMMENT ?? "";
-          if (commentVal && datainv && datainv.length) {
-            const token2 = localStorage.getItem("token");
-            const rowsToUpdate = datainv.filter(inv => inv.num_fact === 0 && String(inv.ps) === String(ps) && String(inv.usr) === String(Cuser));
-            for (const inv of rowsToUpdate) {
-              try {
-                await axios.put(
-                  `/invoices/Update/${inv.id_fact}`,
-                  { COMMENT: commentVal },
-                  { headers: { Authorization: `Bearer ${token2}` } }
-                );
-              } catch { /* continue on single-row failure */ }
+    setIsSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+
+      await axios.put(
+        `/invoices/UpdateTotals/0`,
+        {
+          total_remise_final: totalsDialog.total_remise_final,
+          total_remise_final_lyd: totalsDialog.total_remise_final_lyd,
+          amount_currency: totalsDialog.amount_currency,
+          amount_lyd: totalsDialog.amount_lyd,
+          amount_EUR: totalsDialog.amount_EUR,
+          amount_currency_LYD: totalsDialog.amount_currency_LYD,
+          amount_EUR_LYD: totalsDialog.amount_EUR_LYD,
+          remise: totalsDialog.remise,
+          remise_per: totalsDialog.remise_per,
+          num_fact: 0,
+          usr: Cuser,
+          ps: ps,
+          customer: editInvoice.client,
+          tel_client: (editInvoice as any).tel_client || editInvoice.Client?.tel_client || "",
+          sm: editInvoice.SourceMark,
+          is_chira: editInvoice.is_chira,
+          IS_WHOLE_SALE: editInvoice.IS_WHOLE_SALE,
+          COMMENT: editInvoice.COMMENT ?? "",
+          // Ensure all essential fields are included
+          date_fact: editInvoice.date_fact || new Date().toISOString().split("T")[0],
+          mode_fact: editInvoice.mode_fact || "Debitor",
+          phone_client: (editInvoice as any).phone_client || editInvoice.Client?.tel_client || "",
+          accept_discount: editInvoice.accept_discount ?? false,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      // After totals update, persist COMMENT to all current invoice rows (num_fact=0 for this ps+usr)
+      try {
+        const commentVal = editInvoice.COMMENT ?? "";
+        if (commentVal && datainv && datainv.length) {
+          const token2 = localStorage.getItem("token");
+          const rowsToUpdate = datainv.filter(
+            (inv) =>
+              inv.num_fact === 0 &&
+              String(inv.ps) === String(ps) &&
+              String(inv.usr) === String(Cuser)
+          );
+          for (const inv of rowsToUpdate) {
+            try {
+              await axios.put(
+                `/invoices/Update/${inv.id_fact}`,
+                { COMMENT: commentVal },
+                { headers: { Authorization: `Bearer ${token2}` } }
+              );
+            } catch {
+              /* continue on single-row failure */
             }
           }
-        } catch { /* ignore comment bulk update errors */ }
-        //   setSnackbar({ open: true, message: 'Invoice totals updated successfully', severity: 'success' });
-        setTotalsDialog((prev) => ({ ...prev, open: false }));
-
-        // Refresh to ensure we have latest draft rows.
-        let serverItems: Invoice[] = [];
-        try {
-          serverItems = await fetchDataINV();
-        } catch { }
-
-        // No approval needed: issue invoice immediately.
-        await handleAddNew();
-      } catch (error) {
-        console.error("[handleTotalsDialogUpdate] Error:", error);
-        const errorMsg = (error as any)?.response?.data?.message || 
-                        (error as any)?.response?.data?.error || 
-                        (error as any)?.message || 
-                        "Failed to update invoice totals";
-        console.error("[handleTotalsDialogUpdate] Error details:", {
-          status: (error as any)?.response?.status,
-          data: (error as any)?.response?.data,
-          url: `/invoices/UpdateTotals/0`,
-        });
-        setSnackbar({
-          open: true,
-          message: errorMsg,
-          severity: "error",
-        });
-      } finally {
-        setIsSaving(false);
+        }
+      } catch {
+        /* ignore comment bulk update errors */
       }
 
-      // setShouldOpenPrintDialog(true); // Set flag to open print dialog after data is up-to-date and dialog is closed
+      setTotalsDialog((prev) => ({ ...prev, open: false }));
     } catch (error) {
-      console.error("[handleTotalsDialogUpdate] Outer catch:", error);
+      console.error("[persistTotalsOnly] Error:", error);
+      const errorMsg =
+        (error as any)?.response?.data?.message ||
+        (error as any)?.response?.data?.error ||
+        (error as any)?.message ||
+        "Failed to update invoice totals";
+      setSnackbar({ open: true, message: errorMsg, severity: "error" });
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Request Approval: update totals only (do NOT issue invoice number)
+  const handleTotalsDialogUpdateForApproval = async () => {
+    try {
+      await persistTotalsOnly();
+    } catch {
+      // errors already surfaced via snackbar
+    }
+  };
+
+  // Confirm Checkout: update totals then issue invoice
+  const handleTotalsDialogUpdate = async () => {
+    try {
+      await persistTotalsOnly();
+      await handleAddNew();
+    } catch {
+      // errors already surfaced via snackbar
     }
   };
 
@@ -5815,6 +5821,7 @@ const DNew_I = () => {
                 onChange={handleTotalsDialogChange}
                 onClose={handleTotalsDialogClose}
                 onUpdate={handleTotalsDialogUpdate}
+                onUpdateTotalsOnly={handleTotalsDialogUpdateForApproval}
                 Sm={Sm}
                 customers={customers}
                 editInvoice={editInvoice}
