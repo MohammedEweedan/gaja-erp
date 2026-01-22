@@ -1,6 +1,5 @@
 import React, { forwardRef, useEffect, useState, useMemo } from "react";
 import { useCallback } from "react";
-import QRCode from "react-qr-code";
 import {
   Box,
   Typography,
@@ -9,6 +8,8 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  Divider,
+  Chip,
 } from "@mui/material";
 import { Invoice, Client } from "./PrintInvoiceDialog";
 import axios from "../../../api";
@@ -76,16 +77,29 @@ interface InvoicePrintData {
   remise_per: number;
 }
 
-interface Props {
+export interface Props {
   data: InvoicePrintData;
   num_fact?: number; // Add num_fact as an optional prop
   showImage?: boolean; // Add showImage prop
   showGoldUnitPrices?: boolean;
+  showDiscountValues?: boolean;
+  showSurchargeValues?: boolean;
   createdBy?: string; // creator name passed from parent (SalesReportsTable -> PrintInvoiceDialog)
 }
 
 const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
-  ({ data, num_fact, showImage = true, showGoldUnitPrices = true, createdBy }, ref) => {
+  (
+    {
+      data,
+      num_fact,
+      showImage = true,
+      showGoldUnitPrices = true,
+      showDiscountValues = true,
+      showSurchargeValues = true,
+      createdBy,
+    },
+    ref
+  ) => {
     const {
       TotalAmountFinal,
       invoice,
@@ -140,6 +154,39 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
 
     const getPreferredImageKey = (kind: "gold" | "diamond" | "watch", id: any) =>
       `prefImg:${kind}:${String(id ?? "").trim()}`;
+
+    const canonicalizePrefUrl = React.useCallback(
+      (rawUrl: string, kind: "gold" | "diamond" | "watch", idKey: any): string => {
+        if (!rawUrl) return "";
+        try {
+          let u = String(rawUrl);
+          // Remove token query param for stable comparisons
+          u = u.replace(/([?&])token=[^&]*(&?)/i, (_m, p1, p2) => (p2 ? p1 : ""));
+          u = u.replace(/[?&]$/g, "");
+
+          // For watch, normalize common legacy/alternate paths into /images/watch/<id>/<file>
+          if (kind === "watch" && idKey != null) {
+            try {
+              const basePart = u.split("?")[0];
+              const fileName = basePart.split("/").pop() || "";
+              const id = encodeURIComponent(String(idKey));
+              if (fileName) {
+                u = `/images/watch/${id}/${encodeURIComponent(fileName)}`;
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          // Canonical form: pathname only (stable across origins)
+          const urlObj = new URL(u, window.location.origin);
+          return urlObj.pathname;
+        } catch {
+          return String(rawUrl || "");
+        }
+      },
+      []
+    );
 
     const fmt0 = (v: any) =>
       Math.ceil(Number(v) || 0).toLocaleString(undefined, {
@@ -199,6 +246,47 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
       ps = localStorage.getItem("ps");
       usr = localStorage.getItem("Cuser");
     }
+
+    const branchName = (() => {
+      const psValue = (invoice as any)?.ps ?? ps;
+      const p = String(psValue ?? "").trim().toUpperCase();
+      if (p === "P1") return "Jraba Mall";
+      if (p === "P2") return "Ben Ashour";
+      if (p === "P3") return "Jraba Main";
+      return p;
+    })();
+
+    const formatInvoiceDate = (raw: any): string => {
+      const s = String(raw ?? "").trim();
+      if (!s) return "";
+      let d: Date | null = null;
+      const m = /^\s*(\d{2})-(\d{2})-(\d{4})\s*$/.exec(s);
+      if (m) {
+        const dd = Number(m[1]);
+        const mm = Number(m[2]);
+        const yyyy = Number(m[3]);
+        const tmp = new Date(yyyy, mm - 1, dd);
+        d = Number.isFinite(tmp.getTime()) ? tmp : null;
+      } else {
+        const tmp = new Date(s);
+        d = Number.isFinite(tmp.getTime()) ? tmp : null;
+      }
+      if (!d) return s;
+      const day = d.getDate();
+      const suffix = (() => {
+        const mod100 = day % 100;
+        if (mod100 >= 11 && mod100 <= 13) return "th";
+        const mod10 = day % 10;
+        if (mod10 === 1) return "st";
+        if (mod10 === 2) return "nd";
+        if (mod10 === 3) return "rd";
+        return "th";
+      })();
+      const dayName = new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(d);
+      const monthName = new Intl.DateTimeFormat(undefined, { month: "long" }).format(d);
+      const year = d.getFullYear();
+      return `${dayName}, ${day}${suffix} of ${monthName} ${year}`;
+    };
 
     const [typeinv] = useState(() => {
       // Try to get TYPE_SUPPLIER from the first ACHATs item, fallback to Design_art if available
@@ -328,7 +416,15 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
       });
 
       return detected;
-    }, [pdata, items]);
+    }, [pdata, items, invoice]);
+
+    const invoiceTypeLabel = useMemo(() => {
+      const t = String(typeinv || "").toLowerCase();
+      if (t.includes("gold")) return "Gold";
+      if (t.includes("watch")) return "Watches";
+      if (t.includes("diamond") || hasDiamondData) return "Diamonds";
+      return "Invoice";
+    }, [typeinv, hasDiamondData]);
 
     // Minimal debug hook to trace data presence without unused variables
     useEffect(() => {
@@ -402,29 +498,16 @@ const WatchStandardInvoiceContent = forwardRef<HTMLDivElement, Props>(
 
     // Derive closed status from current invoice data using common flags
     const isClosed = (() => {
-      const v = currentInvoiceData;
+      const v: any = currentInvoiceData || {};
       const candidates = [v?.is_closed, v?.IS_CLOSED, v?.IS_OK, v?.is_ok];
-      return candidates.some(
-        (c: any) => c === true || c === 1 || c === "1" || c === "true"
-      );
+      for (const c of candidates) {
+        if (c === true) return true;
+        if (c === 1) return true;
+        if (typeof c === "string" && c.trim() === "1") return true;
+        if (typeof c === "string" && c.trim().toLowerCase() === "true") return true;
+      }
+      return false;
     })();
-
-    const qrData = JSON.stringify({
-      invoiceNo: invoice.num_fact,
-      date: invoice.date_fact,
-      customer: customer?.client_name,
-      totalLYD: totalAmountLYD,
-      totalUSD: totalAmountUSD,
-      totalEUR: totalAmountEur,
-      totalWeight,
-      itemCount,
-      items: items.map((i) => ({
-        id: i.id_art,
-        qty: i.qty,
-        price: i.prix_vente,
-        currency: i.currency,
-      })),
-    });
 
     // Store all watch & diamond details keyed by picint
     const [allWatchDetails, setAllWatchDetails] = useState<{
@@ -1018,6 +1101,7 @@ const pickNumber = (...values: any[]) => {
                 @page { size: A4; margin: 10mm; }
                 html, body { background: #fff !important; color: #000 !important; -webkit-print-color-adjust: exact; }
                 .invoice-root { width: 210mm !important; max-width: 210mm !important; margin: 0 auto !important; padding: 0 10mm !important; box-sizing: border-box !important; }
+                .invoice-root { min-height: 277mm !important; display: flex !important; flex-direction: column !important; }
                 .invoice-table, table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; }
                 /* center most table cells for tidy print; details column remains left-aligned */
                 .invoice-table td, .invoice-table th, td, th { word-break: break-word !important; overflow-wrap: break-word !important; vertical-align: middle !important; text-align: left !important; }
@@ -1026,17 +1110,18 @@ const pickNumber = (...values: any[]) => {
                 .no-break { page-break-inside: avoid !important; -webkit-page-break-inside: avoid !important; }
                 .MuiBox-root, .MuiTypography-root { -webkit-print-color-adjust: exact; }
 
-                /* Header layout for print: keep logo left and QR/customer right */
-                .invoice-header { display: flex !important; justify-content: space-between !important; align-items: flex-start !important; gap: 8px !important; }
+                /* Header layout for print: keep content compact and centered */
+                .invoice-header { display: flex !important; flex-direction: column !important; align-items: stretch !important; gap: 8px !important; }
+                .invoice-header { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
                 .invoice-header-left { display: flex !important; flex-direction: column !important; align-items: flex-start !important; }
-                .invoice-header-right { display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; min-width: 140px !important; }
+                .invoice-header-right { display: flex !important; flex-direction: column !important; align-items: flex-end !important; justify-content: flex-start !important; min-width: 140px !important; }
                 .invoice-header-right .MuiBox-root { width: 100% !important; }
                 .invoice-header-right > * + * { margin-top: 8px !important; }
                 /* Ensure customer info shows cleanly in print/PDF */
                 .invoice-header-right .customer-box { border: none !important; background: #fff !important; padding: 8px !important; border-radius: 6px !important; -webkit-print-color-adjust: exact; width: 100% !important; }
 
                 /* Logo and stamp sizing for print */
-                .invoice-logo { width: 90px !important; height: auto !important; }
+                .invoice-logo { width: 250px !important; height: auto !important; }
                 .invoice-stamp { width: 72px !important; height: auto !important; }
 
                 /* Key column sizes for print */
@@ -1055,6 +1140,12 @@ const pickNumber = (...values: any[]) => {
                 .invoice-totals .totals-left, .invoice-totals .totals-right { display: flex !important; flex-direction: column !important; gap: 6px !important; width: 48% !important; box-sizing: border-box !important; }
                 .invoice-totals .totals-left { align-items: flex-start !important; text-align: left !important; }
                 .invoice-totals .totals-right { align-items: flex-end !important; text-align: right !important; }
+
+                .invoice-items { display: flex !important; flex-direction: column !important; gap: 6px !important; }
+                .invoice-item-card { page-break-inside: avoid !important; -webkit-page-break-inside: avoid !important; }
+                .invoice-controls { display: none !important; }
+
+                .invoice-bottom { margin-top: auto !important; }
             }
             /* non-print sizes */
             .invoice-table td, .invoice-table th { text-align: center; }
@@ -1063,6 +1154,225 @@ const pickNumber = (...values: any[]) => {
             .col-img { width: 120px; }
             .col-price { width: 80px; }
         `;
+
+    const useLegacyTableLayout = false;
+    const computedGoldTotalWeight = useMemo(() => {
+      if (!Array.isArray(pdata)) return 0;
+      const invs = invoiceNumFact === 0
+        ? (usr ? pdata.filter((inv: any) => String(inv?.usr) === String(usr)) : pdata)
+        : pdata.filter((inv: any) => Number(inv?.num_fact) === Number(invoiceNumFact));
+      return invs
+        .flatMap((inv: any) => inv?.ACHATs || [])
+        .reduce((sum: number, it: any) => sum + (Number(it?.qty) || 0), 0);
+    }, [pdata, invoiceNumFact, usr]);
+
+    const renderInvoiceItemImage = (item: any) => {
+      try {
+        const parentInvoice = item?._parent;
+        const rowPicint = parentInvoice?.picint ?? item?.picint ?? invoice?.picint;
+        const rowIdFact =
+          item?.id_fact ?? parentInvoice?.id_fact ?? invoice?.id_fact ?? invoice?.num_fact;
+        const rowGoldArtId =
+          parentInvoice?.id_art ??
+          parentInvoice?.ID_ART ??
+          parentInvoice?.Id_Art ??
+          item?.id_art ??
+          item?.ID_ART ??
+          item?.Id_Art ??
+          invoice?.id_art;
+        const rowIdAchatCandidate =
+          item?.id_achat ??
+          item?.ID_ACHAT ??
+          item?.Id_Achat ??
+          parentInvoice?.id_achat ??
+          parentInvoice?.ID_ACHAT ??
+          parentInvoice?.Id_Achat;
+
+        const makeKey = (v: any) =>
+          v !== undefined && v !== null && String(v).trim() !== "" ? String(v) : "";
+
+        const isGoldType = typeinv?.toLowerCase().includes("gold");
+        const isWatchType = typeinv?.toLowerCase().includes("watch");
+
+        const orderedKeys = [
+          makeKey(rowGoldArtId),
+          makeKey(rowIdAchatCandidate),
+          makeKey(rowPicint),
+          makeKey(rowIdFact),
+          makeKey(invoice?.picint),
+          makeKey(invoice?.id_fact ?? invoice?.num_fact),
+        ].filter(Boolean);
+
+        let urls: string[] = [];
+        for (const key of orderedKeys) {
+          if (key && imageUrls[key] && imageUrls[key].length) {
+            urls = imageUrls[key];
+            break;
+          }
+        }
+        urls = normalizeImageList(urls);
+
+        const token = localStorage.getItem("token");
+        const candidateUrls = Array.isArray(urls) ? urls.filter(Boolean) : [];
+        if (!candidateUrls.length) return null;
+
+        let preferredUrl: string | null = null;
+        try {
+          const kind: "gold" | "diamond" | "watch" = isGoldType
+            ? "gold"
+            : isWatchType
+              ? "watch"
+              : "diamond";
+          const keyId = isGoldType
+            ? rowGoldArtId ?? rowPicint ?? invoice?.picint
+            : item?.id_achat ?? rowPicint ?? invoice?.picint;
+          const prefRaw =
+            localStorage.getItem(getPreferredImageKey(kind, keyId)) || "";
+          const pref = canonicalizePrefUrl(prefRaw, kind, keyId);
+          if (pref) {
+            const idxPref = candidateUrls.findIndex(
+              (u) => canonicalizePrefUrl(String(u), kind, keyId) === pref
+            );
+            if (idxPref >= 0) preferredUrl = candidateUrls[idxPref];
+          }
+        } catch {
+          // ignore
+        }
+
+        const imgUrl =
+          preferredUrl || candidateUrls[candidateUrls.length - 1] || candidateUrls[0];
+        const httpsImg = toApiImageAbsolute(imgUrl);
+        const urlWithToken = withToken(httpsImg, token);
+
+        return (
+          <Box
+            component="img"
+            src={urlWithToken}
+            alt="Product"
+            loading="lazy"
+            sx={{
+              width: 96,
+              height: 96,
+              objectFit: "cover",
+              borderRadius: 2,
+              border: "1px solid #eee",
+              background: "#fff",
+            }}
+            onError={(
+              e: React.SyntheticEvent<HTMLImageElement, Event>
+            ) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = placeholderImgSrc;
+            }}
+          />
+        );
+      } catch {
+        return null;
+      }
+    };
+
+    const buildDetailsParts = (item: any): string[] => {
+      try {
+        if (typeinv && typeinv.toLowerCase().includes("watch")) {
+          const parentInvoice = item?._parent;
+          const rowId = parentInvoice?.picint;
+          const rowDetails = allWatchDetails[rowId];
+          if (!rowDetails) return [];
+          const parts: string[] = [];
+          if (rowDetails.Brand || rowDetails.brand)
+            parts.push(
+              `Brand: ${rowDetails.Brand?.client_name || rowDetails.brand?.client_name || rowDetails.Brand || rowDetails.brand}`
+            );
+          if (rowDetails.Design_art || rowDetails.design)
+            parts.push(
+              `Product name: ${rowDetails.Design_art || rowDetails.design || ""}`
+            );
+          if (rowDetails.Color) parts.push(`Color: ${rowDetails.Color}`);
+          if (rowDetails.id_achat) parts.push(`Code: ${rowDetails.id_achat}`);
+          if (rowDetails.reference_number)
+            parts.push(`Reference Number: ${rowDetails.reference_number}`);
+          if (rowDetails.serial_number)
+            parts.push(`Serial Number: ${rowDetails.serial_number}`);
+          if (rowDetails.model) parts.push(`Model: ${rowDetails.model}`);
+          if (rowDetails.condition)
+            parts.push(`Condition: ${rowDetails.condition}`);
+          if (rowDetails.case_material)
+            parts.push(`Case Material: ${rowDetails.case_material}`);
+          if (rowDetails.case_size) parts.push(`Case Size: ${rowDetails.case_size}`);
+          if (rowDetails.bracelet_type)
+            parts.push(`Bracelet Type: ${rowDetails.bracelet_type}`);
+          if (rowDetails.dial_color)
+            parts.push(`Dial Color: ${rowDetails.dial_color}`);
+          if (rowDetails.box_papers !== undefined)
+            parts.push(`Box & Papers: ${rowDetails.box_papers ? "Yes" : "No"}`);
+          return parts;
+        }
+
+        if (
+          (typeinv &&
+            (typeinv.toLowerCase().includes("diamond") ||
+              typeinv.toLowerCase().includes("gold"))) ||
+          hasDiamondData
+        ) {
+          const parentInvoice = item?._parent;
+          const rowPic = parentInvoice?.picint;
+          const picDetails = rowPic ? allDiamondDetails[rowPic] : null;
+          let dNorm: any = null;
+          if (picDetails) {
+            dNorm = normalizeDiamond(
+              picDetails.OriginalAchatDiamond ||
+                picDetails.purchaseD ||
+                picDetails.OriginalAchat ||
+                picDetails
+            );
+          }
+          if (!dNorm) {
+            const candidateSources: any[] = [];
+            if (picDetails) candidateSources.push(picDetails);
+            const directById = allDiamondDetails[item?.id_achat];
+            if (directById) candidateSources.push(directById);
+            const dpAny: any =
+              item?.DistributionPurchase ||
+              item?.DistributionPurchases ||
+              item?.distributionPurchase ||
+              item?.distributionPurchases;
+            if (Array.isArray(dpAny)) candidateSources.push(...dpAny);
+            else if (dpAny) candidateSources.push(dpAny);
+            candidateSources.push(item);
+            for (const src of candidateSources) {
+              if (!src) continue;
+              const unwrap =
+                src.OriginalAchatDiamond || src.purchaseD || src.OriginalAchat || src;
+              const n = normalizeDiamond(unwrap);
+              if (n) {
+                dNorm = n;
+                break;
+              }
+            }
+          }
+          if (!dNorm) return [];
+
+          const parts: string[] = [];
+          if (dNorm.Design_art) parts.push(`Product name: ${dNorm.Design_art}`);
+          if (dNorm.CODE_EXTERNAL) parts.push(`Code: ${dNorm.CODE_EXTERNAL}`);
+          if (dNorm.comment_edit) parts.push(`Sales Code: ${dNorm.comment_edit}`);
+          if (dNorm.carat) parts.push(`Carat: ${dNorm.carat}`);
+          if (dNorm.cut) parts.push(`Cut: ${dNorm.cut}`);
+          if (dNorm.color) parts.push(`Color: ${dNorm.color}`);
+          if (dNorm.clarity) parts.push(`Clarity: ${dNorm.clarity}`);
+          if (dNorm.shape) parts.push(`Shape: ${dNorm.shape}`);
+          if (dNorm.measurements) parts.push(`Measurements: ${dNorm.measurements}`);
+          if (dNorm.certificate_number)
+            parts.push(`Certificate #: ${dNorm.certificate_number}`);
+          if (dNorm.certificate_lab) parts.push(`Lab: ${dNorm.certificate_lab}`);
+          return parts;
+        }
+
+        return [];
+      } catch {
+        return [];
+      }
+    };
 
     return (
       <Box
@@ -1082,124 +1392,112 @@ const pickNumber = (...values: any[]) => {
         <Box
           className="invoice-header"
           sx={{
+            position: "relative",
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "flex-start",
+            flexDirection: "column",
+            alignItems: "stretch",
             mb: 2,
             gap: 2,
+            overflow: "hidden",
+            borderRadius: 2,
           }}
         >
-          <Box className="invoice-header-left">
+          <Box
+            sx={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundImage: "url(/pattern.png)",
+              backgroundRepeat: "repeat",
+              backgroundSize: "cover",
+              opacity: 0.15,
+              pointerEvents: "none",
+            }}
+          />
+          <Box sx={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "center" }}>
             <img
               className="invoice-logo"
-              src="/logo.png"
+              src="/Gaja Black.png"
               alt="GAJA Logo"
               style={{
-                width: 140,
+                width: 250,
                 height: "auto",
-                marginBottom: 8,
-                borderRadius: 12,
-                padding: 4,
               }}
             />
-
-            <Typography variant="h5" fontWeight="bold">
-              {typeinv.toLowerCase().includes("gold")
-                ? "Gold Invoice"
-                : typeinv.toLowerCase().includes("watch")
-                  ? "Watch Invoice"
-                  : typeinv.toLowerCase().includes("diamond") || hasDiamondData
-                    ? "Diamond Invoice"
-                    : "Invoice"}
-            </Typography>
-            <Typography variant="subtitle1">
-              Invoice No:{" "}
-              {invoiceNumFact === 0 ? (
-                <span style={{ color: "red" }}>In Progress</span>
-              ) : (
-                invoiceNumFact
-              )}
-              {invoiceNumFact !== 0 && (
-                <>
-                  {" "}
-                  {isClosed ? (
-                    <span style={{ color: "#2e7d32", fontWeight: 700 }}>
-                      (Closed)
-                    </span>
-                  ) : (
-                    <span style={{ color: "#ed6c02", fontWeight: 700 }}>
-                      (Open)
-                    </span>
-                  )}
-                </>
-              )}
-            </Typography>
-            <Typography variant="subtitle2">
-              Date: {currentInvoiceData.date_fact || invoice.date_fact}
-            </Typography>
-
-            <Typography variant="subtitle2">{ps ? `PS: ${ps}` : ""}</Typography>
           </Box>
-          <Box
-            className="invoice-header-right"
-            sx={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              background: "#fff",
-              p: 1,
-              minWidth: 220,
-              gap: 2,
-            }}
-          >
-            {/* Customer info box above QR */}
+
+          <Box sx={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", gap: 2 }}>
+            <Box className="invoice-header-left" sx={{ display: "flex", flexDirection: "column", alignItems: "center" }} bgcolor="#ffffff" border="1px solid #ccc" borderRadius={2}>
+              <Chip size="small" label={invoiceTypeLabel} color="primary" sx={{ fontWeight: 800, mb: 0.75 }} />
+
+              <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                Invoice No:{" "}
+                {invoiceNumFact === 0 ? (
+                  <span style={{ color: "red" }}>In Progress</span>
+                ) : (
+                  invoiceNumFact
+                )}
+                {invoiceNumFact !== 0 && (
+                  <>
+                    {" "}
+                    {isClosed ? (
+                      <span style={{ color: "#2e7d32", fontWeight: 700 }}>(Closed)</span>
+                    ) : (
+                      <span style={{ color: "#ed6c02", fontWeight: 700 }}>(Open)</span>
+                    )}
+                  </>
+                )}
+              </Typography>
+
+              <Typography variant="subtitle2">
+                Date: {formatInvoiceDate(currentInvoiceData.date_fact || invoice.date_fact)}
+              </Typography>
+
+              <Typography variant="subtitle2">
+                {branchName ? `Branch: ${branchName}` : ""}
+              </Typography>
+            </Box>
 
             <Box
+              className="invoice-header-right"
+              bgcolor="#ffffff"
+              border="1px solid #ccc"
+              borderRadius={2}
               sx={{
                 display: "flex",
-                justifyContent: "center",
+                flexDirection: "column",
                 alignItems: "center",
+                minWidth: 220,
+                gap: 0.5,
               }}
             >
-              <QRCode value={qrData} size={90} />
-            </Box>
-            <Box
-              className="customer-box"
-              sx={{
-                mt: 1,
-                p: 1,
-                width: "100%",
-              }}
-            >
-              <Typography
-                variant="subtitle2"
-                sx={{ fontWeight: "bold", color: "#1976d2" }}
-              >
-                Customer
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, color: "#1976d2" }}>
+                Client details
               </Typography>
-              <Box sx={{ mt: 0.5, display: "flex", flexDirection: "column", gap: 0.25 }}>
-                <Typography sx={{ fontSize: 12 }}>
-                  <span style={{ fontWeight: "bold" }}>Code:</span>{" "}
-                  <span style={{ fontFamily: "monospace" }}>
-                    {customer?.id_client ?? pdata[0]?.client ?? pdata[0]?.Client?.num_client ?? "N/A"}
-                  </span>
-                </Typography>
-                <Typography sx={{ fontSize: 12 }}>
-                  <span style={{ fontWeight: "bold" }}>Name:</span>{" "}
-                  <span style={{ fontFamily: "monospace" }}>
-                    {customer?.client_name ?? pdata[0]?.Client?.client_name ?? "N/A"}
-                  </span>
-                </Typography>
-                <Typography sx={{ fontSize: 12 }}>
-                  <span style={{ fontWeight: "bold" }}>Tel:</span>{" "}
-                  <span style={{ fontFamily: "monospace" }}>
-                    {customer?.tel_client ?? pdata[0]?.Client?.tel_client ?? "N/A"}
-                  </span>
-                </Typography>
-              </Box>
+              <Typography sx={{ fontSize: 12 }}>
+                <span style={{ fontWeight: "bold" }}>Code:</span>{" "}
+                <span style={{ fontFamily: "monospace" }}>
+                  {customer?.id_client ?? pdata[0]?.client ?? pdata[0]?.Client?.num_client ?? "N/A"}
+                </span>
+              </Typography>
+              <Typography sx={{ fontSize: 12 }}>
+                <span style={{ fontWeight: "bold" }}>Name:</span>{" "}
+                <span style={{ fontFamily: "monospace" }}>
+                  {customer?.client_name ?? pdata[0]?.Client?.client_name ?? "N/A"}
+                </span>
+              </Typography>
+              <Typography sx={{ fontSize: 12 }}>
+                <span style={{ fontWeight: "bold" }}>Tel:</span>{" "}
+                <span style={{ fontFamily: "monospace" }}>
+                  {customer?.tel_client ?? pdata[0]?.Client?.tel_client ?? "N/A"}
+                </span>
+              </Typography>
             </Box>
           </Box>
         </Box>
+        {useLegacyTableLayout && (
         <Table
           className="invoice-table"
           size="small"
@@ -1692,11 +1990,23 @@ const pickNumber = (...values: any[]) => {
                                     ? "gold"
                                     : isWatchType
                                       ? "watch"
-                                      : "watch";
-                                  const keyId = item?.id_achat ?? rowPicint ?? invoice?.picint;
-                                  const pref = localStorage.getItem(getPreferredImageKey(kind, keyId));
-                                  if (pref && candidateUrls.some((u) => String(u) === String(pref))) {
-                                    preferredUrl = pref;
+                                      : "diamond";
+
+                                  // IMPORTANT:
+                                  // - gold must key by id_art
+                                  // - watch/diamond can key by id_achat (best) and fallback to picint
+                                  const keyId = isGoldType
+                                    ? (rowGoldArtId ?? item?.id_art ?? (parentInvoice as any)?.id_art ?? rowPicint ?? invoice?.picint)
+                                    : (item?.id_achat ?? rowPicint ?? invoice?.picint);
+
+                                  const prefRaw = localStorage.getItem(getPreferredImageKey(kind, keyId)) || "";
+                                  const pref = canonicalizePrefUrl(prefRaw, kind, keyId);
+
+                                  if (pref) {
+                                    const idxPref = candidateUrls.findIndex(
+                                      (u) => canonicalizePrefUrl(String(u), kind, keyId) === pref
+                                    );
+                                    if (idxPref >= 0) preferredUrl = candidateUrls[idxPref];
                                   }
                                 } catch {
                                   // ignore
@@ -1922,6 +2232,187 @@ const pickNumber = (...values: any[]) => {
           </TableBody>
         </Table>
 
+        )}
+
+        {!useLegacyTableLayout && (
+          <Box className="invoice-items" sx={{ mb: 2, display: "flex", flexDirection: "column", gap: 1 }}>
+            {loading ? (
+              <Box sx={{ p: 1, border: "1px solid #eee", borderRadius: 2 }}>
+                <Typography sx={{ fontSize: 12, color: "#666" }}>Loading data...</Typography>
+              </Box>
+            ) : (
+              pdata
+                .flatMap((inv: any) =>
+                  (inv.ACHATs || []).map((item: any) => ({
+                    ...item,
+                    _parent: inv,
+                  }))
+                )
+                .map((item: any, idx: number) => {
+                  if (!item) return null;
+                  const isGold = typeinv && typeinv.toLowerCase().includes("gold");
+                  const detailsParts = buildDetailsParts(item);
+                  const parent = item?._parent;
+                  const goldRowId = parent?.id_art ?? parent?.picint ?? "";
+
+                  const priceText = (() => {
+                    const val =
+                      item.total_remise_final ?? item._parent?.prix_vente ?? 0;
+                    const n = Number(val) || 0;
+                    const suffix = isGold ? "LYD" : "USD";
+                    return (
+                      n.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      }) + ` ${suffix}`
+                    );
+                  })();
+
+                  return (
+                    <Box
+                      key={String(item?.id_achat ?? item?.id_fact ?? item?._parent?.id_fact ?? idx)}
+                      className="invoice-item-card"
+                      sx={{
+                        border: "1px solid #e9e9e9",
+                        borderRadius: 2,
+                        p: 1,
+                        background: "#fff",
+                      }}
+                    >
+                      <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1, alignItems: "baseline" }}>
+                        <Typography sx={{ fontSize: 12, fontWeight: 800 }}>
+                          #{idx + 1}
+                          {isGold && goldRowId ? (
+                            <span style={{ fontWeight: 400, color: "#666", marginLeft: 8 }}>
+                              ID: <span style={{ fontFamily: "monospace" }}>{String(goldRowId)}</span>
+                            </span>
+                          ) : null}
+                        </Typography>
+                        <Box sx={{ display: "flex", gap: 1, alignItems: "baseline" }}>
+                          {!isGold ? (
+                            <Typography sx={{ fontSize: 12, fontFamily: "monospace", fontWeight: 800 }}>
+                              {priceText}
+                            </Typography>
+                          ) : null}
+                          {item.IS_GIFT ? (
+                            <Typography sx={{ fontSize: 11, fontWeight: 800, color: "#ed6c02" }}>
+                              Is Gift
+                            </Typography>
+                          ) : null}
+                        </Box>
+                      </Box>
+
+                      <Divider sx={{ my: 0.75 }} />
+
+                      <Box
+                        sx={{
+                          display: "grid",
+                          gridTemplateColumns: showImage ? "104px 1fr" : "1fr",
+                          gap: 1,
+                          alignItems: "start",
+                        }}
+                      >
+                        {showImage ? (
+                          <Box sx={{ display: "flex", justifyContent: "center" }}>
+                            {renderInvoiceItemImage(item) || (
+                              <Box
+                                component="img"
+                                src={placeholderImgSrc}
+                                alt="Product"
+                                loading="lazy"
+                                sx={{
+                                  width: 96,
+                                  height: 96,
+                                  objectFit: "contain",
+                                  borderRadius: 2,
+                                  border: "1px solid #eee",
+                                  background: "#fff",
+                                  p: 1,
+                                }}
+                              />
+                            )}
+                          </Box>
+                        ) : null}
+
+                        <Box sx={{ minWidth: 0 }}>
+                          {isGold ? (
+                            <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0.75 }}>
+                              <Typography sx={{ fontSize: 11 }}>
+                                <span style={{ fontWeight: 800 }}>Weight:</span>{" "}
+                                <span style={{ fontFamily: "monospace" }}>{fmtWeight(item.qty)} g</span>
+                              </Typography>
+                              <Typography sx={{ fontSize: 11 }}>
+                                <span style={{ fontWeight: 800 }}>Gold Color:</span>{" "}
+                                <span style={{ fontFamily: "monospace" }}>{item.Color_Gold ?? ""}</span>
+                              </Typography>
+
+                              {showGoldUnitPrices ? (
+                                <>
+                                  <Typography sx={{ fontSize: 11 }}>
+                                    <span style={{ fontWeight: 800 }}>Price /g:</span>{" "}
+                                    <span style={{ fontFamily: "monospace" }}>
+                                      {(() => {
+                                        const meta = parseMetaFromComment(parent?.COMMENT);
+                                        const w = Number(item.qty || 0);
+                                        const piece =
+                                          meta?.price_per_piece != null
+                                            ? Number(meta.price_per_piece)
+                                            : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
+                                        const perGram =
+                                          meta?.price_per_gram != null
+                                            ? Number(meta.price_per_gram)
+                                            : w > 0
+                                              ? piece / w
+                                              : 0;
+                                        return fmt0(perGram);
+                                      })()}
+                                    </span>
+                                  </Typography>
+                                  <Typography sx={{ fontSize: 11 }}>
+                                    <span style={{ fontWeight: 800 }}>Price /piece:</span>{" "}
+                                    <span style={{ fontFamily: "monospace" }}>
+                                      {(() => {
+                                        const meta = parseMetaFromComment(parent?.COMMENT);
+                                        const piece =
+                                          meta?.price_per_piece != null
+                                            ? Number(meta.price_per_piece)
+                                            : Number(parent?.prix_vente_remise ?? parent?.prix_vente ?? 0);
+                                        return fmt0(piece);
+                                      })()}
+                                    </span>
+                                  </Typography>
+                                </>
+                              ) : null}
+
+                              <Typography sx={{ fontSize: 11 }}>
+                                <span style={{ fontWeight: 800 }}>Rush Color:</span>{" "}
+                                <span style={{ fontFamily: "monospace" }}>{item.Color_Rush ?? ""}</span>
+                              </Typography>
+                            </Box>
+                          ) : (
+                            <>
+                              {detailsParts.length ? (
+                                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+                                  {detailsParts.map((p, i) => (
+                                    <Typography key={i} sx={{ fontSize: 11, lineHeight: 1.25 }}>
+                                      {p}
+                                    </Typography>
+                                  ))}
+                                </Box>
+                              ) : (
+                                <Typography sx={{ fontSize: 11, color: "#888" }}>No data</Typography>
+                              )}
+                            </>
+                          )}
+                        </Box>
+                      </Box>
+                    </Box>
+                  );
+                })
+            )}
+          </Box>
+        )}
+
         {typeinv && typeinv.toLowerCase().includes("gold") && (
           <Box sx={{ mt: 1, display: "flex", flexDirection: "column", gap: 0.5 }}>
             {(() => {
@@ -1963,7 +2454,7 @@ const pickNumber = (...values: any[]) => {
 
               return (
                 <>
-                  {showDiscount ? (
+                  {showDiscountValues && showDiscount ? (
                     <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                       <Typography sx={{ fontWeight: 700, color: "#d32f2f" }}>
                         Discount
@@ -1978,7 +2469,7 @@ const pickNumber = (...values: any[]) => {
                       </Typography>
                     </Box>
                   ) : null}
-                  {showSurcharge ? (
+                  {showSurchargeValues && showSurcharge ? (
                     <Box sx={{ display: "flex", justifyContent: "space-between" }}>
                       <Typography sx={{ fontWeight: 700, color: "#2e7d32" }}>
                         Surcharge
@@ -2025,16 +2516,18 @@ const pickNumber = (...values: any[]) => {
 
             {typeinv && typeinv.toLowerCase().includes("gold") && (
               <>
-                <Typography>
-                  <span style={{ fontWeight: "bold" }}>Total LYD:</span>
-                  <span style={{ fontFamily: "monospace" }}>
-                    {fmt0(totalAmountLYD)}
-                  </span>
-                </Typography>
+                {(Number(totalAmountLYD) || 0) > moneyEps ? (
+                  <Typography>
+                    <span style={{ fontWeight: "bold" }}>Total LYD:</span>
+                    <span style={{ fontFamily: "monospace" }}>
+                      {fmt0(totalAmountLYD)}
+                    </span>
+                  </Typography>
+                ) : null}
                 <Typography>
                   <span style={{ fontWeight: "bold" }}>Total Weight:</span>
                   <span style={{ fontFamily: "monospace" }}>
-                    {fmtWeight(totalWeight)} g
+                    {fmtWeight(computedGoldTotalWeight)} g
                   </span>
                 </Typography>
               </>
@@ -2042,15 +2535,17 @@ const pickNumber = (...values: any[]) => {
             {typeinv && !typeinv.toLowerCase().includes("gold") && (
               <>
                 {/* Total USD after discount */}
-                <Typography>
-                  <span style={{ fontWeight: "bold" }}>Total USD: </span>
-                  <span style={{ fontFamily: "monospace" }}>
-                    {TotalAmountFinal.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </Typography>
+                {(Number(TotalAmountFinal) || 0) > 0 ? (
+                  <Typography>
+                    <span style={{ fontWeight: "bold" }}>Total USD: </span>
+                    <span style={{ fontFamily: "monospace" }}>
+                      {TotalAmountFinal.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </Typography>
+                ) : null}
 
                 {(() => {
                   const netValue = Number(data.remise) || 0;
@@ -2062,7 +2557,7 @@ const pickNumber = (...values: any[]) => {
 
                   return (
                     <>
-                      {hasDiscount ? (
+                      {showDiscountValues && hasDiscount ? (
                         <Typography>
                           <span style={{ fontWeight: "bold" }}>Discount:</span>{" "}
                           <span style={{ fontFamily: "monospace", color: "#d32f2f" }}>
@@ -2079,7 +2574,7 @@ const pickNumber = (...values: any[]) => {
                         </Typography>
                       ) : null}
 
-                      {hasSurcharge ? (
+                      {showSurchargeValues && hasSurcharge ? (
                         <Typography>
                           <span style={{ fontWeight: "bold" }}>Surcharge:</span>{" "}
                           <span style={{ fontFamily: "monospace", color: "#2e7d32" }}>
@@ -2197,49 +2692,52 @@ const pickNumber = (...values: any[]) => {
               const isPaidInFull = isGoldInv ? Math.abs(diffLyd) <= moneyEps : Math.abs(diffUsd0) <= moneyEps;
               const paidColor = isPaidInFull ? "#2e7d32" : "#d04444ff";
 
-              const lines: Array<{ label: string; value: string }> = [
-                { label: "LYD", value: fmt0(lyd) },
-                { label: "USD", value: fmt0(usd) },
-                { label: "EUR", value: fmt0(eur) },
-              ];
+              const lines: Array<{ label: string; amount: number; value: string; equivLyd?: number }> = [
+                { label: "LYD", amount: lyd, value: fmt0(lyd) },
+                { label: "USD", amount: usd, value: fmt0(usd), equivLyd: usdLyd },
+                { label: "EUR", amount: eur, value: fmt0(eur), equivLyd: eurLyd },
+              ].filter((l) => (Number(l.amount) || 0) > moneyEps);
 
               return (
                 <>
-                  <Typography>
-                    <span style={{ fontWeight: "bold" }}>Payments:</span>
-                  </Typography>
+                  {lines.length ? (
+                    <Typography>
+                      <span style={{ fontWeight: "bold" }}>Payments:</span>
+                    </Typography>
+                  ) : null}
                   {lines.map((l) => {
                     const suffix = l.label;
                     return (
                       <Typography key={l.label} sx={{ mt: 0.25 }}>
                         <span style={{ fontWeight: "bold" }}>{l.label}:</span>{" "}
                         <span style={{ fontFamily: "monospace" }}>{l.value} {suffix}</span>
-                        {l.label === "USD" && usdLyd > 0 ? (
-                          <span style={{ color: "#666" }}> ({fmt0(usdLyd)} LYD)</span>
-                        ) : null}
-                        {l.label === "EUR" && eurLyd > 0 ? (
-                          <span style={{ color: "#666" }}> ({fmt0(eurLyd)} LYD)</span>
+                        {l.equivLyd && l.equivLyd > moneyEps ? (
+                          <span style={{ color: "#666" }}> ({fmt0(l.equivLyd)} LYD)</span>
                         ) : null}
                       </Typography>
                     );
                   })}
                   {isGoldInv ? (
-                    <Typography sx={{ mt: 0.5 }}>
-                      <span style={{ fontWeight: "bold" }}>Paid total:</span>{" "}
-                      <span style={{ fontFamily: "monospace", color: paidColor }}>
-                        {fmt0(paidTotalLydEquiv)} LYD
-                      </span>
-                    </Typography>
+                    paidTotalLydEquiv > moneyEps ? (
+                      <Typography sx={{ mt: 0.5 }}>
+                        <span style={{ fontWeight: "bold" }}>Paid total:</span>{" "}
+                        <span style={{ fontFamily: "monospace", color: paidColor }}>
+                          {fmt0(paidTotalLydEquiv)} LYD
+                        </span>
+                      </Typography>
+                    ) : null
                   ) : (
-                    <Typography sx={{ mt: 0.5 }}>
-                      <span style={{ fontWeight: "bold" }}>Paid total:</span>{" "}
-                      <span style={{ fontFamily: "monospace", color: paidColor }}>
-                        {fmt0(usd)} USD
-                      </span>
-                      {Number.isFinite(usdRate) && usdRate > 0 ? (
-                        <span style={{ color: "#666" }}> ({fmt0(usd * usdRate)} LYD)</span>
-                      ) : null}
-                    </Typography>
+                    usd > moneyEps ? (
+                      <Typography sx={{ mt: 0.5 }}>
+                        <span style={{ fontWeight: "bold" }}>Paid total:</span>{" "}
+                        <span style={{ fontFamily: "monospace", color: paidColor }}>
+                          {fmt0(usd)} USD
+                        </span>
+                        {Number.isFinite(usdRate) && usdRate > 0 ? (
+                          <span style={{ color: "#666" }}> ({fmt0(usd * usdRate)} LYD)</span>
+                        ) : null}
+                      </Typography>
+                    ) : null
                   )}
                   {hasRemainder && (
                     <Typography sx={{ mt: 0.25 }}>
@@ -2267,6 +2765,11 @@ const pickNumber = (...values: any[]) => {
             })()}
           </Box>
         </Box>
+
+        <Box
+          className="invoice-bottom"
+          sx={{ display: "flex", flexDirection: "column" }}
+        >
 
         <Box
           className="invoice-footer"
@@ -2353,7 +2856,7 @@ const pickNumber = (...values: any[]) => {
         </Box>
 
         {/* Notes & Warnings: Render on a separate page for printing */}
-        <div style={{ pageBreakBefore: "always" }}>
+        <div>
           <Box
             sx={{
               mt: 2,
@@ -2578,6 +3081,8 @@ const pickNumber = (...values: any[]) => {
             })()}
           </Box>
         </div>
+
+        </Box>
       </Box>
     );
   }

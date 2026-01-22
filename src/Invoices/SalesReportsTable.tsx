@@ -607,21 +607,41 @@ const computeInvoicePaySummary = (row: any): InvoicePaySummary => {
 
   // These MUST come from real USD/EUR-total fields (or be 0).
   // Add/remove candidates to match your backend names.
-  const totalUsdCandidate = pickNumber(
-    row?.total_usd,
-    row?.totalAmountUsd,
-    row?.total_amount_usd,
-    row?.total_remise_final_usd,
-    row?.total_currency_usd
-  ) ?? 0;
+  const totalUsdCandidate =
+    (isGold
+      ? pickNumber(
+          row?.total_usd,
+          row?.totalAmountUsd,
+          row?.total_amount_usd,
+          row?.total_remise_final_usd,
+          row?.total_currency_usd
+        )
+      : pickNumber(
+          // For non-gold invoices, backend often stores the USD final total in total_remise_final
+          row?.total_remise_final,
+          row?.total_usd,
+          row?.totalAmountUsd,
+          row?.total_amount_usd,
+          row?.total_remise_final_usd,
+          row?.total_currency_usd
+        )) ?? 0;
 
-  const totalEurCandidate = pickNumber(
-    row?.total_eur,
-    row?.totalAmountEur,
-    row?.total_amount_eur,
-    row?.total_remise_final_eur,
-    row?.total_EUR
-  ) ?? 0;
+  const totalEurCandidate =
+    (isGold
+      ? pickNumber(
+          row?.total_eur,
+          row?.totalAmountEur,
+          row?.total_amount_eur,
+          row?.total_remise_final_eur,
+          row?.total_EUR
+        )
+      : pickNumber(
+          row?.total_eur,
+          row?.totalAmountEur,
+          row?.total_amount_eur,
+          row?.total_remise_final_eur,
+          row?.total_EUR
+        )) ?? 0;
 
   // PAID
   const paidLyd = Number(row?.amount_lyd ?? 0) || 0;
@@ -788,6 +808,8 @@ const SalesReportsTable = ({
 }) => {
   // Fetch users on mount
 
+  const theme = useTheme();
+
   const [selectedTypes, setSelectedTypes] = useState<string[]>(
     initialType ? [initialType] : ["all"]
   );
@@ -828,8 +850,8 @@ const SalesReportsTable = ({
   const [globalFilter, setGlobalFilter] = useState<string>("");
   const [customerSearch, setCustomerSearch] = useState<string>("");
   const [sortBy, setSortBy] = useState<
-    "date_created" | "invoice_number" | "invoice_date" | "value"
-  >("invoice_date");
+    "invoice_number" | "invoice_date" | "value"
+  >("invoice_number");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [sortCurrency, setSortCurrency] = useState<"LYD" | "USD" | "EUR">(
     "USD"
@@ -840,6 +862,8 @@ const SalesReportsTable = ({
   const [paymentStatus, setPaymentStatus] = useState<
     "all" | "paid" | "unpaid" | "partial"
   >("all");
+
+  const [expandedProducts, setExpandedProducts] = useState<Record<string, boolean>>({});
 
   // --------- Queue images to fetch (restore old behavior + fix watch IDs) ----------
   const buildImageQueue = React.useCallback((rows: any[]) => {
@@ -2827,12 +2851,16 @@ useEffect(() => {
 
     base.sort((a: any, b: any) => {
       if (sortBy === "invoice_number") {
-        const av = Number(a?.num_fact ?? 0) || 0;
-        const bv = Number(b?.num_fact ?? 0) || 0;
+        const parseInv = (r: any): number => {
+          const raw = String(r?.num_fact ?? "");
+          const digits = raw.replace(/\D+/g, "");
+          if (digits) return Number(digits) || 0;
+          const n = Number(raw);
+          return Number.isFinite(n) ? n : 0;
+        };
+        const av = parseInv(a);
+        const bv = parseInv(b);
         return (av - bv) * dir;
-      }
-      if (sortBy === "date_created") {
-        return (getCreatedTime(a) - getCreatedTime(b)) * dir;
       }
       if (sortBy === "invoice_date") {
         return (getInvoiceDate(a) - getInvoiceDate(b)) * dir;
@@ -2844,8 +2872,14 @@ useEffect(() => {
   }, [filteredData, sortBy, sortDir, sortCurrency]);
 
   const topSummary = React.useMemo(() => {
+    const seen = new Set<string>();
     return filteredData.reduce(
       (acc, row) => {
+        const invoiceKey = String(row?.num_fact ?? row?.id_fact ?? "");
+        if (!invoiceKey) return acc;
+        if (seen.has(invoiceKey)) return acc;
+        seen.add(invoiceKey);
+
         const supplierType = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
         const typeKey: "gold" | "diamond" | "watches" | "other" = supplierType.includes("gold")
           ? "gold"
@@ -2856,24 +2890,38 @@ useEffect(() => {
               : "other";
 
         const s = computeInvoicePaySummary(row);
+
+        // Prefer backend remainder fields when present (these are typically the authoritative "unpaid" figures)
+        const unpaidLyd =
+          toFiniteNumber(row?.rest_of_money ?? row?.rest_of_moneyLYD ?? row?.rest_of_money_lyd) ??
+          (s.remaining?.lyd || 0);
+        const unpaidUsd =
+          toFiniteNumber(row?.rest_of_moneyUSD ?? row?.rest_of_money_usd) ??
+          (s.remaining?.usd || 0);
+        const unpaidEur =
+          toFiniteNumber(row?.rest_of_moneyEUR ?? row?.rest_of_money_eur) ??
+          (s.remaining?.eur || 0);
+
         acc.sales.lyd = normalizeMoney(acc.sales.lyd + (s.total?.lyd || 0));
         acc.sales.usd = normalizeMoney(acc.sales.usd + (s.total?.usd || 0));
         acc.sales.eur = normalizeMoney(acc.sales.eur + (s.total?.eur || 0));
 
-        acc.unpaid.lyd = normalizeMoney(acc.unpaid.lyd + (s.remaining?.lyd || 0));
-        acc.unpaid.usd = normalizeMoney(acc.unpaid.usd + (s.remaining?.usd || 0));
-        acc.unpaid.eur = normalizeMoney(acc.unpaid.eur + (s.remaining?.eur || 0));
+        acc.unpaid.lyd = normalizeMoney(acc.unpaid.lyd + unpaidLyd);
+        acc.unpaid.usd = normalizeMoney(acc.unpaid.usd + unpaidUsd);
+        acc.unpaid.eur = normalizeMoney(acc.unpaid.eur + unpaidEur);
 
         acc.byType[typeKey].sales.lyd = normalizeMoney(acc.byType[typeKey].sales.lyd + (s.total?.lyd || 0));
         acc.byType[typeKey].sales.usd = normalizeMoney(acc.byType[typeKey].sales.usd + (s.total?.usd || 0));
         acc.byType[typeKey].sales.eur = normalizeMoney(acc.byType[typeKey].sales.eur + (s.total?.eur || 0));
 
-        acc.byType[typeKey].unpaid.lyd = normalizeMoney(acc.byType[typeKey].unpaid.lyd + (s.remaining?.lyd || 0));
-        acc.byType[typeKey].unpaid.usd = normalizeMoney(acc.byType[typeKey].unpaid.usd + (s.remaining?.usd || 0));
-        acc.byType[typeKey].unpaid.eur = normalizeMoney(acc.byType[typeKey].unpaid.eur + (s.remaining?.eur || 0));
+        acc.byType[typeKey].unpaid.lyd = normalizeMoney(acc.byType[typeKey].unpaid.lyd + unpaidLyd);
+        acc.byType[typeKey].unpaid.usd = normalizeMoney(acc.byType[typeKey].unpaid.usd + unpaidUsd);
+        acc.byType[typeKey].unpaid.eur = normalizeMoney(acc.byType[typeKey].unpaid.eur + unpaidEur);
 
         const detailsArr: any[] = Array.isArray(row?._productDetails) ? row._productDetails : [];
-        acc.byType[typeKey].itemsSold += detailsArr.length;
+        const achatsArr: any[] = Array.isArray(row?.ACHATs) ? row.ACHATs : [];
+        const itemsSoldCount = detailsArr.length > 0 ? detailsArr.length : achatsArr.length;
+        acc.byType[typeKey].itemsSold += itemsSoldCount;
 
         // Total grams sold (gold): sum qty across all achats on the invoice
         if (supplierType.includes("gold")) {
@@ -2976,84 +3024,51 @@ useEffect(() => {
   }, [filteredData]);
 
   const summaryStats = React.useMemo(() => {
-    const typeMaps: Record<"gold" | "diamond" | "watches", Map<string, number>> = {
-      gold: new Map(),
-      diamond: new Map(),
-      watches: new Map(),
-    };
+    const seen = new Set<string>();
+    let invoiceCount = 0;
     let itemCount = 0;
     let totalWeightFiltered = 0;
+    let totalGold = 0;
+    let totalDiamond = 0;
+    let totalWatch = 0;
 
     filteredData.forEach((row: any) => {
-      if (Array.isArray(row._productDetails)) {
-        itemCount += row._productDetails.length;
-      }
+      const invoiceKey = String(row?.num_fact ?? row?.id_fact ?? "");
+      if (!invoiceKey) return;
+      if (seen.has(invoiceKey)) return;
+      seen.add(invoiceKey);
+      invoiceCount += 1;
 
-      const achats: any[] = row.ACHATs || [];
-      if (achats.length === 0) {
-        return;
-      }
+      const detailsArr: any[] = Array.isArray(row?._productDetails) ? row._productDetails : [];
+      const achatsArr: any[] = Array.isArray(row?.ACHATs) ? row.ACHATs : [];
+      itemCount += detailsArr.length > 0 ? detailsArr.length : achatsArr.length;
 
-      const firstAchat = achats[0];
-      const supplierTypeRaw = firstAchat?.Fournisseur?.TYPE_SUPPLIER || "";
-      const supplierType = String(supplierTypeRaw).toLowerCase();
+      const supplierType = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || "").toLowerCase();
+      const isGold = supplierType.includes("gold");
+      const isDiamond = supplierType.includes("diamond");
+      const isWatch = supplierType.includes("watch");
 
-      if (supplierType.includes("gold")) {
-        const qty = Number(firstAchat.qty);
-        if (!isNaN(qty)) {
-          totalWeightFiltered += qty;
+      // Total weight (grams): sum all gold achat qty values on the invoice
+      if (isGold) {
+        for (const a of achatsArr) {
+          const q = toFiniteNumber(a?.qty);
+          if (q !== null && q > 0) totalWeightFiltered += q;
         }
       }
 
-      let targetType: "gold" | "diamond" | "watches" | null = null;
-      if (supplierType.includes("gold")) targetType = "gold";
-      else if (supplierType.includes("diamond")) targetType = "diamond";
-      else if (supplierType.includes("watches")) targetType = "watches";
-
-      if (!targetType) {
-        return;
-      }
-
-      const numFact = row.num_fact;
-      if (!numFact) {
-        return;
-      }
-
-      const baseTotal = Number(row.total_remise_final) || 0;
-      const remiseValue = Number(row.remise) || 0;
-      const remisePerValue = Number(row.remise_per) || 0;
-      let adjustedTotal = baseTotal;
-      if (remiseValue > 0) {
-        adjustedTotal = baseTotal - remiseValue;
-      } else if (remisePerValue > 0) {
-        adjustedTotal =
-          baseTotal - (baseTotal * remisePerValue) / 100;
-      }
-      if (isNaN(adjustedTotal)) {
-        return;
-      }
-
-      const map = typeMaps[targetType];
-      if (!map.has(numFact) || (map.get(numFact) as number) < adjustedTotal) {
-        map.set(numFact, adjustedTotal);
-      }
+      const s = computeInvoicePaySummary(row);
+      if (isGold) totalGold += Number(s.total?.lyd || 0);
+      else if (isDiamond) totalDiamond += Number(s.total?.usd || 0);
+      else if (isWatch) totalWatch += Number(s.total?.usd || 0);
     });
 
-    const sumMap = (m: Map<string, number>) => {
-      let sum = 0;
-      m.forEach((v) => {
-        sum += v;
-      });
-      return sum;
-    };
-
     return {
-      invoiceCount: filteredData.length,
+      invoiceCount,
       itemCount,
       totalWeight: totalWeightFiltered,
-      totalGold: sumMap(typeMaps.gold),
-      totalDiamond: sumMap(typeMaps.diamond),
-      totalWatch: sumMap(typeMaps.watches),
+      totalGold: normalizeMoney(totalGold),
+      totalDiamond: normalizeMoney(totalDiamond),
+      totalWatch: normalizeMoney(totalWatch),
     };
   }, [filteredData]);
   const [pageSize, setPageSize] = useState<number>(5);
@@ -3081,7 +3096,11 @@ useEffect(() => {
   const invoiceComment = stripInternalMetaTags(row.COMMENT ?? "");
 
   const paySummary = computeInvoicePaySummary(row);
-  const headerBg = getHeaderBgByStatus(paySummary);
+  const statusAccent = getHeaderBgByStatus(paySummary);
+  const headerBg = theme.palette.mode === "dark" ? "#000" : "#fff";
+  const headerFg = theme.palette.mode === "dark" ? "#fff" : "#000";
+  const headerMutedFg = theme.palette.mode === "dark" ? "rgba(255,255,255,0.78)" : "rgba(0,0,0,0.65)";
+  const headerChipBg = theme.palette.mode === "dark" ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)";
 
   const eps = MONEY_EPS;
 
@@ -3100,12 +3119,13 @@ useEffect(() => {
     remaining.usd <= eps &&
     remaining.eur <= eps;
 
-  // OPTIONAL: readable label
   const statusLabel = !paySummary.isClosed
     ? "Open"
-    : paySummary.isFullyPaid
-      ? "Closed • Paid"
-      : "Closed • Remainder";
+    : fullyPaidNow
+      ? "Closed"
+      : "Partially Paid";
+
+  const hasDiscount = (Number(row?.remise ?? 0) || 0) > 0 || (Number(row?.remise_per ?? 0) || 0) > 0;
   
   const clientValue = row.Client || row.client || null;
   const clientName =
@@ -3155,13 +3175,16 @@ useEffect(() => {
       invoiceTypeLabel = "Diamond";
       typeColor = "#B9F2FF";
     } else if (t.includes("watches")) {
-      invoiceTypeLabel = "watches";
+      invoiceTypeLabel = "Watches";
       typeColor = "#DDA15E";
     }
   }
 
   const numFactAction = row?.num_fact ?? row?.num ?? row?.id_fact ?? null;
   const isReturning = numFactAction !== null && returningIds.includes(String(numFactAction));
+
+  const rowKey = String(row.num_fact || row.id_fact || row.picint || Math.random());
+  const isProductsExpanded = expandedProducts[rowKey] ?? false;
 
   return (
     <Card
@@ -3172,7 +3195,20 @@ useEffect(() => {
         boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
         border: '1px solid #e5e7eb',
         overflow: 'hidden',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
         transition: 'all 0.3s ease',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 6,
+          background: statusAccent,
+        },
         '&:hover': {
           boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
           transform: 'translateY(-2px)',
@@ -3184,7 +3220,8 @@ useEffect(() => {
         sx={{
           background: headerBg,
           p: 2.25,
-          color: "white",
+          color: headerFg,
+          pl: 2.75,
         }}
       >
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
@@ -3193,50 +3230,67 @@ useEffect(() => {
               {isChiraVal ? `Chira #${num}` : `Invoice #${num}`}
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-              <Chip
-                icon={paySummary.isClosed ? <LockIcon fontSize="small" /> : undefined}
-                label={statusLabel}
-                size="small"
-                sx={{
-                  backgroundColor: "rgba(0,0,0,0.18)",
-                  color: "white",
-                  fontWeight: 800,
-                }}
-              />
-              <Typography sx={{ fontSize: 13, opacity: 0.9 }}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0.5 }}>
+                <Chip
+                  icon={paySummary.isClosed ? <LockIcon fontSize="small" /> : undefined}
+                  label={statusLabel}
+                  size="small"
+                  sx={{
+                    backgroundColor: headerChipBg,
+                    color: headerFg,
+                    fontWeight: 900,
+                  }}
+                />
+                {hasDiscount && (
+                  <Chip
+                    label="Discount"
+                    size="small"
+                    variant="outlined"
+                    sx={{
+                      height: 22,
+                      '& .MuiChip-label': { px: 1, fontSize: 11, fontWeight: 800 },
+                      borderColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.35)',
+                      color: headerFg,
+                    }}
+                  />
+                )}
+              </Box>
+
+              {invoiceTypeLabel && (
+                <Chip
+                  label={invoiceTypeLabel}
+                  size="small"
+                  sx={{
+                    backgroundColor: typeColor,
+                    color: '#111827',
+                    fontWeight: 900,
+                  }}
+                />
+              )}
+
+              <Typography sx={{ fontSize: 13, color: headerMutedFg }}>
                 {date} • {createdStr}
               </Typography>
             </Box>
           </Box>
           
           <Box sx={{ textAlign: 'right' }}>
-            <Chip
-              icon={isClosed ? <LockIcon fontSize="small" /> : undefined}
-              label={isClosed ? "Closed" : "Open"}
-              size="small"
-              sx={{
-                backgroundColor: isClosed ? '#10b981' : '#f59e0b',
-                color: 'white',
-                fontWeight: 700,
-              }}
-            />
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Chip
+                label={psCode ? `${psCode}` : "PS"}
+                size="small"
+                sx={{
+                  backgroundColor: headerChipBg,
+                  color: headerFg,
+                  fontWeight: 800,
+                }}
+              />
+            </Box>
           </Box>
         </Box>
 
         {/* Meta Info Row */}
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', fontSize: 13, opacity: 0.95 }}>
-          {psCode && (
-            <Chip
-              label={`${psCode}`}
-              size="small"
-              sx={{
-                backgroundColor: 'rgba(255,255,255,0.2)',
-                color: 'white',
-                fontWeight: 700,
-                letterSpacing: 0.5,
-              }}
-            />
-          )}
           {(user || clientName || clientContact) && (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
               {/* User Section */}
@@ -3249,7 +3303,7 @@ useEffect(() => {
                     sx={{
                       p: 0.5,
                       minWidth: 0,
-                      color: 'primary.main',
+                      color: theme.palette.mode === 'dark' ? '#93c5fd' : 'primary.main',
                       textTransform: 'none',
                       fontWeight: 700,
                       background: 'none',
@@ -3263,7 +3317,11 @@ useEffect(() => {
                       <IconButton
                         size="small"
                         onClick={() => handleOpenEditSeller(row)}
-                        sx={{ color: 'white', bgcolor: 'rgba(0,0,0,0.2)', '&:hover': { bgcolor: 'rgba(0,0,0,0.35)' } }}
+                        sx={{
+                          color: headerFg,
+                          bgcolor: headerChipBg,
+                          '&:hover': { bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)' },
+                        }}
                       >
                         <EditIcon fontSize="inherit" />
                       </IconButton>
@@ -3276,7 +3334,7 @@ useEffect(() => {
               {(clientName || clientContact) && (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
                   {clientName && (
-                    customerIdForLink != null ? (
+                    hasCustomerProfileLink ? (
                       <Button
                         size="small"
                         component={RouterLink}
@@ -3284,11 +3342,11 @@ useEffect(() => {
                         sx={{
                           p: 0.5,
                           minWidth: 0,
-                          color: '#fbbf24',
+                          color: theme.palette.mode === 'dark' ? '#fbbf24' : '#92400e',
                           textTransform: 'none',
                           fontWeight: 700,
-                          background: 'rgba(255,255,255,0.1)',
-                          '&:hover': { textDecoration: 'underline', background: 'rgba(255,255,255,0.2)' },
+                          background: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                          '&:hover': { textDecoration: 'underline', background: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.06)' },
                         }}
                         onClick={() => {
                           try {
@@ -3303,14 +3361,13 @@ useEffect(() => {
                         🛍️ {clientName}
                       </Button>
                     ) : (
-                      // fallback: just show text if no ID
-                      <Typography sx={{ fontWeight: 600, color: '#fbbf24' }}>
+                      <Typography sx={{ fontWeight: 600, color: theme.palette.mode === 'dark' ? '#fbbf24' : '#92400e' }}>
                         🛍️ {clientName}
                       </Typography>
                     )
                   )}
                   {clientContact && (
-                    <Typography sx={{ fontSize: 12, opacity: 0.85 }}>📞 {clientContact}</Typography>
+                    <Typography sx={{ fontSize: 12, color: headerMutedFg }}>📞 {clientContact}</Typography>
                   )}
                 </Box>
               )}
@@ -3319,7 +3376,7 @@ useEffect(() => {
         </Box>
         
         {invoiceComment && (
-          <Box sx={{ mt: 1, p: 1, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 1 }}>
+          <Box sx={{ mt: 1, p: 1, backgroundColor: headerChipBg, borderRadius: 1 }}>
             <Typography sx={{ fontSize: 12, fontStyle: 'italic' }}>
               💬 {invoiceComment}
             </Typography>
@@ -3327,14 +3384,21 @@ useEffect(() => {
         )}
       </Box>
 
-      <CardContent sx={{ p: 3 }}>
+      <CardContent sx={{ p: 3, display: "flex", flexDirection: "column", flex: 1 }}>
         {/* Financial Summary */}
         <Box sx={{ mb: 3, p: 2, backgroundColor: '#f8fafc', borderRadius: 2 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.25, color: '#0f172a' }}>
             Payment Summary
           </Typography>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 1.5 }}>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+              gap: 1.5,
+              alignItems: 'start',
+            }}
+          >
             {/* TOTAL */}
             {paySummary.isGold ? (
               <Box>
@@ -3360,7 +3424,7 @@ useEffect(() => {
             {/* PAID */}
             {(paySummary.paid.lyd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (LYD)</Typography>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Amount due(LYD)</Typography>
                 <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.lyd)} LYD
                 </Typography>
@@ -3369,7 +3433,7 @@ useEffect(() => {
 
             {(paySummary.paid.usd > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (USD)</Typography>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Amount due(USD)</Typography>
                 <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.usd)} USD
                 </Typography>
@@ -3383,7 +3447,7 @@ useEffect(() => {
 
             {(paySummary.paid.eur > eps) && (
               <Box>
-                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Paid Amount (EUR)</Typography>
+                <Typography sx={{ fontSize: 11, color: "#64748b" }}>Amount due(EUR)</Typography>
                 <Typography sx={{ fontSize: 16, fontWeight: 800, color: "#10b981" }}>
                   {formatWholeAmount(paySummary.paid.eur)} EUR
                 </Typography>
@@ -3452,238 +3516,245 @@ useEffect(() => {
           return null;
         })()}
         {details.length > 0 && (
-          <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 2, color: 'text.primary', fontSize: 16 }}>
-              Products ({details.length})
-            </Typography>
-            <Box
-              sx={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-                gap: 1.5,
-              }}
-            >
-              {details.map((d: any, idx: number) => {
-                const productImageId = d.imageId ?? d.id_achat ?? d.picint ?? d.id_art ?? d.ID_ART;
-
-                const imgType = resolveTypeFromSupplierType(d.typeSupplier);
-                const imgKey = productImageId ? makeImgKey(imgType, productImageId) : "";
-
-                const productBlobUrls =
-                  (imgKey && imageBlobUrls[imgKey]) ||
-                  (productImageId != null ? imageBlobUrls[String(productImageId)] : []) ||
-                  [];
-
-                const productRawUrls =
-                  (imgKey && imageUrls[imgKey]) ||
-                  (productImageId != null ? imageUrls[String(productImageId)] : []) ||
-                  [];
-
-                // Choose only THIS item’s image; otherwise fallback.
-                const primaryImg = productBlobUrls[0] || productRawUrls[0] || FALLBACK_ITEM_IMAGE;
-
-                // Ensure individual price is shown (already computed in merge)
-                const rawPrice = d.prix_vente_remise;
-                const currencyLabel =
-                  String(d.typeSupplier || "").toLowerCase().includes("gold") ? "LYD" : "USD";
-                const resolvedPriceLabel =
-                  rawPrice !== "" && rawPrice !== null && rawPrice !== undefined
-                    ? `${formatNumber(rawPrice)} ${currencyLabel}`
-                    : "—";
-
-                return (
-                  <Card
-                    key={idx}
-                    variant="outlined"
-                    sx={{
-                      borderRadius: 2,
-                      overflow: "hidden",
-                      border: (theme) => `1px solid ${theme.palette.divider}`,
-                      transition: "0.15s ease",
-                      "&:hover": { boxShadow: 3, borderColor: (theme) => theme.palette.primary.main },
-                    }}
-                  >
-                    <Box sx={{ display: "flex", gap: 2, p: 1.5, alignItems: "stretch" }}>
-                      {/* Image (fixed, always shows fallback) */}
-                      <Box
-                        sx={{
-                          width: 92,
-                          height: 92,
-                          borderRadius: 2,
-                          overflow: "hidden",
-                          flex: "0 0 auto",
-                          bgcolor: (theme) => (theme.palette.mode === "dark" ? "#111827" : "#e2e8f0"),
-                          border: "1px solid rgba(0,0,0,0.06)",
-                          position: "relative",
-                          cursor: primaryImg !== FALLBACK_ITEM_IMAGE ? "pointer" : "default",
-                        }}
-                        onClick={() => {
-                          if (primaryImg && primaryImg !== FALLBACK_ITEM_IMAGE) {
-                            setImageDialogUrl(primaryImg);
-                            setImageDialogOpen(true);
-                          }
-                        }}
-                      >
-                        <img
-                          src={primaryImg}
-                          alt="Product"
-                          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                          onError={(e) => {
-                            // Force fallback for THIS element only
-                            const img = e.currentTarget as HTMLImageElement;
-                            img.src = FALLBACK_ITEM_IMAGE;
-                          }}
-                        />
-                        {d.IS_GIFT && (
-                          <Chip
-                            label="🎁 Gift"
-                            size="small"
-                            sx={{
-                              position: "absolute",
-                              top: 6,
-                              left: 6,
-                              bgcolor: "#fbbf24",
-                              color: "#111827",
-                              fontWeight: 900,
-                              height: 22,
-                            }}
-                          />
-                        )}
-                      </Box>
-
-                      {/* Details */}
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
-                          <Typography
-                            sx={{
-                              fontWeight: 900,
-                              fontSize: 14,
-                              color: "text.primary",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                            title={d.design || ""}
-                          >
-                            {d.design || "Unnamed Product"}
-                          </Typography>
-
-                          <Typography sx={{ fontWeight: 900, fontSize: 14, color: "primary.main", flex: "0 0 auto" }}>
-                            {resolvedPriceLabel}
-                          </Typography>
-                        </Box>
-
-                        <Box sx={{ mt: 0.75, display: "flex", gap: 1, flexWrap: "wrap" }}>
-                          <Chip
-                            label={String(d.typeSupplier || "").replace(/^\s+|\s+$/g, "") || "Type"}
-                            size="small"
-                            sx={{ fontWeight: 800, }}
-                          />
-                          {d.weight && (
-                            <Chip
-                              label={`⚖️ ${d.weight}g`}
-                              size="small"
-                              sx={{ fontWeight: 800 }}
-                            />
-                          )}
-                          {d.code && (
-                            <Chip
-                              label={`🔖 ${d.code}`}
-                              size="small"
-                              sx={{ fontWeight: 800, }}
-                            />
-                          )}
-                          {d.CODE_EXTERNAL && (
-                            <Chip
-                              label={`Ref: ${d.CODE_EXTERNAL}`}
-                              size="small"
-                              sx={{ fontWeight: 800, }}
-                            />
-                          )}
-                          {productImageId && (
-                            <Chip
-                              label={`ImgID: ${productImageId}`}
-                              size="small"
-                              sx={{ fontWeight: 800 }}
-                            />
-                          )}
-                        </Box>
-
-                        {/* Chira button stays as-is */}
-                        {isChiraVal && (
-                          <Button
-                            variant="contained"
-                            size="small"
-                            fullWidth
-                            sx={{ mt: 1.25, fontSize: 12, py: 0.75, textTransform: "none", fontWeight: 800 }}
-                            onClick={() => {
-                              const invoiceIdForLine = d.id_fact || row.id_fact || row.num_fact;
-                              setChiraDialogIdFact(invoiceIdForLine);
-                              setChiraDialogOpen(true);
-                            }}
-                          >
-                            Return Chira
-                          </Button>
-                        )}
-                      </Box>
-                    </Box>
-                  </Card>
-                );
-              })}
+          <Box sx={{ mb: 2 }}>
+            <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, mb: 1 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'text.primary', fontSize: 16 }}>
+                Products ({details.length})
+              </Typography>
+              <IconButton
+                size="small"
+                onClick={() =>
+                  setExpandedProducts((prev) => ({
+                    ...prev,
+                    [rowKey]: !isProductsExpanded,
+                  }))
+                }
+              >
+                {isProductsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              </IconButton>
             </Box>
+
+            <Collapse in={isProductsExpanded} timeout="auto" unmountOnExit>
+              <Box
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
+                  gap: 1.5,
+                }}
+              >
+                {details.map((d: any, idx: number) => {
+                  const productImageId = d.imageId ?? d.id_achat ?? d.picint ?? d.id_art ?? d.ID_ART;
+                  const imgType = resolveTypeFromSupplierType(d.typeSupplier);
+                  const imgKey = makeImgKey(imgType, productImageId);
+
+                  const productBlobUrls =
+                    (imgKey && imageBlobUrls[imgKey]) ||
+                    (productImageId != null ? imageBlobUrls[String(productImageId)] : []) ||
+                    [];
+
+                  const productRawUrls =
+                    (imgKey && imageUrls[imgKey]) ||
+                    (productImageId != null ? imageUrls[String(productImageId)] : []) ||
+                    [];
+
+                  const primaryImg = productBlobUrls[0] || productRawUrls[0] || FALLBACK_ITEM_IMAGE;
+
+                  const rawPrice = d.prix_vente_remise;
+                  const currencyLabel =
+                    String(d.typeSupplier || "").toLowerCase().includes("gold") ? "LYD" : "USD";
+                  const resolvedPriceLabel =
+                    rawPrice !== "" && rawPrice !== null && rawPrice !== undefined
+                      ? `${formatNumber(rawPrice)} ${currencyLabel}`
+                      : "—";
+
+                  return (
+                    <Card
+                      key={idx}
+                      variant="outlined"
+                      sx={{
+                        borderRadius: 2,
+                        overflow: "hidden",
+                        border: (theme) => `1px solid ${theme.palette.divider}`,
+                        transition: "0.15s ease",
+                        "&:hover": {
+                          boxShadow: 3,
+                          borderColor: (theme) => theme.palette.primary.main,
+                        },
+                      }}
+                    >
+                      <Box sx={{ display: "flex", gap: 2, p: 1.5, alignItems: "stretch" }}>
+                        <Box
+                          sx={{
+                            width: 92,
+                            height: 92,
+                            borderRadius: 2,
+                            overflow: "hidden",
+                            flex: "0 0 auto",
+                            bgcolor: (theme) => (theme.palette.mode === "dark" ? "#111827" : "#e2e8f0"),
+                            border: "1px solid rgba(0,0,0,0.06)",
+                            position: "relative",
+                            cursor: primaryImg !== FALLBACK_ITEM_IMAGE ? "pointer" : "default",
+                          }}
+                          onClick={() => {
+                            if (primaryImg && primaryImg !== FALLBACK_ITEM_IMAGE) {
+                              setImageDialogUrl(primaryImg);
+                              setImageDialogOpen(true);
+                            }
+                          }}
+                        >
+                          <img
+                            src={primaryImg}
+                            alt="Product"
+                            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                            onError={(e) => {
+                              const img = e.currentTarget as HTMLImageElement;
+                              img.src = FALLBACK_ITEM_IMAGE;
+                            }}
+                          />
+                          {d.IS_GIFT && (
+                            <Chip
+                              label="🎁 Gift"
+                              size="small"
+                              sx={{
+                                position: "absolute",
+                                top: 6,
+                                left: 6,
+                                bgcolor: "#fbbf24",
+                                color: "#111827",
+                                fontWeight: 900,
+                                height: 22,
+                              }}
+                            />
+                          )}
+                        </Box>
+
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1 }}>
+                            <Typography
+                              sx={{
+                                fontWeight: 900,
+                                fontSize: 14,
+                                color: "text.primary",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                              title={d.design || ""}
+                            >
+                              {d.design || "Unnamed Product"}
+                            </Typography>
+
+                            <Typography sx={{ fontWeight: 900, fontSize: 14, color: "primary.main", flex: "0 0 auto" }}>
+                              {resolvedPriceLabel}
+                            </Typography>
+                          </Box>
+
+                          <Box sx={{ mt: 0.75, display: "flex", gap: 1, flexWrap: "wrap" }}>
+                            <Chip
+                              label={String(d.typeSupplier || "").replace(/^\s+|\s+$/g, "") || "Type"}
+                              size="small"
+                              sx={{ fontWeight: 800 }}
+                            />
+                            {d.weight && (
+                              <Chip label={`⚖️ ${d.weight}g`} size="small" sx={{ fontWeight: 800 }} />
+                            )}
+                            {d.code && (
+                              <Chip label={`🔖 ${d.code}`} size="small" sx={{ fontWeight: 800 }} />
+                            )}
+                            {d.CODE_EXTERNAL && (
+                              <Chip label={`Ref: ${d.CODE_EXTERNAL}`} size="small" sx={{ fontWeight: 800 }} />
+                            )}
+                            {productImageId && (
+                              <Chip label={`ImgID: ${productImageId}`} size="small" sx={{ fontWeight: 800 }} />
+                            )}
+                          </Box>
+
+                          {isChiraVal && (
+                            <Button
+                              variant="contained"
+                              size="small"
+                              fullWidth
+                              sx={{ mt: 1.25, fontSize: 12, py: 0.75, textTransform: "none", fontWeight: 800 }}
+                              onClick={() => {
+                                const invoiceIdForLine = d.id_fact || row.id_fact || row.num_fact;
+                                setChiraDialogIdFact(invoiceIdForLine);
+                                setChiraDialogOpen(true);
+                              }}
+                            >
+                              Return Chira
+                            </Button>
+                          )}
+                        </Box>
+                      </Box>
+                    </Card>
+                  );
+                })}
+              </Box>
+            </Collapse>
           </Box>
         )}
 
         {/* Action Buttons */}
-        <Box sx={{ mt: 3, display: 'flex', gap: 2, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-          <Button
-            variant="outlined"
-            startIcon={<FileCopyIcon />}
-            onClick={() => {
-              setSelectedInvoice(row);
-              setPrintDialogOpen(true);
+        <Box sx={{ mt: "auto", pt: 2 }}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: !isClosed ? "1fr 1fr" : "1fr",
+              gap: 1.5,
+              alignItems: "stretch",
             }}
-            sx={{ textTransform: 'none', fontWeight: 600 }}
           >
-            View Invoice
-          </Button>
-          
-          {!isClosed && (
             <Button
-              variant="contained"
-              color="error"
-              onClick={async () => {
-                setCloseError("");
-                setClosePayLydStr("");
-                setClosePayUsdStr("");
-                setClosePayUsdLydStr("");
-                setClosePayEurStr("");
-                setClosePayEurLydStr("");
-                setCloseMakeCashVoucher(true);
-                setCloseInvoice(row);
-                setCloseDialogOpen(true);
-
-                try {
-                  const token = localStorage.getItem("token");
-                  const psParam = String(row?.ps ?? "");
-                  const usrParam = String(row?.usr ?? "");
-                  const nfParam = String(row?.num_fact ?? "");
-                  if (token && psParam && usrParam && nfParam) {
-                    const verifyRes = await axios.get(`/invoices/Getinvoice/`, {
-                      params: { ps: psParam, usr: usrParam, num_fact: nfParam },
-                      headers: { Authorization: `Bearer ${token}` },
-                    });
-                    setCloseInvoiceRows(Array.isArray(verifyRes.data) ? verifyRes.data : []);
-                  }
-                } catch {
-                  setCloseInvoiceRows([]);
-                }
+              fullWidth
+              variant="outlined"
+              startIcon={<FileCopyIcon />}
+              onClick={() => {
+                setSelectedInvoice(row);
+                setPrintDialogOpen(true);
               }}
-              sx={{ textTransform: 'none', fontWeight: 700 }}
+              sx={{ textTransform: 'none', fontWeight: 700, py: 1.25 }}
             >
-              Validate Payment
+              View Invoice
             </Button>
-          )}
+
+            {!isClosed && (
+              <Button
+                fullWidth
+                variant="contained"
+                color="error"
+                onClick={async () => {
+                  setCloseError("");
+                  setClosePayLydStr("");
+                  setClosePayUsdStr("");
+                  setClosePayUsdLydStr("");
+                  setClosePayEurStr("");
+                  setClosePayEurLydStr("");
+                  setCloseMakeCashVoucher(true);
+                  setCloseInvoice(row);
+                  setCloseDialogOpen(true);
+
+                  try {
+                    const token = localStorage.getItem("token");
+                    const psParam = String(row?.ps ?? "");
+                    const usrParam = String(row?.usr ?? "");
+                    const nfParam = String(row?.num_fact ?? "");
+                    if (token && psParam && usrParam && nfParam) {
+                      const verifyRes = await axios.get(`/invoices/Getinvoice/`, {
+                        params: { ps: psParam, usr: usrParam, num_fact: nfParam },
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      setCloseInvoiceRows(Array.isArray(verifyRes.data) ? verifyRes.data : []);
+                    }
+                  } catch {
+                    setCloseInvoiceRows([]);
+                  }
+                }}
+                sx={{ textTransform: 'none', fontWeight: 800, py: 1.25 }}
+              >
+                Validate Payment
+              </Button>
+            )}
+          </Box>
         </Box>
       </CardContent>
     </Card>
@@ -4489,6 +4560,55 @@ useEffect(() => {
                 />
               </Box>
 
+              {/* Sort */}
+              <Box sx={{ flex: "1 1 220px", minWidth: 220, maxWidth: { md: 320 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="sort-by-label">Sort by</InputLabel>
+                  <Select
+                    labelId="sort-by-label"
+                    value={sortBy}
+                    label="Sort by"
+                    onChange={(e) => setSortBy(e.target.value as any)}
+                  >
+                    <MenuItem value="invoice_number">Invoice number</MenuItem>
+                    <MenuItem value="value">Value</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              <Box sx={{ flex: "1 1 160px", minWidth: 160, maxWidth: { md: 220 } }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel id="sort-dir-label">Direction</InputLabel>
+                  <Select
+                    labelId="sort-dir-label"
+                    value={sortDir}
+                    label="Direction"
+                    onChange={(e) => setSortDir(e.target.value as any)}
+                  >
+                    <MenuItem value="desc">High to low</MenuItem>
+                    <MenuItem value="asc">Low to high</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+
+              {sortBy === "value" && (
+                <Box sx={{ flex: "1 1 160px", minWidth: 160, maxWidth: { md: 220 } }}>
+                  <FormControl size="small" fullWidth>
+                    <InputLabel id="sort-currency-label">Currency</InputLabel>
+                    <Select
+                      labelId="sort-currency-label"
+                      value={sortCurrency}
+                      label="Currency"
+                      onChange={(e) => setSortCurrency(e.target.value as any)}
+                    >
+                      <MenuItem value="LYD">LYD</MenuItem>
+                      <MenuItem value="USD">USD</MenuItem>
+                      <MenuItem value="EUR">EUR</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+              )}
+
               {/* Search */}
               <Box sx={{ flex: "2 1 280px", minWidth: 240 }}>
                 <TextField
@@ -4564,36 +4684,67 @@ useEffect(() => {
 
         <Card sx={{ mb: 2, borderRadius: 2, boxShadow: 1 }}>
           <CardContent sx={{ p: 2 }}>
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start" }}>
-              <Box sx={{ minWidth: 220 }}>
-                <Typography variant="body2" color="textSecondary">Total gold grams sold</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                  {formatNumber(topSummary.totalGoldGrams)} g
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr", md: "1fr 1fr 1fr" },
+                gap: 2,
+                alignItems: "start",
+              }}
+            >
+              <Box>
+                <Typography variant="body2" color="textSecondary">Total unpaid</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 900, color: "error.main" }}>
+                  LYD {formatNumber(topSummary.unpaid.lyd)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  USD {formatNumber(topSummary.unpaid.usd)}
+                  {topSummary.unpaid.eur > MONEY_EPS ? ` • EUR ${formatNumber(topSummary.unpaid.eur)}` : ""}
                 </Typography>
               </Box>
 
-              <Box sx={{ minWidth: 260 }}>
-                <Typography variant="body2" color="textSecondary">Sales</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 800 }}>
-                  LYD {formatWholeAmount(topSummary.sales.lyd)}
+              <Box>
+                <Typography variant="body2" color="textSecondary">Invoice Count</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 900 }}>
+                  {summaryStats.invoiceCount}
                 </Typography>
-                {(topSummary.sales.usd > MONEY_EPS || topSummary.sales.eur > MONEY_EPS) && (
-                  <Typography variant="body2" color="textSecondary">
-                    USD {formatWholeAmount(topSummary.sales.usd)} • EUR {formatWholeAmount(topSummary.sales.eur)}
-                  </Typography>
-                )}
               </Box>
 
-              <Box sx={{ minWidth: 260 }}>
-                <Typography variant="body2" color="textSecondary">Unpaid totals</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 800, color: topSummary.unpaid.lyd > MONEY_EPS ? "error.main" : "text.primary" }}>
-                  LYD {formatWholeAmount(topSummary.unpaid.lyd)}
+              <Box>
+                <Typography variant="body2" color="textSecondary">Item Count</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 900 }}>
+                  {summaryStats.itemCount}
                 </Typography>
-                {(topSummary.unpaid.usd > MONEY_EPS || topSummary.unpaid.eur > MONEY_EPS) && (
-                  <Typography variant="body2" color="textSecondary">
-                    USD {formatWholeAmount(topSummary.unpaid.usd)} • EUR {formatWholeAmount(topSummary.unpaid.eur)}
-                  </Typography>
-                )}
+              </Box>
+
+              <Box>
+                <Typography variant="body2" color="textSecondary">Total Weight (gram)</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 900 }}>
+                  {formatNumber(summaryStats.totalWeight)}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Gold grams sold: {formatNumber(topSummary.totalGoldGrams)} g
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography variant="body2" color="textSecondary">Total (gold)</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 900 }}>
+                  {formatNumber(summaryStats.totalGold)} LYD
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Items sold: {topSummary.byType.gold.itemsSold}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography variant="body2" color="textSecondary">Total (diamond / watches)</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>
+                  Diamond: {formatNumber(summaryStats.totalDiamond)} USD
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 900 }}>
+                  Watches: {formatNumber(summaryStats.totalWatch)} USD
+                </Typography>
               </Box>
             </Box>
 
@@ -4610,33 +4761,127 @@ useEffect(() => {
             </Box>
 
             <Collapse in={showTopSummaryDetails} timeout="auto" unmountOnExit>
-              <Box sx={{ mt: 1.5 }}>
-                <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-                  Items sold (Gold / Diamond / Watches)
-                </Typography>
-                <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>
-                  {topSummary.byType.gold.itemsSold} / {topSummary.byType.diamond.itemsSold} / {topSummary.byType.watches.itemsSold}
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Gold sales: LYD {formatWholeAmount(topSummary.byType.gold.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.gold.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.gold.sales.eur)}
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Diamond sales: LYD {formatWholeAmount(topSummary.byType.diamond.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.diamond.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.diamond.sales.eur)}
-                </Typography>
-                <Typography variant="body2" color="textSecondary">
-                  Watches sales: LYD {formatWholeAmount(topSummary.byType.watches.sales.lyd)} • USD {formatWholeAmount(topSummary.byType.watches.sales.usd)} • EUR {formatWholeAmount(topSummary.byType.watches.sales.eur)}
-                </Typography>
-                <Box sx={{ mt: 1 }}>
-                  <Typography variant="body2" color="textSecondary">
-                    Unpaid — Gold: LYD {formatWholeAmount(topSummary.byType.gold.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.gold.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.gold.unpaid.eur)}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Unpaid — Diamond: LYD {formatWholeAmount(topSummary.byType.diamond.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.diamond.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.diamond.unpaid.eur)}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Unpaid — Watches: LYD {formatWholeAmount(topSummary.byType.watches.unpaid.lyd)} • USD {formatWholeAmount(topSummary.byType.watches.unpaid.usd)} • EUR {formatWholeAmount(topSummary.byType.watches.unpaid.eur)}
-                  </Typography>
-                </Box>
+              <Box
+                sx={{
+                  mt: 1.5,
+                  display: "grid",
+                  gridTemplateColumns: { xs: "1fr", md: "1fr 1fr 1fr" },
+                  gap: 2,
+                }}
+              >
+                {/* GOLD */}
+                <Card variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Typography sx={{ fontWeight: 900, mb: 1, color: "#b45309" }}>Gold</Typography>
+
+                    <Typography variant="body2" color="textSecondary">Items sold</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>
+                      {topSummary.byType.gold.itemsSold}
+                    </Typography>
+
+                    <Typography variant="body2" color="textSecondary">Sales</Typography>
+                    <Typography sx={{ fontWeight: 900 }}>
+                      LYD {formatWholeAmount(topSummary.byType.gold.sales.lyd)}
+                    </Typography>
+                    {(topSummary.byType.gold.sales.usd > MONEY_EPS || topSummary.byType.gold.sales.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.gold.sales.usd > MONEY_EPS ? `USD ${formatWholeAmount(topSummary.byType.gold.sales.usd)}` : ""}
+                        {topSummary.byType.gold.sales.usd > MONEY_EPS && topSummary.byType.gold.sales.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.gold.sales.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.gold.sales.eur)}` : ""}
+                      </Typography>
+                    )}
+
+                    <Divider sx={{ my: 1.25 }} />
+
+                    <Typography variant="body2" color="textSecondary">Unpaid</Typography>
+                    <Typography sx={{ fontWeight: 900, color: "error.main" }}>
+                      LYD {formatWholeAmount(topSummary.byType.gold.unpaid.lyd)}
+                    </Typography>
+                    {(topSummary.byType.gold.unpaid.usd > MONEY_EPS || topSummary.byType.gold.unpaid.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.gold.unpaid.usd > MONEY_EPS ? `USD ${formatWholeAmount(topSummary.byType.gold.unpaid.usd)}` : ""}
+                        {topSummary.byType.gold.unpaid.usd > MONEY_EPS && topSummary.byType.gold.unpaid.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.gold.unpaid.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.gold.unpaid.eur)}` : ""}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* DIAMOND */}
+                <Card variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Typography sx={{ fontWeight: 900, mb: 1, color: "#0ea5e9" }}>Diamond</Typography>
+
+                    <Typography variant="body2" color="textSecondary">Items sold</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>
+                      {topSummary.byType.diamond.itemsSold}
+                    </Typography>
+
+                    <Typography variant="body2" color="textSecondary">Sales</Typography>
+                    <Typography sx={{ fontWeight: 900 }}>
+                      USD {formatWholeAmount(topSummary.byType.diamond.sales.usd)}
+                    </Typography>
+                    {(topSummary.byType.diamond.sales.lyd > MONEY_EPS || topSummary.byType.diamond.sales.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.diamond.sales.lyd > MONEY_EPS ? `LYD ${formatWholeAmount(topSummary.byType.diamond.sales.lyd)}` : ""}
+                        {topSummary.byType.diamond.sales.lyd > MONEY_EPS && topSummary.byType.diamond.sales.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.diamond.sales.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.diamond.sales.eur)}` : ""}
+                      </Typography>
+                    )}
+
+                    <Divider sx={{ my: 1.25 }} />
+
+                    <Typography variant="body2" color="textSecondary">Unpaid</Typography>
+                    <Typography sx={{ fontWeight: 900, color: (topSummary.byType.diamond.unpaid.usd > MONEY_EPS || topSummary.byType.diamond.unpaid.lyd > MONEY_EPS || topSummary.byType.diamond.unpaid.eur > MONEY_EPS) ? "error.main" : "text.primary" }}>
+                      USD {formatWholeAmount(topSummary.byType.diamond.unpaid.usd)}
+                    </Typography>
+                    {(topSummary.byType.diamond.unpaid.lyd > MONEY_EPS || topSummary.byType.diamond.unpaid.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.diamond.unpaid.lyd > MONEY_EPS ? `LYD ${formatWholeAmount(topSummary.byType.diamond.unpaid.lyd)}` : ""}
+                        {topSummary.byType.diamond.unpaid.lyd > MONEY_EPS && topSummary.byType.diamond.unpaid.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.diamond.unpaid.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.diamond.unpaid.eur)}` : ""}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* WATCHES */}
+                <Card variant="outlined" sx={{ borderRadius: 2, overflow: "hidden" }}>
+                  <CardContent sx={{ p: 1.5 }}>
+                    <Typography sx={{ fontWeight: 900, mb: 1, color: "#7c3aed" }}>Watches</Typography>
+
+                    <Typography variant="body2" color="textSecondary">Items sold</Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 900, mb: 1 }}>
+                      {topSummary.byType.watches.itemsSold}
+                    </Typography>
+
+                    <Typography variant="body2" color="textSecondary">Sales</Typography>
+                    <Typography sx={{ fontWeight: 900 }}>
+                      USD {formatWholeAmount(topSummary.byType.watches.sales.usd)}
+                    </Typography>
+                    {(topSummary.byType.watches.sales.lyd > MONEY_EPS || topSummary.byType.watches.sales.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.watches.sales.lyd > MONEY_EPS ? `LYD ${formatWholeAmount(topSummary.byType.watches.sales.lyd)}` : ""}
+                        {topSummary.byType.watches.sales.lyd > MONEY_EPS && topSummary.byType.watches.sales.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.watches.sales.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.watches.sales.eur)}` : ""}
+                      </Typography>
+                    )}
+
+                    <Divider sx={{ my: 1.25 }} />
+
+                    <Typography variant="body2" color="textSecondary">Unpaid</Typography>
+                    <Typography sx={{ fontWeight: 900, color: (topSummary.byType.watches.unpaid.usd > MONEY_EPS || topSummary.byType.watches.unpaid.lyd > MONEY_EPS || topSummary.byType.watches.unpaid.eur > MONEY_EPS) ? "error.main" : "text.primary" }}>
+                      USD {formatWholeAmount(topSummary.byType.watches.unpaid.usd)}
+                    </Typography>
+                    {(topSummary.byType.watches.unpaid.lyd > MONEY_EPS || topSummary.byType.watches.unpaid.eur > MONEY_EPS) && (
+                      <Typography variant="body2" color="textSecondary">
+                        {topSummary.byType.watches.unpaid.lyd > MONEY_EPS ? `LYD ${formatWholeAmount(topSummary.byType.watches.unpaid.lyd)}` : ""}
+                        {topSummary.byType.watches.unpaid.lyd > MONEY_EPS && topSummary.byType.watches.unpaid.eur > MONEY_EPS ? " • " : ""}
+                        {topSummary.byType.watches.unpaid.eur > MONEY_EPS ? `EUR ${formatWholeAmount(topSummary.byType.watches.unpaid.eur)}` : ""}
+                      </Typography>
+                    )}
+                  </CardContent>
+                </Card>
               </Box>
             </Collapse>
           </CardContent>

@@ -1,5 +1,3 @@
-/* eslint-disable react-hooks/exhaustive-deps */
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Grid } from '@mui/material';
@@ -75,9 +73,12 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import html2canvas from "html2canvas";
 import CloseIcon from "@mui/icons-material/Close";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import SettingsIcon from "@mui/icons-material/Settings";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 
 dayjs.extend(utc);
 dayjs.extend(isSameOrBefore);
@@ -115,7 +116,7 @@ function parseStartDateLocal(val: any): dayjs.Dayjs | null {
   return null;
 }
 
-type EmpOption = { id: number; name: string; ps?: string; tStart?: string; tEnd?: string };
+type EmpOption = { id: number; name: string; nameAr?: string; ps?: string; tStart?: string; tEnd?: string; fingerprintNeeded?: boolean | null; state?: boolean | null };
 
 type EmpScheduleInfo = {
   start: string;
@@ -129,6 +130,117 @@ const months = Array.from({ length: 12 }, (_, i) => ({
 }));
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 6 }, (_, i) => currentYear - 2 + i);
+
+function parseLooseBoolean(value: any): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value == null) return undefined;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return undefined;
+  }
+  const s = String(value).trim().toLowerCase();
+  if (!s) return undefined;
+  if (s === "true" || s === "1" || s === "yes" || s === "y" || s === "on") return true;
+  if (s === "false" || s === "0" || s === "no" || s === "n" || s === "off") return false;
+  return undefined;
+}
+
+function pickField(obj: any, keys: string[]): any {
+  if (!obj) return undefined;
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, k) && (obj as any)[k] !== undefined) {
+      return (obj as any)[k];
+    }
+  }
+  return undefined;
+}
+
+function extractFingerprintRaw(obj: any): any {
+  const direct = pickField(obj, [
+    "FINGERPRINT_NEEDED",
+    "fingerprint_needed",
+    "fingerprintNeeded",
+    "FP_REQUIRED",
+    "fp_required",
+    "NEED_FINGERPRINT",
+    "need_fingerprint",
+    "IS_FP_REQUIRED",
+    "is_fp_required",
+    "FINGERPRINT",
+    "fingerprint",
+    "FP",
+    "fp",
+  ]);
+  if (direct !== undefined) return direct;
+
+  try {
+    for (const k of Object.keys(obj || {})) {
+      const lk = k.toLowerCase();
+      if (lk.includes("finger") || lk === "fp" || lk.includes("biometric")) return (obj as any)[k];
+    }
+  } catch {}
+  return undefined;
+}
+
+function extractStateRaw(obj: any): any {
+  const direct = pickField(obj, [
+    "STATE",
+    "state",
+    "ACTIVE",
+    "active",
+    "Actived",
+    "STATUS",
+    "Status",
+  ]);
+  if (direct !== undefined) return direct;
+  try {
+    for (const k of Object.keys(obj || {})) {
+      const lk = k.toLowerCase();
+      if (lk === "state" || lk === "active" || lk === "status") return (obj as any)[k];
+    }
+  } catch {}
+  return undefined;
+}
+
+function extractArabicNameRaw(obj: any): string | null {
+  const direct = pickField(obj, [
+    "NAME_AR",
+    "name_ar",
+    "NAME_ARABIC",
+    "name_arabic",
+    "AR_NAME",
+    "ar_name",
+    "FULL_NAME_AR",
+    "full_name_ar",
+  ]);
+  const val = direct != null ? String(direct).trim() : "";
+  return val ? val : null;
+}
+
+function escapeHtml(s: string) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizePossiblyMojibakeUtf8(input: any): string {
+  const s = input == null ? "" : String(input);
+  if (!s) return "";
+  const hasLatin1Bytes = /[\u0080-\u00FF]/.test(s);
+  if (!hasLatin1Bytes) return s;
+  try {
+    const bytes = Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const decodedHasArabic = /[\u0600-\u06FF]/.test(decoded);
+    if (decoded && decodedHasArabic) return decoded;
+  } catch {}
+  return s;
+}
 
 // ---- TIME UTILITIES ----
 
@@ -165,6 +277,7 @@ interface Employee {
   T_START?: string | null;
   T_END?: string | null;
   TITLE?: string | null;
+  FINGERPRINT_NEEDED?: boolean | null;
 }
 
 /**
@@ -501,6 +614,403 @@ export default function TimeSheetsPage() {
     if (exportMode !== "single" || exportEmployeeId == null) return null;
     return employees.find((emp) => emp.id === exportEmployeeId) || null;
   }, [exportMode, exportEmployeeId, employees]);
+
+  const getEmployeeLabelForExport = useCallback(
+    (empId: number) => {
+      const meta = employees.find((e) => e.id === empId) || null;
+      const ar = meta?.nameAr ? normalizePossiblyMojibakeUtf8(meta.nameAr).trim() : "";
+      const en = meta?.name ? normalizePossiblyMojibakeUtf8(meta.name).trim() : "";
+      return {
+        ar: ar || en || String(empId),
+        en: en || ar || String(empId),
+        ps: meta?.ps ? String(meta.ps) : "",
+      };
+    },
+    [employees]
+  );
+
+  const generateSingleEmployeeCorporatePrint = useCallback(
+    async (empId: number) => {
+      const mm = String(exportMonth).padStart(2, "0");
+      const monthStart = dayjs(`${exportYear}-${mm}-01`).startOf("day");
+      const daysInMonth = monthStart.daysInMonth();
+      const days = await getTimesheetDays(empId, exportYear, exportMonth);
+      if (!days || days.length === 0) throw new Error("No timesheet data available for the selected month.");
+
+      const dayMap = new Map<number, TimesheetDay>();
+      for (const d of days) {
+        const n = Number((d as any).day ?? 0);
+        if (n > 0) dayMap.set(n, d);
+      }
+
+      const sched = empSchedule.get(empId) || null;
+      const start12 = sched?.start ? to12h(sched.start) : "—";
+      const end12 = sched?.end ? to12h(sched.end) : "—";
+      const label = getEmployeeLabelForExport(empId);
+
+      const fileSafe = (s: string) =>
+        s
+          .trim()
+          .replace(/[\\/:*?"<>|]+/g, "_")
+          .replace(/\s+/g, "_")
+          .slice(0, 80);
+      const fileBase = `${fileSafe(label.ar || label.en || String(empId))}_timesheet_${mm}_${exportYear}`;
+
+      const dayCodes: string[] = [];
+      const dayIn: string[] = [];
+      const dayOut: string[] = [];
+      const dayMissing: string[] = [];
+
+      let totalMissingMin = 0;
+      let fridayCount = 0;
+
+      const weekdayLabels: string[] = [];
+      const isFridayCol: boolean[] = [];
+
+      let lateCount = 0;
+      let absentCount = 0;
+      let earlyCount = 0;
+      let holidayCount = 0;
+      let holidayWorkedCount = 0;
+      let presentCount = 0;
+
+      const lateDays: number[] = [];
+      const absentDays: number[] = [];
+      const earlyDays: number[] = [];
+      const holidayWorkedDays: number[] = [];
+
+      for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+        const ymd = `${exportYear}-${mm}-${String(dayNum).padStart(2, "0")}`;
+        const d = dayMap.get(dayNum) || null;
+        const isFriday = dayjs(ymd).day() === 5;
+        const isHoliday = Boolean(d?.isHoliday) || holidaysSet.has(ymd);
+        const isAbsent = isAbsentDay(d);
+        const isPresent = hasPresence(d);
+
+        const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][dayjs(ymd).day()] || "";
+        weekdayLabels.push(dow);
+        isFridayCol.push(isFriday);
+        if (isFriday) fridayCount++;
+
+        if (isPresent) presentCount++;
+        if (isAbsent && !isHoliday && !isFriday) {
+          absentCount++;
+          absentDays.push(dayNum);
+        }
+        if (isHoliday) holidayCount++;
+        if (isHoliday && isPresent) {
+          holidayWorkedCount++;
+          holidayWorkedDays.push(dayNum);
+        }
+
+        const entry = d?.entry ? formatEntryExit(d.entry) : "";
+        const exit = d?.exit ? formatEntryExit(d.exit) : "";
+
+        let code = "";
+        const rawCode = String((d as any)?.code || "").toUpperCase();
+        if (rawCode) code = rawCode;
+        if (isFriday) code = "";
+        else if (isAbsent && !isHoliday) code = "A";
+        if (isHoliday && isPresent) code = "PHF";
+
+        let isLate = false;
+        if (sched?.start && entry && !isHoliday) {
+          try {
+            const st = dayjs(`${ymd}T${sched.start}:00`);
+            const et = dayjs(`${ymd}T${entry}:00`);
+            const diff = et.diff(st, "minute");
+            if (diff > 0) {
+              isLate = true;
+              lateCount++;
+              lateDays.push(dayNum);
+              if (code === "P") code = "PL";
+            }
+          } catch {}
+        }
+
+        let isEarly = false;
+        if (sched?.end && exit && !isHoliday && isPresent) {
+          try {
+            const et = dayjs(`${ymd}T${sched.end}:00`);
+            const xt = dayjs(`${ymd}T${exit}:00`);
+            const diff = et.diff(xt, "minute");
+            if (diff > 0) {
+              isEarly = true;
+              earlyCount++;
+              earlyDays.push(dayNum);
+            }
+          } catch {}
+        }
+
+        const excludeMissing = isFriday || isHoliday;
+        const missingHrs =
+          !excludeMissing && typeof (d as any)?.deltaMin === "number" && (d as any).deltaMin < 0
+            ? (Math.abs((d as any).deltaMin) / 60).toFixed(2)
+            : "";
+
+        if (!excludeMissing && typeof (d as any)?.deltaMin === "number" && (d as any).deltaMin < 0) {
+          totalMissingMin += Math.abs((d as any).deltaMin);
+        }
+
+        dayCodes.push(code);
+        dayIn.push(entry);
+        dayOut.push(exit);
+        dayMissing.push(missingHrs && missingHrs !== "0.00" ? missingHrs : "");
+      }
+
+      const dayHeaders = Array.from({ length: daysInMonth }, (_, i) => String(i + 1));
+      const renderRow = (labelText: string, values: string[]) => {
+        const labelCell = `<th class="rowHdr">${escapeHtml(labelText)}</th>`;
+        const tds = values
+          .map((v, idx) =>
+            `<td class="v${isFridayCol[idx] ? " fri" : ""}">${v ? escapeHtml(String(v)) : ""}</td>`
+          )
+          .join("");
+        return `<tr>${labelCell}${tds}</tr>`;
+      };
+
+      const hasAnyValue = (arr: string[]) => arr.some((v) => String(v || "").trim() !== "");
+      const showCodeRow = hasAnyValue(dayCodes);
+      const showInRow = hasAnyValue(dayIn);
+      const showOutRow = hasAnyValue(dayOut);
+      const showMissingRow = hasAnyValue(dayMissing);
+
+      const exceptionsParts: string[] = [];
+      const fmtDays = (arr: number[]) => arr.join(", ");
+      if (absentDays.length) exceptionsParts.push(`<div><b>Absent:</b> ${escapeHtml(fmtDays(absentDays))}</div>`);
+      if (lateDays.length) exceptionsParts.push(`<div><b>Late:</b> ${escapeHtml(fmtDays(lateDays))}</div>`);
+      if (earlyDays.length) exceptionsParts.push(`<div><b>Left Early:</b> ${escapeHtml(fmtDays(earlyDays))}</div>`);
+      if (holidayWorkedDays.length) exceptionsParts.push(`<div><b>Holiday Worked:</b> ${escapeHtml(fmtDays(holidayWorkedDays))}</div>`);
+      const exceptionsHtml = exceptionsParts.length
+        ? `<div class="box"><div class="title">Exceptions</div><div class="meta">${exceptionsParts.join("")}</div></div>`
+        : ``;
+
+      const missingHoursTotal = totalMissingMin > 0 ? Number((totalMissingMin / 60).toFixed(2)) : 0;
+      const summaryItems: Array<{ k: string; v: number | string }> = [
+        { k: "Present", v: presentCount },
+        { k: "Absent", v: absentCount },
+        { k: "Late", v: lateCount },
+        { k: "Left Early", v: earlyCount },
+        { k: "Holidays", v: holidayCount },
+        { k: "Holiday Worked", v: holidayWorkedCount },
+        { k: "Missing (hrs)", v: missingHoursTotal },
+      ].filter((x) => (typeof x.v === "number" ? x.v > 0 : String(x.v).trim() !== "") || x.k === "Present" || x.k === "Absent");
+      const summaryHtml = summaryItems.length
+        ? `<div class="box"><div class="title">Summary</div><div class="summary">${summaryItems
+            .map((it) => `<div class="kpi"><div class="k">${escapeHtml(it.k)}</div><div class="v">${escapeHtml(String(it.v))}</div></div>`)
+            .join("")}</div></div>`
+        : ``;
+
+      const logoUrl = new URL("/Gaja_out_black.png", window.location.href).toString();
+
+      const html = `<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base href="${escapeHtml(window.location.origin)}/" />
+  <title>${escapeHtml(fileBase)}.pdf</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    body { margin: 0; font-family: Cairo, Arial, sans-serif; color: #0f172a; }
+    .page { --padX: 34px; position: relative; padding: 18px var(--padX) 44px var(--padX); }
+    .wrap { display: flex; flex-direction: column; gap: 12px; }
+    .topbar { display: grid; grid-template-columns: 1fr 1.4fr auto; align-items: center; column-gap: 14px; }
+    .headerTitle { font-weight: 900; font-size: 20px; letter-spacing: 0.2px; }
+    .employeeName { font-weight: 800; font-size: 18px; text-align: center; direction: auto; unicode-bidi: plaintext; }
+    .logo { height: 42px; max-width: 180px; width: auto; object-fit: contain; object-position: right center; }
+    .headerGrid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px 18px; align-items: start; margin-top: 12px; }
+    .meta { margin-top: 10px; display: grid; gap: 8px; }
+    .kv { display: grid; grid-template-columns: 150px 1fr; column-gap: 12px; align-items: baseline; font-size: 12px; line-height: 1.35; }
+    .kv .k { font-weight: 800; }
+    .kv .k::after { content: ":"; margin-left: 0; margin-right: 10px; }
+    .kv .v { font-weight: 500; direction: auto; unicode-bidi: plaintext; }
+    .box { border: 0; border-radius: 14px; padding: 14px 16px; background: #ffffff; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.10); }
+    .title { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
+    .matrix { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .matrix th, .matrix td { border: 1px solid #e2e8f0; padding: 4px 3px; font-size: 9px; text-align: center; }
+    .matrix thead th { background: #0ea5e9; color: #fff; border-color: #0284c7; font-weight: 800; }
+    .matrix thead th.fri { background: #e2e8f0; color: #475569; border-color: #cbd5e1; }
+    .matrix .rowHdr { background: #f1f5f9; text-align: left; font-weight: 800; width: 120px; }
+    .matrix td.v { font-weight: 700; }
+    .matrix td.fri { background: #f8fafc; color: #94a3b8; }
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+    .kpi { border: 0; border-radius: 12px; padding: 10px 12px; background: #f8fafc; }
+    .kpi .k { font-size: 10px; opacity: 0.8; }
+    .kpi .v { font-size: 16px; font-weight: 800; margin-top: 2px; }
+    .legend { font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .legend span { border: 1px solid #e2e8f0; padding: 4px 8px; border-radius: 999px; background: #fff; }
+    .footer { position: absolute; right: var(--padX); bottom: 14px; font-size: 10px; opacity: 0.75; text-align: right; }
+    .noPrint { display: none; }
+    .wk { font-weight: 700; font-size: 8px; opacity: 0.9; }
+  </style>
+</head>
+  <body>
+  <div class="page">
+    <div class="wrap">
+      <div class="topbar">
+        <div class="headerTitle">Timesheet</div>
+        <div class="employeeName" style="text-align: center; direction: auto; unicode-bidi: plaintext;">${escapeHtml(label.ar || label.en || String(empId))}</div>
+        <img class="logo" src="${escapeHtml(logoUrl)}" alt="GAJA" />
+      </div>
+
+      <div class="headerGrid">
+        <div class="box">
+          <div class="meta">
+            <div class="kv"><div class="k">Employee ID</div><div class="v">${empId}</div></div>
+            <div class="kv"><div class="k">Month</div><div class="v">${escapeHtml(monthStart.format("MMMM"))} ${exportYear}</div></div>
+            <div class="kv"><div class="k">Shift</div><div class="v">${escapeHtml(start12)} — ${escapeHtml(end12)}</div></div>
+            ${label.ps ? `<div class="kv"><div class="k">PS</div><div class="v">${escapeHtml(label.ps)}</div></div>` : ``}
+          </div>
+        </div>
+        <div>${summaryHtml}</div>
+      </div>
+
+    <div class="box">
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th class="rowHdr">Day</th>
+            ${dayHeaders
+              .map((d, idx) => `<th class="${isFridayCol[idx] ? "fri" : ""}">${escapeHtml(d)}</th>`)
+              .join("")}
+          </tr>
+          <tr>
+            <th class="rowHdr"></th>
+            ${weekdayLabels
+              .map((w, idx) =>
+                `<th class="wk ${isFridayCol[idx] ? "fri" : ""}">${escapeHtml(w)}</th>`
+              )
+              .join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${showCodeRow ? renderRow("Code", dayCodes) : ""}
+          ${showInRow ? renderRow("In", dayIn) : ""}
+          ${showOutRow ? renderRow("Out", dayOut) : ""}
+          ${showMissingRow ? renderRow("Missing (hrs)", dayMissing) : ""}
+        </tbody>
+      </table>
+    </div>
+
+    ${exceptionsHtml}
+
+    <div class="box">
+      <div class="legend">
+        <span><b>P</b> Present</span>
+        <span><b>A</b> Absent</span>
+        <span><b>PL</b> Present Late</span>
+        <span><b>PH</b> Holiday</span>
+        <span><b>PHF</b> Holiday Worked</span>
+      </div>
+    </div>
+
+      <div class="footer">Generated: ${escapeHtml(dayjs().format("YYYY-MM-DD HH:mm"))}</div>
+    </div>
+  </div>
+  </body>
+  </html>`;
+
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.left = "-10000px";
+      iframe.style.top = "0";
+      iframe.style.width = "1200px";
+      iframe.style.height = "900px";
+      iframe.style.border = "0";
+      iframe.style.opacity = "0";
+      iframe.setAttribute("aria-hidden", "true");
+      document.body.appendChild(iframe);
+
+      try {
+        iframe.srcdoc = html;
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(() => {
+            reject(new Error("Timed out rendering export document"));
+          }, 15000);
+
+          iframe.onload = () => {
+            window.clearTimeout(timer);
+            resolve();
+          };
+        });
+
+        const doc = iframe.contentDocument;
+        if (!doc || !iframe.contentWindow) throw new Error("Failed to render export document");
+
+        try {
+          await (doc as any).fonts?.ready;
+        } catch {}
+
+        const target = (doc.querySelector(".page") as HTMLElement) || doc.body;
+
+        try {
+          const imgs = Array.from(doc.images || []);
+          await Promise.all(
+            imgs.map((img: any) =>
+              img?.complete
+                ? Promise.resolve()
+                : new Promise<void>((resolve) => {
+                    img.onload = () => resolve();
+                    img.onerror = () => resolve();
+                  })
+            )
+          );
+        } catch {}
+
+        const canvas = await html2canvas(target, {
+          scale: 2,
+          backgroundColor: "#ffffff",
+          useCORS: true,
+          logging: false,
+          windowWidth: target.scrollWidth,
+          windowHeight: target.scrollHeight,
+        });
+
+        const { jsPDF } = await getPdfLibraries();
+        const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+
+        const pageW = pdf.internal.pageSize.getWidth();
+        const pageH = pdf.internal.pageSize.getHeight();
+
+        const pxPerPt = canvas.width / pageW;
+        const pageHPx = Math.floor(pageH * pxPerPt);
+
+        const sliceCanvas = document.createElement("canvas");
+        sliceCanvas.width = canvas.width;
+        const sliceCtx = sliceCanvas.getContext("2d");
+        if (!sliceCtx) throw new Error("Failed to prepare export canvas");
+
+        let y = 0;
+        let pageIndex = 0;
+        while (y < canvas.height) {
+          const sliceH = Math.min(pageHPx, canvas.height - y);
+          sliceCanvas.height = sliceH;
+          sliceCtx.clearRect(0, 0, sliceCanvas.width, sliceH);
+          sliceCtx.drawImage(canvas, 0, y, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+          const imgData = sliceCanvas.toDataURL("image/png");
+          const imgW = pageW;
+          const imgH = (sliceH / pxPerPt);
+
+          if (pageIndex > 0) pdf.addPage();
+          pdf.addImage(imgData, "PNG", 0, 0, imgW, imgH);
+
+          y += sliceH;
+          pageIndex++;
+        }
+
+        pdf.save(`${fileBase}.pdf`);
+      } finally {
+        document.body.removeChild(iframe);
+      }
+    },
+    [exportMonth, exportYear, getTimesheetDays, getEmployeeLabelForExport, getPdfLibraries]
+  );
 
   // Quick lookup: employee meta by id (name + fallback times)
   const empById = useMemo(() => {
@@ -1332,7 +1842,11 @@ export default function TimeSheetsPage() {
     try {
       setExportLoading(true);
       if (exportMode === "single" && exportEmployeeId) {
-        await generateSingleEmployeePdf(exportEmployeeId);
+        if (exportPeriod === "month") {
+          await generateSingleEmployeeCorporatePrint(exportEmployeeId);
+        } else {
+          await generateSingleEmployeePdf(exportEmployeeId);
+        }
       } else if (exportMode === "all" && rangeResults) {
         await generateAllEmployeesPdf(rangeResults);
       }
@@ -1392,6 +1906,13 @@ export default function TimeSheetsPage() {
   );
   const [rangeLoading, setRangeLoading] = useState(false);
   const [rangeError, setRangeError] = useState<string | null>(null);
+
+  const shiftRangeMonth = useCallback((deltaMonths: number) => {
+    setRangeFrom((prev) => {
+      const base = prev ?? dayjs().startOf("month");
+      return base.add(deltaMonths, "month").startOf("month");
+    });
+  }, []);
 
   // Declare the shape once (adjust if your backend differs)
   type PsPoint = {
@@ -1548,6 +2069,15 @@ useEffect(() => {
       // DEBUG: Log first employee to see actual data structure
       if (list.length > 0) {
         console.log('[DEBUG] First employee full data:', list[0]);
+        try {
+          const fpKeys = Object.keys(list[0] as any).filter((k) => {
+            const lk = k.toLowerCase();
+            return lk.includes('finger') || lk === 'fp' || lk.includes('biometric');
+          });
+          console.log('[DEBUG] Fingerprint-like keys:', fpKeys);
+          const fpRaw = extractFingerprintRaw(list[0]);
+          console.log('[DEBUG] Fingerprint raw + parsed:', { raw: fpRaw, parsed: parseLooseBoolean(fpRaw) });
+        } catch {}
         console.log('[DEBUG] CONTRACT_START variants:', {
           CONTRACT_START: (list[0] as any).CONTRACT_START,
           contract_start: (list[0] as any).contract_start,
@@ -1562,6 +2092,19 @@ useEffect(() => {
           t_end: (list[0] as any).t_end,
         });
       }
+
+      try {
+        let fpTrue = 0;
+        let fpFalse = 0;
+        let fpUnknown = 0;
+        for (const e of list as any[]) {
+          const p = parseLooseBoolean(extractFingerprintRaw(e));
+          if (p === true) fpTrue++;
+          else if (p === false) fpFalse++;
+          else fpUnknown++;
+        }
+        console.log('[DEBUG] listEmployees fingerprint distribution:', { fpTrue, fpFalse, fpUnknown, total: list.length });
+      } catch {}
 
       const filtered = list.filter((r: Employee) => {
         if (!empFilter) return true;
@@ -1583,12 +2126,25 @@ useEffect(() => {
         };
         const tStart = extractTime((r as any).T_START || (r as any).t_start);
         const tEnd = extractTime((r as any).T_END || (r as any).t_end);
+        const fingerprintNeeded = extractFingerprintRaw(r);
+        const stateRaw = extractStateRaw(r);
+        const nameAr = extractArabicNameRaw(r);
+        const nameEnRaw = r.NAME || r.name || String(r.ID_EMP);
+        const nameEn = normalizePossiblyMojibakeUtf8(nameEnRaw);
+        let nameArClean = nameAr ? normalizePossiblyMojibakeUtf8(nameAr) : null;
+        // Some backends store Arabic in NAME (not NAME_AR). If NAME contains Arabic, treat it as Arabic display name.
+        if (!nameArClean && /[\u0600-\u06FF]/.test(nameEn)) {
+          nameArClean = nameEn;
+        }
         return {
           id: Number(r.ID_EMP),
-          name: r.NAME || r.name || String(r.ID_EMP),
+          name: nameEn || String(r.ID_EMP),
+          nameAr: nameArClean || undefined,
           ps: (r.PS || r.ps || r.PS_POINT || r.psPoint || "").toString(),
           tStart,
           tEnd,
+          fingerprintNeeded: fingerprintNeeded === undefined ? null : (fingerprintNeeded as any),
+          state: stateRaw === undefined ? null : (stateRaw as any),
         } as EmpOption;
       });
       setEmployees(options);
@@ -2733,6 +3289,17 @@ useEffect(() => {
 
       y += 90;
 
+      const employeeLabelPdf = (() => {
+        try {
+          const meta = employees.find((e) => e.id === empId) || null;
+          const raw = String(meta?.name || employeeName || "").trim();
+          const ascii = raw.replace(/[\u0080-\uFFFF]/g, "").trim();
+          return ascii || `Employee #${empId}`;
+        } catch {
+          return `Employee #${empId}`;
+        }
+      })();
+
       // === EMPLOYEE INFORMATION SECTION (Rounded Box) ===
       doc.setDrawColor(220, 220, 220);
       doc.setFillColor(248, 248, 248);
@@ -2751,7 +3318,7 @@ useEffect(() => {
       doc.setFont("helvetica", "bold");
       doc.text("Name:", margin + 15, y + 45);
       doc.setFont("helvetica", "normal");
-      doc.text(employeeName, margin + 80, y + 45);
+      doc.text(employeeLabelPdf, margin + 80, y + 45);
       
       doc.setFont("helvetica", "bold");
       doc.text("Job Title:", margin + 15, y + 62);
@@ -3031,7 +3598,12 @@ useEffect(() => {
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_");
-      doc.save(`leave_balance_${slug || empId}_${year}.pdf`);
+
+      const slugSafe = employeeLabelPdf
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_");
+      doc.save(`leave_balance_${slugSafe || slug || empId}_${year}.pdf`);
     },
     [
       employees,
@@ -3968,6 +4540,14 @@ useEffect(() => {
                   mb: 1.5,
                 }}
               >
+                <IconButton
+                  size="small"
+                  aria-label="Previous month"
+                  onClick={() => shiftRangeMonth(-1)}
+                >
+                  <ChevronLeftIcon />
+                </IconButton>
+
                 <TextField
                   select
                   label={t("hr.timesheets.month") || "Month"}
@@ -3994,6 +4574,14 @@ useEffect(() => {
                     </MenuItem>
                   ))}
                 </TextField>
+
+                <IconButton
+                  size="small"
+                  aria-label="Next month"
+                  onClick={() => shiftRangeMonth(1)}
+                >
+                  <ChevronRightIcon />
+                </IconButton>
 
                 <TextField
                   select
@@ -4079,9 +4667,16 @@ useEffect(() => {
                   <Button
                     variant="outlined"
                     size="small"
-                    onClick={() => setLeaveLedgerDialogOpen(true)}
+                    onClick={() => {
+                      setExportMode("single");
+                      setExportPeriod("month");
+                      setExportEmployeeId(
+                        employeeId || (employees.length ? employees[0].id : null)
+                      );
+                      setExportOpen(true);
+                    }}
                   >
-                    {t("hr.timesheets.exportAll") || "Export All"}
+                    {t("hr.timesheets.export") || "Export Timesheets"}
                   </Button>
                   <IconButton aria-label="settings" onClick={() => setSettingsOpen(true)} size="large">
                     <SettingsIcon fontSize="large" />
@@ -4494,8 +5089,99 @@ useEffect(() => {
                       ].join(" ");
                     })();
 
+                    const visibleRows = (() => {
+                      const isAllowed = (row: any) => {
+                        const meta = empById.get(row.id_emp);
+
+                        const stateRaw = extractStateRaw(row) ?? meta?.state;
+                        // Only exclude explicitly inactive
+                        if (parseLooseBoolean(stateRaw) === false) return false;
+
+                        return true;
+                      };
+
+                      return filtered2.filter((r: any) => isAllowed(r));
+                    })();
+
+                    const visibleDiag = (() => {
+                      let activeTrue = 0;
+                      let activeFalse = 0;
+                      let activeUnknown = 0;
+                      for (const row of filtered2 as any[]) {
+                        const meta = empById.get(row.id_emp);
+                        const stateRaw = extractStateRaw(row) ?? meta?.state;
+                        const p = parseLooseBoolean(stateRaw);
+                        if (p === true) activeTrue++;
+                        else if (p === false) activeFalse++;
+                        else activeUnknown++;
+                      }
+                      return {
+                        total: (filtered2 as any[])?.length ?? 0,
+                        visible: (visibleRows as any[])?.length ?? 0,
+                        activeTrue,
+                        activeFalse,
+                        activeUnknown,
+                      };
+                    })();
+
+                    const totalsAgg = (() => {
+                      const leaveCounts: Record<string, number> = {};
+                      const attendanceCounts: Record<string, number> = {};
+                      let deltaMinTotal = 0;
+                      const today = dayjs().startOf("day");
+
+                      visibleRows.forEach((r) => {
+                        const byDate = new Map(r.days.map((d: any) => [d.date, d]));
+                        dates.forEach((d) => {
+                          const ymd = d.format("YYYY-MM-DD");
+                          const tsd = tsByEmp.get(r.id_emp)?.get(ymd);
+                          const rec = byDate.get(ymd);
+
+                          const isFuture = d.isAfter(today, "day");
+                          const isFriday = d.day() === 5;
+
+                          if (!isFuture && !isFriday && typeof tsd?.deltaMin === "number" && tsd.deltaMin < 0) {
+                            deltaMinTotal += tsd.deltaMin;
+                          }
+
+                          const baseCell = cellFor(rec, d, r);
+                          const centerCode = baseCell.centerCode;
+                          const finalCode = finalLeaveCodeForDay(
+                            r.id_emp,
+                            ymd,
+                            tsd,
+                            rec as any
+                          );
+
+                          const dayUp = String((rec as any)?.j ?? tsd?.code ?? "").toUpperCase();
+                          const isHoliday =
+                            holidaysSet.has(ymd) ||
+                            Boolean((tsd as any)?.isHoliday) ||
+                            Boolean((rec as any)?.isHoliday) ||
+                            dayUp === "PH" ||
+                            dayUp === "PHF";
+                          const isSick = /^(SL)$/i.test(finalCode || "");
+
+                          if (finalCode && visibleLeaveSet.has(finalCode)) {
+                            const shouldCountLeave = isSick || (!isHoliday && !isFriday);
+                            if (shouldCountLeave && LEAVE_TYPES[finalCode as keyof typeof LEAVE_TYPES]) {
+                              leaveCounts[finalCode] = (leaveCounts[finalCode] || 0) + 1;
+                            }
+                          }
+
+                          if (centerCode && visibleAttendanceSet.has(centerCode)) {
+                            if (ATTENDANCE_TYPES[centerCode as keyof typeof ATTENDANCE_TYPES]) {
+                              attendanceCounts[centerCode] = (attendanceCounts[centerCode] || 0) + 1;
+                            }
+                          }
+                        });
+                      });
+
+                      return { leaveCounts, attendanceCounts, deltaMinTotal };
+                    })();
+
                     return (
-                      <Box sx={{ overflowX: "auto" }}>
+                      <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: "70vh" }}>
                         <Box
                           sx={{
                             display: "grid",
@@ -4512,8 +5198,9 @@ useEffect(() => {
                               p: 0.5,
                               bgcolor: APPLE.datePillBg,
                               position: "sticky",
+                              top: 0,
                               left: 0,
-                              zIndex: 3,
+                              zIndex: 4,
                               minWidth: 56,
                               maxWidth: 56,
                             }}
@@ -4530,8 +5217,9 @@ useEffect(() => {
                               p: 0.5,
                               bgcolor: APPLE.datePillBg,
                               position: "sticky",
+                              top: 0,
                               left: 56,
-                              zIndex: 3,
+                              zIndex: 4,
                               minWidth: 180,
                               maxWidth: 180,
                             }}
@@ -4547,6 +5235,7 @@ useEffect(() => {
                           {/* day headers */}
                           {dates.map((d) => {
                             const isFri = d.day() === 5;
+                            const isToday = d.isSame(dayjs(), "day");
                             return (
                               <Box
                                 key={d.format("YYYYMMDD")}
@@ -4554,9 +5243,19 @@ useEffect(() => {
                                   p: 0.5,
                                   textAlign: "center",
                                   borderLeft: `1px solid ${APPLE.border}`,
+                                  position: "sticky",
+                                  top: 0,
+                                  zIndex: 3,
                                   bgcolor: isFri
                                     ? APPLE.fridayHeaderBg
                                     : APPLE.datePillBg,
+                                  boxShadow: isToday
+                                    ? (theme) =>
+                                        `inset 0 0 0 2px ${alpha(
+                                          theme.palette.primary.main,
+                                          theme.palette.mode === "dark" ? 0.55 : 0.35
+                                        )}`
+                                    : undefined,
                                 }}
                               >
                                 <Typography
@@ -4593,6 +5292,9 @@ useEffect(() => {
                               p: 0.5,
                               bgcolor: APPLE.datePillBg,
                               textAlign: "center",
+                              position: "sticky",
+                              top: 0,
+                              zIndex: 3,
                             }}
                           >
                             <Typography
@@ -4615,6 +5317,9 @@ useEffect(() => {
                                     p: 0.5,
                                     textAlign: "center",
                                     borderLeft: `1px solid ${APPLE.border}`,
+                                    position: "sticky",
+                                    top: 0,
+                                    zIndex: 3,
                                     bgcolor: alpha(
                                       meta.color,
                                       isDark ? 0.3 : 0.18
@@ -4660,6 +5365,9 @@ useEffect(() => {
                                     p: 0.5,
                                     textAlign: "center",
                                     borderLeft: `1px solid ${APPLE.border}`,
+                                    position: "sticky",
+                                    top: 0,
+                                    zIndex: 3,
                                     bgcolor: alpha(
                                       meta.color,
                                       isDark ? 0.3 : 0.18
@@ -4694,7 +5402,7 @@ useEffect(() => {
                             })}
 
                           {/* rows */}
-                          {filtered2.map((r) => {
+                          {visibleRows.map((r) => {
                             const byDate = new Map(
                               r.days.map((d: any) => [d.date, d])
                             );
@@ -4874,21 +5582,43 @@ useEffect(() => {
                                       gap: 0.5,
                                     }}
                                   >
-                                    {/* Name → encrypted profile URL */}
-                                    <Typography
-                                      component={Link}
-                                      to={buildEncryptedProfilePath(r.id_emp)}
-                                      sx={{
-                                        fontWeight: 800,
-                                        color: "primary.main",
-                                        textDecoration: "none",
-                                        "&:hover": {
-                                          textDecoration: "underline",
-                                        },
-                                      }}
-                                    >
-                                      {r.name || empById.get(r.id_emp)?.name || String(r.id_emp)}
-                                    </Typography>
+                                    {(() => {
+                                      const meta = empById.get(r.id_emp);
+                                      const stateRaw = extractStateRaw(r) ?? meta?.state;
+                                      const isActive = parseLooseBoolean(stateRaw) === false ? false : true;
+
+                                      return (
+                                        <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, flexWrap: "wrap" }}>
+                                          <Box
+                                            title={isActive ? "Active" : "Inactive"}
+                                            sx={{
+                                              width: 8,
+                                              height: 8,
+                                              borderRadius: "50%",
+                                              bgcolor: isActive ? "success.main" : "text.disabled",
+                                              boxShadow: isActive
+                                                ? (theme) => `0 0 0 3px ${alpha(theme.palette.success.main, 0.12)}`
+                                                : "none",
+                                            }}
+                                          />
+
+                                          <Typography
+                                            component={Link}
+                                            to={buildEncryptedProfilePath(r.id_emp)}
+                                            sx={{
+                                              fontWeight: 800,
+                                              color: "primary.main",
+                                              textDecoration: "none",
+                                              "&:hover": {
+                                                textDecoration: "underline",
+                                              },
+                                            }}
+                                          >
+                                            {r.name || meta?.name || String(r.id_emp)}
+                                          </Typography>
+                                        </Box>
+                                      );
+                                    })()}
 
                                     {/* Hours in AM/PM */}
                                     {(() => {
@@ -4939,6 +5669,7 @@ useEffect(() => {
                                 {/* day cells */}
                                 {dates.map((d) => {
                                   const ymd = d.format("YYYY-MM-DD");
+                                  const isToday = d.isSame(dayjs(), "day");
                                   const rec = byDate.get(ymd);
                                   const sty = cellFor(rec, d, r);
                                   return (
@@ -4956,6 +5687,13 @@ useEffect(() => {
                                         bgcolor: sty.bg,
                                         border: sty.border,
                                         borderLeft: `1px solid ${APPLE.border}`,
+                                        boxShadow: isToday
+                                          ? (theme) =>
+                                              `inset 0 0 0 2px ${alpha(
+                                                theme.palette.primary.main,
+                                                theme.palette.mode === "dark" ? 0.5 : 0.32
+                                              )}`
+                                          : undefined,
                                         cursor: sty.disabled ? "default" : "pointer",
                                         p: 0.5,
                                         position: "relative",
@@ -5185,6 +5923,119 @@ useEffect(() => {
                               </React.Fragment>
                             );
                           })}
+
+                          <React.Fragment key="__totals__">
+                            <Box
+                              sx={{
+                                p: 0.5,
+                                position: "sticky",
+                                bottom: 0,
+                                left: 0,
+                                bgcolor: "background.paper",
+                                zIndex: 4,
+                                minWidth: 56,
+                                maxWidth: 56,
+                                borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                                borderRight: (theme) => `1px solid ${theme.palette.divider}`,
+                              }}
+                            />
+                            <Box
+                              sx={{
+                                p: 0.5,
+                                position: "sticky",
+                                bottom: 0,
+                                left: 56,
+                                bgcolor: "background.paper",
+                                zIndex: 4,
+                                minWidth: 180,
+                                maxWidth: 180,
+                                borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                                borderRight: (theme) => `1px solid ${theme.palette.divider}`,
+                              }}
+                            >
+                              <Typography variant="caption" sx={{ fontWeight: 900 }}>
+                                TOTAL
+                              </Typography>
+                            </Box>
+
+                            {dates.map((d) => (
+                              <Box
+                                key={`tot-${d.format("YYYYMMDD")}`}
+                                sx={{
+                                  p: 0.5,
+                                  textAlign: "center",
+                                  borderLeft: `1px solid ${APPLE.border}`,
+                                  position: "sticky",
+                                  bottom: 0,
+                                  zIndex: 2,
+                                  bgcolor: "background.paper",
+                                  borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                                }}
+                              />
+                            ))}
+
+                            <Box
+                              sx={{
+                                p: 0.5,
+                                textAlign: "center",
+                                position: "sticky",
+                                bottom: 0,
+                                zIndex: 2,
+                                bgcolor: "background.paper",
+                                borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                              }}
+                            >
+                              <Typography variant="caption" sx={{ fontWeight: 900 }}>
+                                {totalsAgg.deltaMinTotal !== 0
+                                  ? roundedHoursWithSign(totalsAgg.deltaMinTotal)
+                                  : ""}
+                              </Typography>
+                            </Box>
+
+                            {leaveColumnOrder
+                              .filter((code) => visibleLeaveSet.has(code))
+                              .map((code) => (
+                                <Box
+                                  key={`tot-leave-${code}`}
+                                  sx={{
+                                    p: 0.5,
+                                    textAlign: "center",
+                                    borderLeft: `1px solid ${APPLE.border}`,
+                                    position: "sticky",
+                                    bottom: 0,
+                                    zIndex: 2,
+                                    bgcolor: "background.paper",
+                                    borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                                  }}
+                                >
+                                  <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                                    {totalsAgg.leaveCounts[code] || 0}
+                                  </Typography>
+                                </Box>
+                              ))}
+
+                            {attendanceColumnOrder
+                              .filter((code) => visibleAttendanceSet.has(code))
+                              .map((code) => (
+                                <Box
+                                  key={`tot-att-${code}`}
+                                  sx={{
+                                    p: 0.5,
+                                    textAlign: "center",
+                                    borderLeft: `1px solid ${APPLE.border}`,
+                                    position: "sticky",
+                                    bottom: 0,
+                                    zIndex: 2,
+                                    bgcolor: "background.paper",
+                                    borderTop: (theme) => `2px solid ${theme.palette.divider}`,
+                                  }}
+                                >
+                                  <Typography variant="caption" sx={{ fontWeight: 800 }}>
+                                    {totalsAgg.attendanceCounts[code] || 0}
+                                  </Typography>
+                                </Box>
+                              ))}
+                          </React.Fragment>
                         </Box>
                       </Box>
                     );

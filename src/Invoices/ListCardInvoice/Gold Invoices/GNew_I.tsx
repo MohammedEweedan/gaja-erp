@@ -1147,6 +1147,7 @@ const DNew_I = () => {
     typeFilter === "gold" ? "3" : "4"
   );
   const [viewAnchorEl, setViewAnchorEl] = useState<null | HTMLElement>(null);
+  const [goldDetailsExpanded, setGoldDetailsExpanded] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     fetchData("gold");
@@ -2848,6 +2849,28 @@ const DNew_I = () => {
                       src={(() => {
                         let url = dialogImageList[dialogImageIndex];
                         if (!url) return "/default-image.png";
+                        try {
+                          const dp: any = (dialogItem as any)?.DistributionPurchase;
+                          let watch: any = undefined;
+                          if (Array.isArray(dp) && dp.length > 0 && typeof dp[0] === "object") {
+                            watch = dp[0]?.OriginalAchatWatch;
+                          } else if (dp && typeof dp === "object") {
+                            watch = dp?.OriginalAchatWatch;
+                          }
+                          if (watch?.id_achat) {
+                            // Use the same working watch URL format as the card thumbnail:
+                            // https://<origin>/uploads/WatchPic/<id>/<filename>
+                            const basePart = String(url).split('?')[0];
+                            const fileName = basePart.split('/').pop() || '';
+                            const apiBaseRaw = ('https://system.gaja.ly/api/');
+                            let origin = '';
+                            try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
+                            const originHttps = origin.replace(/^http:\/\//i, 'https://');
+                            url = `${originHttps}/uploads/WatchPic/${Number(watch.id_achat)}/${fileName}`;
+                          }
+                        } catch {
+                          // ignore
+                        }
                         url = toApiImageAbsolute(url);
                         const token = localStorage.getItem("token");
                         if (token && url && !url.includes("token=")) {
@@ -3910,7 +3933,7 @@ const DNew_I = () => {
                                 return (
                                   <Box
                                     component="img"
-                                    src={"/GJ LOGO.png"}
+                                    src={"/login-logo.png"}
                                     alt="Product"
                                     loading="lazy"
                                     sx={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9, display: 'block' }}
@@ -3924,7 +3947,7 @@ const DNew_I = () => {
                                 return (
                                   <Box
                                     component="img"
-                                    src={"/GJ LOGO.png"}
+                                    src={"/login-logo.png"}
                                     alt="Product"
                                     loading="lazy"
                                     sx={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9, display: 'block' }}
@@ -3970,13 +3993,13 @@ const DNew_I = () => {
                                   onError={(e) => {
                                     const img = e.currentTarget as HTMLImageElement;
                                     img.onerror = null;
-                                    setResolvedImgSrc((prev) => ({ ...prev, [keyStr]: "/GJ LOGO.png" }));
+                                    setResolvedImgSrc((prev) => ({ ...prev, [keyStr]: "/login-logo.png" }));
                                   }}
                                 />
                               );
                             })()}
                           </Box>
-                          <Box sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                          <Box sx={{ p: 1, display: 'flex', flexDirection: 'column', gap: 0.25, flex: 1 }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
                               <Typography sx={{ fontWeight: 900, fontSize: 12, lineHeight: 1.2, flex: 1, minWidth: 0 }}>
                                 {`ID: ${String(headerIdLabel)}`}{row.Design_art ? ` - ${row.Design_art}` : ""}
@@ -3985,29 +4008,31 @@ const DNew_I = () => {
                                 <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
                                   <Typography
                                     variant="body2"
-                                    sx={{ fontWeight: 900, fontSize: 12, color: isGoldItem ? 'warning.main' : 'info.main' }}
+                                    sx={{ fontWeight: 950, fontSize: 14.5, color: isGoldItem ? 'warning.main' : 'info.main' }}
                                   >
                                     {priceText}
                                   </Typography>
                                   {isGoldItem && displaySub ? (
                                     <Typography
                                       variant="caption"
-                                      sx={{ fontWeight: 800, fontSize: 10.5, color: 'text.secondary' }}
+                                      sx={{ fontWeight: 900, fontSize: 12, color: 'text.secondary' }}
                                     >
                                       {displaySub} LYD/g
+                                    </Typography>
+                                  ) : null}
+                                  {isGoldItem ? (
+                                    <Typography
+                                      sx={{ fontWeight: 900, fontSize: 12, color: 'text.secondary', lineHeight: 1.1 }}
+                                    >
+                                      {row.qty}
+                                      <Box component="span" sx={{ ml: 0.5 }}>
+                                        g
+                                      </Box>
                                     </Typography>
                                   ) : null}
                                 </Box>
                               ) : null}
                             </Box>
-                            {isGoldItem && (
-                              <Typography sx={{ fontWeight: 800, fontSize: 12, lineHeight: 1.1, color: 'text.secondary' }}>
-                                Weight: {row.qty}
-                                <Box component="span" sx={{ ml: 0.5 }}>
-                                  g
-                                </Box>
-                              </Typography>
-                            )}
                             {isGoldItem && (
                               <Typography sx={{ fontWeight: 900, fontSize: 12, lineHeight: 1.1, color: 'warning.main' }}>
                                 {goldLabel}
@@ -4019,7 +4044,7 @@ const DNew_I = () => {
                               </Typography>
                             )}
                           </Box>
-                          <Box sx={{ p: 1, pt: 0 }}>
+                          <Box sx={{ p: 1, pt: 0, mt: 'auto' }}>
                             <Button
                               variant="contained"
                               color="warning"
@@ -4144,7 +4169,7 @@ const DNew_I = () => {
                                     onError={(e) => {
                                       const img = e.currentTarget as HTMLImageElement;
                                       img.onerror = null;
-                                      setResolvedImgSrc((prev) => ({ ...prev, [goldKeyStr]: "/GJ LOGO.png" }));
+                                      setResolvedImgSrc((prev) => ({ ...prev, [goldKeyStr]: "/login-logo.png" }));
                                     }}
                                     title={urls[idx] || "No image URL"}
                                   />
@@ -4153,7 +4178,7 @@ const DNew_I = () => {
                               ) : (
                                 <Box
                                   component="img"
-                                  src="/GJ LOGO.png"
+                                  src="/login-logo.png"
                                   alt="No Image"
                                   sx={{
                                     opacity: 0.5,
@@ -4290,20 +4315,36 @@ const DNew_I = () => {
                                         onClick={() => {
                                           // Open dialog with ALL watch images for this product (no marketing/invoice filtering)
                                           const token2 = localStorage.getItem("token");
-                                          const urlsForDialog = urls.map((u) => {
-                                            if (!u) return u;
-                                            if (token2 && !u.includes("token=")) {
-                                              return (
-                                                u +
-                                                (u.includes("?") ? "&" : "?") +
-                                                "token=" +
-                                                encodeURIComponent(token2)
-                                              );
-                                            }
-                                            return u;
-                                          });
+                                          const apiBaseRaw = ('https://system.gaja.ly/api/');
+                                          let origin = '';
+                                          try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
+                                          const originHttps = origin.replace(/^http:\/\//i, 'https://');
+                                          const urlsForDialog = urls
+                                            .map((u) => {
+                                              if (!u) return u;
+                                              try {
+                                                const basePart = String(u).split('?')[0];
+                                                const fileName = basePart.split('/').pop() || '';
+                                                return `${originHttps}/uploads/WatchPic/${Number(watch.id_achat)}/${fileName}`;
+                                              } catch {
+                                                return u;
+                                              }
+                                            })
+                                            .map((u) => {
+                                              if (!u) return u;
+                                              if (token2 && !u.includes("token=")) {
+                                                return (
+                                                  u +
+                                                  (u.includes("?") ? "&" : "?") +
+                                                  "token=" +
+                                                  encodeURIComponent(token2)
+                                                );
+                                              }
+                                              return u;
+                                            });
                                           setDialogImageList(normalizeDialogUrls(urlsForDialog));
                                           setDialogImageIndex(idx);
+                                          setDialogItem(row);
                                           setImageDialogOpen(true);
                                         }}
                                         onError={(e) => {
@@ -4396,34 +4437,32 @@ const DNew_I = () => {
                                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.05 }}>
                                     <Typography
                                       variant="body2"
-                                      sx={{ fontWeight: 900, fontSize: 12, color: isGoldItem ? 'warning.main' : 'info.main' }}
+                                      sx={{ fontWeight: 950, fontSize: 16, color: isGoldItem ? 'warning.main' : 'info.main' }}
                                     >
                                       {priceText}
                                     </Typography>
                                     {isGoldItem && displaySub ? (
                                       <Typography
                                         variant="caption"
-                                        sx={{ fontWeight: 800, fontSize: 10.5, color: 'text.secondary' }}
+                                        sx={{ fontWeight: 900, fontSize: 12.5, color: 'text.secondary' }}
                                       >
                                         {displaySub} LYD/g
+                                      </Typography>
+                                    ) : null}
+                                    {isGoldItem ? (
+                                      <Typography
+                                        sx={{ fontWeight: 900, fontSize: 13, color: 'text.secondary', lineHeight: 1.1 }}
+                                      >
+                                        {row.qty}
+                                        <Box component="span" sx={{ ml: 0.5 }}>
+                                          g
+                                        </Box>
                                       </Typography>
                                     ) : null}
                                   </Box>
                                 );
                               })()}
                             </Box>
-
-                            {row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes('gold') && (
-                              <Typography
-                                variant="body2"
-                                sx={{ color: 'text.secondary', fontWeight: 800, fontSize: 12 }}
-                              >
-                                Weight: {row.qty}
-                                <Box component="span" sx={{ ml: 0.5, fontSize: 12 }}>
-                                  g
-                                </Box>
-                              </Typography>
-                            )}
 
                             {row.Fournisseur?.TYPE_SUPPLIER && (
                               <Typography
@@ -4606,20 +4645,41 @@ const DNew_I = () => {
                               width: '100%',
                             }}
                           >
-                            <ul style={{ margin: 0, paddingLeft: 18 }}>
-                              {row.Fournisseur?.TYPE_SUPPLIER &&
-                                row.Fournisseur.TYPE_SUPPLIER.toLowerCase().includes("gold") && (
-                                  <>
-                                    <li>
-                                      <b>Stone:</b> {row.Color_Rush ?? "-"}
-                                    </li>
-                                    <li>
-                                      <b>Color:</b> {row.Color_Gold ?? "-"}
-                                    </li>
-
-                                  </>
-                                )}
-                            </ul>
+                            {row.Fournisseur?.TYPE_SUPPLIER?.toLowerCase().includes("gold") ? (
+                              <>
+                                <Button
+                                  variant="text"
+                                  color="inherit"
+                                  size="small"
+                                  onClick={() =>
+                                    setGoldDetailsExpanded((prev) => ({
+                                      ...prev,
+                                      [row.id_fact]: !prev[row.id_fact],
+                                    }))
+                                  }
+                                  sx={{
+                                    p: 0,
+                                    minWidth: 0,
+                                    fontWeight: 800,
+                                    textTransform: 'none',
+                                  }}
+                                >
+                                  {goldDetailsExpanded[row.id_fact] ? 'Hide details' : 'Show details'}
+                                </Button>
+                                <Collapse in={!!goldDetailsExpanded[row.id_fact]} timeout={180} unmountOnExit>
+                                  <Box sx={{ mt: 0.5 }}>
+                                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                                      <li>
+                                        <b>Stone:</b> {row.Color_Rush ?? "-"}
+                                      </li>
+                                      <li>
+                                        <b>Color:</b> {row.Color_Gold ?? "-"}
+                                      </li>
+                                    </ul>
+                                  </Box>
+                                </Collapse>
+                              </>
+                            ) : null}
                             {/* Exchange rate today: {(usdToLyd + 2.05).toLocaleString('en-LY', { minimumFractionDigits: 3, maximumFractionDigits: 3 })}*/}
                             {(() => {
                               let diamond: any = undefined;
@@ -4885,7 +4945,7 @@ const DNew_I = () => {
                             color="warning"
                             size="small"
                             sx={{
-                              mt: 1,
+                              mt: 'auto',
                               fontWeight: 700,
                               borderRadius: 2,
                               alignSelf: "stretch",

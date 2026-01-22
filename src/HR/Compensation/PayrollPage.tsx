@@ -42,6 +42,10 @@ import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import SettingsIcon from "@mui/icons-material/Settings";
 import PictureAsPdfOutlinedIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { getLeaveBalance, getLeaveRequests, getLeaveTypes, getHolidays } from "../../services/leaveService";
 import { getVacationsInRange } from "../../api/vacations";
 import type { VacationRecord } from "../../api/vacations";
@@ -71,6 +75,8 @@ export default function PayrollPage() {
   const [year, setYear] = React.useState<number>(y);
   const [month, setMonth] = React.useState<number>(m);
   const [ps, setPs] = React.useState<string>("");
+  const fullscreenRef = React.useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = React.useState<boolean>(false);
   const [usdToLyd] = React.useState<number>(0); // exchange removed; keep value for PDF logic
   const [psOptions, setPsOptions] = React.useState<PsItem[]>([]);
   const [psPoints, setPsPoints] = React.useState<Record<number, string>>({});
@@ -1226,6 +1232,129 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     onRun();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month, ps]);
+
+  React.useEffect(() => {
+    if (!isFullscreen) return;
+    if (tab !== "payroll") setTab("payroll");
+  }, [isFullscreen, tab]);
+
+  const psCycleValues = React.useMemo(() => {
+    const cur = String(ps ?? "").trim();
+    const fromPsOptions = ((psOptions || []) as any[])
+      .map((p: any) => String(p?.PS ?? ""))
+      .filter((v) => v != null && String(v).trim() !== "");
+
+    const fromPoints = Object.keys(psPoints || {})
+      .map((k) => String(k))
+      .filter((v) => v != null && String(v).trim() !== "");
+
+    const combined = Array.from(new Set(["", ...(cur ? [cur] : []), ...fromPsOptions, ...fromPoints]));
+    // Keep "All" first, then try to sort numeric-like PS values.
+    const rest = combined
+      .filter((v) => v !== "")
+      .sort((a, b) => {
+        const na = Number(a);
+        const nb = Number(b);
+        const fa = Number.isFinite(na);
+        const fb = Number.isFinite(nb);
+        if (fa && fb) return na - nb;
+        if (fa && !fb) return -1;
+        if (!fa && fb) return 1;
+        return String(a).localeCompare(String(b));
+      });
+    return ["", ...rest];
+  }, [ps, psOptions, psPoints]);
+
+  const psCountMap = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    (psOptions || []).forEach((p: any) => {
+      const k = String(p?.PS ?? "");
+      if (!k) return;
+      const c = Number(p?.count ?? 0) || 0;
+      m[k] = c;
+    });
+    return m;
+  }, [psOptions]);
+
+  const shiftMonth = React.useCallback(
+    (delta: number) => {
+      let yy = year;
+      let mm = month + delta;
+      while (mm < 1) {
+        mm += 12;
+        yy -= 1;
+      }
+      while (mm > 12) {
+        mm -= 12;
+        yy += 1;
+      }
+      setYear(yy);
+      setMonth(mm);
+    },
+    [year, month]
+  );
+
+  const shiftPs = React.useCallback(
+    (delta: number) => {
+      const values = psCycleValues;
+      if (!values || values.length <= 1) return;
+      const current = String(ps ?? "");
+      const foundIdx = values.indexOf(current);
+      const idx = foundIdx >= 0 ? foundIdx : 0;
+      const next = values[(idx + delta + values.length) % values.length];
+      setPs(next);
+    },
+    [ps, psCycleValues]
+  );
+
+  const toggleFullscreen = React.useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      const el = fullscreenRef.current;
+      if (el && (el as any).requestFullscreen) {
+        await (el as any).requestFullscreen();
+      }
+    } catch {}
+  }, []);
+
+  React.useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFsChange);
+    onFsChange();
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isFullscreen) return;
+    if (tab !== "payroll") return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as any;
+      const tag = String(target?.tagName || "").toLowerCase();
+      if (target?.isContentEditable) return;
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        shiftMonth(-1);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        shiftMonth(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        shiftPs(-1);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        shiftPs(1);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isFullscreen, tab, shiftMonth, shiftPs]);
 
   // Fetch sales metrics for the current window
   const fetchSales = React.useCallback(async () => {
@@ -4229,55 +4358,89 @@ React.useEffect(() => {
   }, [displayedRows, resolveCommissionFigures]);
 
   return (
-  <Box p={2}>
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Tabs
-          value={tab}
-          onChange={(_, v) => setTab(v)}
-          sx={{
-            mb: 1,
-            display: "flex",
-            justifyContent: "center",
-            "& .MuiTabs-flexContainer": {
-              gap: 1,
-            },
-          }}
-          TabIndicatorProps={{ sx: { display: "none" } }}
+  <Box
+    ref={fullscreenRef}
+    sx={{
+      p: isFullscreen ? 0 : 2,
+      width: isFullscreen ? "100vw" : "auto",
+      height: isFullscreen ? "100vh" : "auto",
+      overflow: isFullscreen ? "auto" : "visible",
+      bgcolor: isFullscreen ? "background.paper" : "transparent",
+      position: "relative",
+      display: isFullscreen ? "flex" : "block",
+      flexDirection: isFullscreen ? "column" : undefined,
+      minHeight: isFullscreen ? 0 : undefined,
+    }}
+  >
+    {isFullscreen && (
+      <Box sx={{ position: "fixed", top: 12, right: 12, zIndex: 2500 }}>
+        <IconButton
+          onClick={toggleFullscreen}
+          sx={{ bgcolor: "background.paper", boxShadow: 2, "&:hover": { bgcolor: "background.paper" } }}
         >
-          {[
-            { label: t("Payroll") || "Payroll", value: "payroll" },
-            { label: t("Salary Advance") || "Salary Advance", value: "advances" },
-            { label: t("Loans") || "Loans", value: "loans" },
-            { label: t("Reimbursements") || "Reimbursements", value: "adjustments" },
-            ...(isAdmin ? [{ label: t("Settings") || "Settings", value: "settings" }] : []),
-          ].map((tdef) => (
-            <Tab
-              key={tdef.value}
-              label={tdef.label}
-              value={tdef.value}
-              sx={{
-                minHeight: 0,
-                height: 32,
-                padding: "4px 14px",
-                lineHeight: 1,
-                color: "white !important",
-                borderRadius: 1,
-                textTransform: "none",
-                backgroundColor: tab === tdef.value ? "#b7a27d" : "#65a8bf",
-                "&.Mui-selected": {
-                  color: "white !important",
-                  backgroundColor: "#b7a27d",
-                },
-                "&:hover": {
-                  backgroundColor: tab === tdef.value ? "#b7a27d" : "#5793a7",
-                },
-              }}
-            />
-          ))}
-        </Tabs>
+          <FullscreenExitIcon />
+        </IconButton>
+      </Box>
+    )}
 
-        {tab === "payroll" && (
+    <Card
+      sx={{
+        mb: isFullscreen ? 1 : 2,
+        width: "100%",
+        borderRadius: isFullscreen ? 0 : undefined,
+        boxShadow: isFullscreen ? "none" : undefined,
+        flexShrink: isFullscreen ? 0 : undefined,
+      }}
+    >
+      <CardContent sx={{ p: isFullscreen ? 1 : undefined }}>
+        {!isFullscreen && (
+          <Tabs
+            value={tab}
+            onChange={(_, v) => setTab(v)}
+            sx={{
+              mb: 1,
+              display: "flex",
+              justifyContent: "center",
+              "& .MuiTabs-flexContainer": {
+                gap: 1,
+              },
+            }}
+            TabIndicatorProps={{ sx: { display: "none" } }}
+          >
+            {[
+              { label: t("Payroll") || "Payroll", value: "payroll" },
+              { label: t("Salary Advance") || "Salary Advance", value: "advances" },
+              { label: t("Loans") || "Loans", value: "loans" },
+              { label: t("Reimbursements") || "Reimbursements", value: "adjustments" },
+              ...(isAdmin ? [{ label: t("Settings") || "Settings", value: "settings" }] : []),
+            ].map((tdef) => (
+              <Tab
+                key={tdef.value}
+                label={tdef.label}
+                value={tdef.value}
+                sx={{
+                  minHeight: 0,
+                  height: 32,
+                  padding: "4px 14px",
+                  lineHeight: 1,
+                  color: "white !important",
+                  borderRadius: 1,
+                  textTransform: "none",
+                  backgroundColor: tab === tdef.value ? "#b7a27d" : "#65a8bf",
+                  "&.Mui-selected": {
+                    color: "white !important",
+                    backgroundColor: "#b7a27d",
+                  },
+                  "&:hover": {
+                    backgroundColor: tab === tdef.value ? "#b7a27d" : "#5793a7",
+                  },
+                }}
+              />
+            ))}
+          </Tabs>
+        )}
+
+        {(tab === "payroll" || isFullscreen) && (
           <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>
             <Box minWidth={140}>
               <TextField
@@ -4296,69 +4459,119 @@ React.useEffect(() => {
               </TextField>
             </Box>
             <Box minWidth={140}>
-              <TextField
-                select
-                fullWidth
-                label={t("hr.timesheets.month") || "Month"}
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
-                size="small"
-              >
-                {months.map((mm) => (
-                  <MenuItem key={mm} value={mm}>
-                    {String(mm).padStart(2, "0")}
-                  </MenuItem>
-                ))}
-              </TextField>
+              <Box display="flex" alignItems="center" gap={0.5}>
+                {!isFullscreen && (
+                  <IconButton size="small" onClick={() => shiftMonth(-1)}>
+                    <ChevronLeftIcon fontSize="small" />
+                  </IconButton>
+                )}
+                <TextField
+                  select
+                  fullWidth
+                  label={t("hr.timesheets.month") || "Month"}
+                  value={month}
+                  onChange={(e) => setMonth(Number(e.target.value))}
+                  size="small"
+                  sx={{ flex: 1 }}
+                >
+                  {months.map((mm) => (
+                    <MenuItem key={mm} value={mm}>
+                      {String(mm).padStart(2, "0")}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                {!isFullscreen && (
+                  <IconButton size="small" onClick={() => shiftMonth(1)}>
+                    <ChevronRightIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </Box>
             </Box>
             <Box minWidth={160}>
-              <TextField
-                select
-                fullWidth
-                label={t("hr.timesheets.psPoint") || "PS"}
-                value={ps}
-                onChange={(e) => setPs(e.target.value)}
-                size="small"
-              >
-                <MenuItem value="">{t("hr.timesheets.allPs") || "All PS"}</MenuItem>
-                {psOptions.map((p) => (
-                  <MenuItem key={String(p.PS)} value={String(p.PS)}>
-                    {`${formatPs(p.PS)} (${p.count})`}
-                  </MenuItem>
-                ))}
-              </TextField>
+              <Box display="flex" alignItems="center" gap={0.5}>
+                {isFullscreen && (
+                  <IconButton size="small" onClick={() => shiftPs(-1)} disabled={(psCycleValues?.length || 0) <= 1}>
+                    <ChevronLeftIcon fontSize="small" />
+                  </IconButton>
+                )}
+                <TextField
+                  select
+                  fullWidth
+                  label={t("hr.timesheets.psPoint") || "PS"}
+                  value={ps}
+                  onChange={(e) => setPs(e.target.value)}
+                  size="small"
+                  sx={{ flex: 1 }}
+                >
+                  <MenuItem value="">{t("hr.timesheets.allPs") || "All PS"}</MenuItem>
+                  {psCycleValues
+                    .filter((v) => v !== "")
+                    .map((v) => {
+                      const cnt = Number(psCountMap[v] ?? 0) || 0;
+                      const idPs = Number(v);
+                      const ptName = Number.isFinite(idPs) ? String(psPoints[idPs] ?? "") : "";
+                      const code = formatPs(v) || String(v);
+                      const label = cnt
+                        ? `${code} (${cnt})`
+                        : ptName && ptName !== code
+                          ? `${ptName} (${code})`
+                          : code;
+                      return (
+                        <MenuItem key={v} value={v}>
+                          {label}
+                        </MenuItem>
+                      );
+                    })}
+                </TextField>
+                {isFullscreen && (
+                  <IconButton size="small" onClick={() => shiftPs(1)} disabled={(psCycleValues?.length || 0) <= 1}>
+                    <ChevronRightIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </Box>
             </Box>
-            <Box minWidth={180}>
-              <TextField
-                select
-                fullWidth
-                size="small"
-                label={t("Position") || "Position"}
-                value={positionFilter}
-                onChange={(e) => setPositionFilter(e.target.value)}
-              >
-                <MenuItem value="all">{t("All Positions") || "All Positions"}</MenuItem>
-                {positionOptions.map((pos) => (
-                  <MenuItem key={pos.id} value={String(pos.id)}>
-                    {pos.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Box>
-            <Box minWidth={200}>
-              <TextField
-                size="small"
-                fullWidth
-                label={t("Search") || "Search"}
-                value={filterText}
-                onChange={(e) => setFilterText(e.target.value)}
-              />
-            </Box>
+            {!isFullscreen && (
+              <Box minWidth={180}>
+                <TextField
+                  select
+                  fullWidth
+                  size="small"
+                  label={t("Position") || "Position"}
+                  value={positionFilter}
+                  onChange={(e) => setPositionFilter(e.target.value)}
+                >
+                  <MenuItem value="all">{t("All Positions") || "All Positions"}</MenuItem>
+                  {positionOptions.map((pos) => (
+                    <MenuItem key={pos.id} value={String(pos.id)}>
+                      {pos.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
+            )}
+            {!isFullscreen && (
+              <Box minWidth={200}>
+                <TextField
+                  size="small"
+                  fullWidth
+                  label={t("Search") || "Search"}
+                  value={filterText}
+                  onChange={(e) => setFilterText(e.target.value)}
+                />
+              </Box>
+            )}
 
             <Box display="flex" flexWrap="wrap" alignItems="center" gap={1.5}>
-              <Button
-                variant="outlined"
-                onClick={async () => {
+              {!isFullscreen && (
+                <IconButton onClick={toggleFullscreen}>
+                  <FullscreenIcon />
+                </IconButton>
+              )}
+              {!isFullscreen && (
+                <>
+                  <Button
+                    variant="outlined"
+                    onClick={async () => {
                   const headers: string[] = [
                     "Employee",
                     "Working Days",
@@ -4481,13 +4694,13 @@ React.useEffect(() => {
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-              >
-                {t("Export CSV") || "Export CSV"}
-              </Button>
+                  >
+                    {t("Export CSV") || "Export CSV"}
+                  </Button>
 
-              <Button
-                variant="outlined"
-                onClick={async () => {
+                  <Button
+                    variant="outlined"
+                    onClick={async () => {
                   const doc = new jsPDF({
                     orientation: "landscape",
                     unit: "pt",
@@ -4583,13 +4796,13 @@ React.useEffect(() => {
 
                   doc.save(`payroll_${year}_${String(month).padStart(2, "0")}.pdf`);
                 }}
-              >
-                {t("Export PDF") || "Export PDF"}
-              </Button>
+                  >
+                    {t("Export PDF") || "Export PDF"}
+                  </Button>
 
-              <Button
-                variant="outlined"
-                onClick={() => {
+                  <Button
+                    variant="outlined"
+                    onClick={() => {
                   const sel: Record<number, boolean> = {};
                   (displayedRows || []).forEach((e) => {
                     sel[e.id_emp] = true;
@@ -4597,14 +4810,14 @@ React.useEffect(() => {
                   setSendSelection(sel);
                   setSendDialogOpen(true);
                 }}
-              >
-                {t("Send Payslips") || "Send Payslips"}
-              </Button>
+                  >
+                    {t("Send Payslips") || "Send Payslips"}
+                  </Button>
 
-              <Button
-                variant="contained"
-                disabled={viewOnly}
-                onClick={async () => {
+                  <Button
+                    variant="contained"
+                    disabled={viewOnly}
+                    onClick={async () => {
                   if (viewOnly) return;
                   const bankAcc = window.prompt("Bank/Cash Account No", "");
                   if (!bankAcc) return;
@@ -4625,9 +4838,11 @@ React.useEffect(() => {
                     alert(e?.message || "Failed to close");
                   }
                 }}
-              >
-                {t("Close Month") || "Close Month"}
-              </Button>
+                  >
+                    {t("Close Month") || "Close Month"}
+                  </Button>
+                </>
+              )}
             </Box>
           </Box>
         )}
@@ -5669,26 +5884,43 @@ React.useEffect(() => {
       </Box>
     )}
 
-    {!loading && result && tab === "payroll" && (
-      <Card>
-        <CardContent>
-          <Typography variant="subtitle1" gutterBottom>
-            {t("Period") || "Period"}: {`${year}-${String(month).padStart(2, "0")}-01`} →{" "}
-            {`${year}-${String(month).padStart(2, "0")}-${String(new Date(year, month, 0).getDate()).padStart(
-              2,
-              "0"
-            )}`}{" "}
-            — {t("common.showing") || "Showing"} {result?.count ?? 0}
-          </Typography>
-
-          <TableContainer sx={{ overflow: "auto", maxHeight: "calc(100vh - 280px)" }}>
+    {!loading && result && (tab === "payroll" || isFullscreen) && (
+      <Card
+        sx={{
+          width: "100%",
+          borderRadius: isFullscreen ? 0 : undefined,
+          boxShadow: isFullscreen ? "none" : undefined,
+          display: isFullscreen ? "flex" : "block",
+          flexDirection: isFullscreen ? "column" : undefined,
+          flex: isFullscreen ? 1 : undefined,
+          minHeight: isFullscreen ? 0 : undefined,
+          mb: isFullscreen ? 0 : undefined,
+        }}
+      >
+        <CardContent
+          sx={{
+            p: isFullscreen ? 0 : undefined,
+            display: isFullscreen ? "flex" : "block",
+            flexDirection: isFullscreen ? "column" : undefined,
+            flex: isFullscreen ? 1 : undefined,
+            minHeight: isFullscreen ? 0 : undefined,
+          }}
+        >
+          <TableContainer
+            sx={{
+              overflow: "auto",
+              maxHeight: isFullscreen ? "none" : "calc(100vh - 280px)",
+              flex: isFullscreen ? 1 : undefined,
+              minHeight: isFullscreen ? 0 : undefined,
+            }}
+          >
             <Table
               stickyHeader
               size="small"
               sx={{
-                tableLayout: "fixed",
+                tableLayout: isFullscreen ? "auto" : "fixed",
                 width: "100%",
-                minWidth: tableMinWidth,
+                minWidth: isFullscreen ? "100%" : tableMinWidth,
                 "& .MuiTableCell-root": { py: 0.5, px: 1 },
                 "& td, & th": { borderBottom: "1px solid", borderColor: "divider" },
               }}
@@ -6026,8 +6258,10 @@ React.useEffect(() => {
                   </TableSortLabel>
                 </TableCell>
 
-                {/* Actions */}
-                <TableCell align="right" sx={{ width: 220, position: "sticky", right: 0, zIndex: 6, bgcolor: "background.paper" }}>
+                <TableCell
+                  align="right"
+                  sx={{ width: 220, position: "sticky", right: 0, zIndex: 6, bgcolor: "background.paper" }}
+                >
                   <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
                     <span>{t("Actions") || "Actions"}</span>
                     <IconButton size="small" onClick={(e) => setColsAnchor(e.currentTarget)}>
@@ -6495,26 +6729,20 @@ React.useEffect(() => {
           )}
         </TableCell>
 
-        {/* Actions */}
-        <TableCell align="right" sx={{ width: 220, position: "sticky", right: 0, zIndex: 2, bgcolor: "background.paper" }}>
+        <TableCell
+          align="right"
+          sx={{ width: 90, position: "sticky", right: 0, zIndex: 2, bgcolor: "background.paper" }}
+        >
           <Box display="flex" flexDirection="row" gap={1} alignItems="center" justifyContent="flex-end">
             {savingRows[e.id_emp] && <CircularProgress size={14} />}
             <Button
-              size="small"
-              variant="outlined"
-              startIcon={<PictureAsPdfOutlinedIcon fontSize="small" />}
+              startIcon={<PictureAsPdfOutlinedIcon />}
               onClick={() => exportPdfClient(e)}
-            >
-              {t("Payslip") || "Payslip"}
-            </Button>
+              />
             <Button
-              size="small"
-              variant="contained"
-              startIcon={<SendOutlinedIcon fontSize="small" />}
+              startIcon={<SendOutlinedIcon />}
               onClick={() => sendPayslipEmailClient(e)}
-            >
-              {t("Send") || "Send"}
-            </Button>
+            />
           </Box>
         </TableCell>
       </TableRow>
@@ -6522,8 +6750,25 @@ React.useEffect(() => {
   })}
 
                 {/* Totals row */}
-                <TableRow>
-                  <TableCell sx={{ position: "sticky", left: 0, zIndex: 3, bgcolor: "background.paper" }}>
+                <TableRow
+                  sx={{
+                    "& > *": {
+                      position: "sticky",
+                      bottom: 0,
+                      bgcolor: "background.paper",
+                      zIndex: 3,
+                    },
+                    "& > *:first-of-type": {
+                      left: 0,
+                      zIndex: 7,
+                    },
+                    "& > *:last-of-type": {
+                      right: 0,
+                      zIndex: 7,
+                    },
+                  }}
+                >
+                  <TableCell sx={{ position: "sticky", left: 0, bottom: 0, zIndex: 7, bgcolor: "background.paper" }}>
                     <strong style={{ fontSize: 16 }}>{t("Totals") || "Totals"}</strong>
                   </TableCell>
 
@@ -6812,7 +7057,7 @@ React.useEffect(() => {
 
                   <TableCell
                     align="right"
-                    sx={{ position: "sticky", right: 0, zIndex: 3, bgcolor: "background.paper" }}
+                    sx={{ position: "sticky", right: 0, bottom: 0, zIndex: 7, bgcolor: "background.paper" }}
                   >
                     —
                   </TableCell>

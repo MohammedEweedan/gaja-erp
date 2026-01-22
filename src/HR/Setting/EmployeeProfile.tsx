@@ -85,6 +85,8 @@ import TableRow from '@mui/material/TableRow';
 import * as XLSX from "xlsx";
 import api from "../../api";
 import { useTranslation } from "react-i18next";
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import UsersDialog from "../../Profile/components/UsersDialog";
 
 // Components
 import EmployeeCard, {
@@ -960,7 +962,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     }
   };
 
-  const [tab, setTab] = useState(0); // 0 Directory, 1 Profile, 2 Org
+  const [tab, setTab] = useState(0); // 0 Directory, 1 Profile, 2 Org, 3 Roles
   const [selected, setSelected] = useState<Employee | null>(null);
   const [selectedEmp, setSelectedEmp] = React.useState<MinimalEmployee | null>(
     null
@@ -1958,6 +1960,136 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
     }
   };
 
+  const [activeSaving, setActiveSaving] = useState(false);
+  const handleToggleActive = useCallback(
+    async (nextActive: boolean) => {
+      if (!selected?.ID_EMP) return;
+      const empId = Number(selected.ID_EMP);
+      if (!Number.isFinite(empId) || empId <= 0) return;
+
+      const prevSelected = selected;
+
+      setSelected((prev) => (prev ? ({ ...prev, STATE: nextActive } as any) : prev));
+      setData((prev) =>
+        prev.map((e) =>
+          Number(e.ID_EMP) === empId ? ({ ...e, STATE: nextActive } as any) : e
+        )
+      );
+      setAllEmployees((prev) =>
+        prev.map((e) =>
+          Number(e.ID_EMP) === empId ? ({ ...e, STATE: nextActive } as any) : e
+        )
+      );
+
+      try {
+        setActiveSaving(true);
+        try {
+          await api.patch(`/employees/${empId}`, { STATE: nextActive });
+        } catch (e: any) {
+          const payload: any = { STATE: nextActive };
+          if (prevSelected?.NAME) payload.NAME = prevSelected.NAME;
+          await api.put(`/employees/${empId}`, payload);
+        }
+        showSnackbar(
+          nextActive
+            ? t("hr.toast.activated", "Employee activated")
+            : t("hr.toast.deactivated", "Employee deactivated"),
+          "success"
+        );
+        await fetchEmployees();
+        await fetchAllEmployees();
+      } catch (e: any) {
+        setSelected(prevSelected);
+        setData((prev) =>
+          prev.map((emp) =>
+            Number(emp.ID_EMP) === empId ? ({ ...emp, STATE: prevSelected.STATE } as any) : emp
+          )
+        );
+        setAllEmployees((prev) =>
+          prev.map((emp) =>
+            Number(emp.ID_EMP) === empId ? ({ ...emp, STATE: prevSelected.STATE } as any) : emp
+          )
+        );
+        const msg = e?.response?.data?.message || e?.message || "Failed to update status";
+        showSnackbar(msg, "error");
+      } finally {
+        setActiveSaving(false);
+      }
+    },
+    [selected, t, fetchEmployees, fetchAllEmployees]
+  );
+
+  const [fingerprintSaving, setFingerprintSaving] = useState(false);
+  const handleToggleFingerprint = useCallback(
+    async (nextRequired: boolean) => {
+      if (!selected?.ID_EMP) return;
+      const empId = Number(selected.ID_EMP);
+      if (!Number.isFinite(empId) || empId <= 0) return;
+
+      const prevSelected = selected;
+
+      setSelected((prev) =>
+        prev ? ({ ...prev, FINGERPRINT_NEEDED: nextRequired } as any) : prev
+      );
+      setData((prev) =>
+        prev.map((e) =>
+          Number(e.ID_EMP) === empId
+            ? ({ ...e, FINGERPRINT_NEEDED: nextRequired } as any)
+            : e
+        )
+      );
+      setAllEmployees((prev) =>
+        prev.map((e) =>
+          Number(e.ID_EMP) === empId
+            ? ({ ...e, FINGERPRINT_NEEDED: nextRequired } as any)
+            : e
+        )
+      );
+
+      try {
+        setFingerprintSaving(true);
+        try {
+          await api.patch(`/employees/${empId}`, {
+            FINGERPRINT_NEEDED: nextRequired,
+          });
+        } catch (e: any) {
+          const payload: any = { FINGERPRINT_NEEDED: nextRequired };
+          if (prevSelected?.NAME) payload.NAME = prevSelected.NAME;
+          await api.put(`/employees/${empId}`, payload);
+        }
+        showSnackbar(
+          nextRequired
+            ? t("hr.toast.fingerprintEnabled", "Fingerprint required enabled")
+            : t("hr.toast.fingerprintDisabled", "Fingerprint required disabled"),
+          "success"
+        );
+        await fetchEmployees();
+        await fetchAllEmployees();
+      } catch (e: any) {
+        setSelected(prevSelected);
+        setData((prev) =>
+          prev.map((emp) =>
+            Number(emp.ID_EMP) === empId
+              ? ({ ...emp, FINGERPRINT_NEEDED: prevSelected.FINGERPRINT_NEEDED } as any)
+              : emp
+          )
+        );
+        setAllEmployees((prev) =>
+          prev.map((emp) =>
+            Number(emp.ID_EMP) === empId
+              ? ({ ...emp, FINGERPRINT_NEEDED: prevSelected.FINGERPRINT_NEEDED } as any)
+              : emp
+          )
+        );
+        const msg = e?.response?.data?.message || e?.message || "Failed to update fingerprint setting";
+        showSnackbar(msg, "error");
+      } finally {
+        setFingerprintSaving(false);
+      }
+    },
+    [selected, t, fetchEmployees, fetchAllEmployees]
+  );
+
   const fileToDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -2004,7 +2136,11 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
       }}
     >
       <PersonAddIcon
-        sx={{ fontSize: { xs: 48, sm: 64 }, color: "action.disabled", mb: 2 }}
+        sx={{
+          fontSize: { xs: 48, sm: 64 },
+          color: "action.disabled",
+          mb: 2,
+        }}
       />
       <Typography variant="h6" color="text.secondary" gutterBottom>
         {t("hr.empty.title", "No employees found")}
@@ -2285,6 +2421,27 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
 
   const ProfileView = (
     <Box sx={{ p: 3, width: "100%" }}>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Autocomplete
+          size="small"
+          options={(allEmployees && allEmployees.length ? allEmployees : data) as any}
+          value={selected as any}
+          onChange={(_, v) => setSelected((v as any) || null)}
+          isOptionEqualToValue={(o: any, v: any) => Number(o?.ID_EMP) === Number(v?.ID_EMP)}
+          getOptionLabel={(o: any) =>
+            o
+              ? `${o.NAME || ""}${o.ID_EMP != null ? ` (#${o.ID_EMP})` : ""}`
+              : ""
+          }
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label={t("hr.profile.selectEmployee", "Select Employee")}
+              placeholder={t("hr.profile.selectEmployeePlaceholder", "Type a name or ID")}
+            />
+          )}
+        />
+      </Paper>
       {selected ? (
         <Stack spacing={3}>
           <Card
@@ -2335,7 +2492,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                   >
                     {selected.NAME}
                   </Typography>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
                     {selected.TITLE && (
                       <Chip label={selected.TITLE} size="small" />
                     )}
@@ -2346,6 +2503,41 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                         sx={{ backgroundColor: accent, color: "white" }}
                       />
                     )}
+                    <Chip
+                      label={
+                        isActiveEmployee(selected)
+                          ? t("common.active", "Active")
+                          : t("common.inactive", "Inactive")
+                      }
+                      color={isActiveEmployee(selected) ? "success" : "default"}
+                      size="small"
+                      variant={isActiveEmployee(selected) ? "filled" : "outlined"}
+                    />
+                    <FormControlLabel
+                      sx={{ ml: 1 }}
+                      control={
+                        <Switch
+                          size="small"
+                          checked={selected.STATE === false ? false : true}
+                          disabled={activeSaving}
+                          onChange={(e) => handleToggleActive(e.target.checked)}
+                        />
+                      }
+                      label={t("employees.fields.STATE", "Active")}
+                    />
+
+                    <FormControlLabel
+                      sx={{ ml: 1 }}
+                      control={
+                        <Switch
+                          size="small"
+                          checked={Boolean(selected.FINGERPRINT_NEEDED)}
+                          disabled={fingerprintSaving}
+                          onChange={(e) => handleToggleFingerprint(e.target.checked)}
+                        />
+                      }
+                      label={t("employees.fields.FINGERPRINT_NEEDED", "Fingerprint required")}
+                    />
                   </Stack>
                 </Box>
               </Stack>
@@ -2354,7 +2546,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
 
           {coworkers.length > 0 && (
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-              <Typography fontWeight={700} sx={{ mb: 1 }}>
+              <Typography fontWeight={700}>
                 {t("hr.profile.coworkers", "Coworkers (same job & level)")}
               </Typography>
               <Stack direction="row" flexWrap="wrap" spacing={2} useFlexGap>
@@ -2386,178 +2578,114 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
             </Paper>
           )}
 
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-            <Box sx={{ flex: "1 1 320px", minWidth: 300 }}>
-              <Card
-                sx={{
-                  boxShadow: 3,
-                  borderRadius: 2,
-                  backgroundColor: "background.paper",
-                  border: "1px solid",
-                  borderColor: accent,
-                  height: "100%",
-                  transition:
-                    "transform 0.2s, box-shadow 0.2s, border-color 0.2s",
-                  "&:hover": {
-                    transform: "translateY(-4px)",
-                    boxShadow: 6,
-                    borderColor: accent,
-                  },
-                }}
-              >
-                <Box sx={{ p: 3 }}>
-                  <Typography
-                    variant="h6"
-                    fontWeight={700}
-                    sx={{
-                      color: accent,
-                      mb: 2,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    <EmailIcon sx={{ mr: 1, color: accent }} />
-                    {t("hr.profile.contact", "Contact Information")}
-                  </Typography>
-                  <Stack spacing={2}>
-                    <Row
-                      icon={<EmailIcon fontSize="small" />}
-                      label={t("employees.fields.EMAIL", "Email")}
-                      value={selected.EMAIL}
-                    />
-                    <Row
-                      icon={<PhoneIcon fontSize="small" />}
-                      label={t("employees.fields.PHONE", "Phone")}
-                      value={selected.PHONE}
-                    />
-                  </Stack>
-                </Box>
-              </Card>
-            </Box>
+          <SquareGrid cols={3}>
+            <SquareCard title={t("hr.profile.contact", "Contact Information") as any}>
+              <Box sx={{ display: "grid", gap: 2, width: "100%" }}>
+                <Row
+                  icon={<EmailIcon fontSize="small" />}
+                  label={t("employees.fields.EMAIL", "Email")}
+                  value={selected.EMAIL}
+                />
+                <Row
+                  icon={<PhoneIcon fontSize="small" />}
+                  label={t("employees.fields.PHONE", "Phone")}
+                  value={selected.PHONE}
+                />
+                <Row
+                  icon={<PhoneIcon fontSize="small" />}
+                  label={t("employees.fields.EMERGENCY_CONTACT_PHONE", "Emergency")}
+                  value={selected.EMERGENCY_CONTACT_PHONE}
+                />
+              </Box>
+            </SquareCard>
 
-            <Box sx={{ flex: "1 1 320px", minWidth: 300 }}>
-              <Card
-                sx={{
-                  boxShadow: 3,
-                  borderRadius: 2,
-                  backgroundColor: "background.paper",
-                  border: "1px solid",
-                  borderColor: accent,
-                  height: "100%",
-                  transition:
-                    "transform 0.2s, box-shadow 0.2s, border-color 0.2s",
-                  "&:hover": {
-                    transform: "translateY(-4px)",
-                    boxShadow: 6,
-                    borderColor: accent,
-                  },
-                }}
-              >
-                <Box sx={{ p: 3 }}>
-                  <Typography
-                    variant="h6"
-                    fontWeight={700}
-                    sx={{
-                      color: accent,
-                      mb: 2,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    <WorkOutlineIcon sx={{ mr: 1, color: accent }} />
-                    {t("hr.profile.employment", "Employment Details")}
-                  </Typography>
-                  <Stack spacing={2}>
-                    <Row
-                      icon={<CalendarMonthIcon fontSize="small" />}
-                      label={t("hr.profile.contract", "Contract Period")}
-                      value={`${fmtDate(selected.CONTRACT_START)} → ${fmtDate(
-                        selected.CONTRACT_END
-                      )}`}
-                    />
-                    <Row
-                      icon={<LocalAtmIcon fontSize="small" />}
-                      label={t("employees.fields.BASIC_SALARY", "Basic Salary")}
-                      value={currency(selected.BASIC_SALARY)}
-                    />
-                    <Row
-                      icon={<BadgeIcon fontSize="small" />}
-                      label={t("employees.fields.ID_EMP", "Employee ID")}
-                      value={String(
-                        selected.ID_EMP ?? t("common.notSpecified", "—")
-                      )}
-                    />
-                  </Stack>
-                </Box>
-              </Card>
-            </Box>
+            <SquareCard title={t("hr.profile.employment", "Employment Details") as any}>
+              <Box sx={{ display: "grid", gap: 2, width: "100%" }}>
+                <Row
+                  icon={<BadgeIcon fontSize="small" />}
+                  label={t("employees.fields.ID_EMP", "Employee ID")}
+                  value={String(selected.ID_EMP ?? t("common.notSpecified", "—"))}
+                />
+                <Row
+                  icon={<WorkOutlineIcon fontSize="small" />}
+                  label={t("employees.fields.TITLE", "Title")}
+                  value={selected.TITLE}
+                />
+                <Row
+                  icon={<ApartmentIcon fontSize="small" />}
+                  label={t("employees.fields.PS", "Point of Sale")}
+                  value={selected.PS ? formatPs(selected.PS) : null}
+                />
+                <Row
+                  icon={<CalendarMonthIcon fontSize="small" />}
+                  label={t("hr.profile.contract", "Contract Period")}
+                  value={`${fmtDate(selected.CONTRACT_START)} → ${fmtDate(selected.CONTRACT_END)}`}
+                />
+                <Row
+                  icon={<CalendarMonthIcon fontSize="small" />}
+                  label={t("hr.profile.schedule", "Schedule")}
+                  value={
+                    selected.T_START && selected.T_END
+                      ? `${selected.T_START} → ${selected.T_END}`
+                      : null
+                  }
+                />
+              </Box>
+            </SquareCard>
 
-            <Box sx={{ flex: "1 1 320px", minWidth: 300 }}>
-              <Card
-                sx={{
-                  boxShadow: 3,
-                  borderRadius: 2,
-                  backgroundColor: "background.paper",
-                  border: "1px solid",
-                  borderColor: accent,
-                  height: "100%",
-                  transition:
-                    "transform 0.2s, box-shadow 0.2s, border-color 0.2s",
-                  "&:hover": {
-                    transform: "translateY(-4px)",
-                    boxShadow: 6,
-                    borderColor: accent,
-                  },
-                }}
-              >
-                <Box sx={{ p: 3 }}>
-                  <Typography
-                    variant="h6"
-                    fontWeight={700}
-                    sx={{
-                      color: accent,
-                      mb: 2,
-                      display: "flex",
-                      alignItems: "center",
-                    }}
-                  >
-                    <PersonAddIcon sx={{ mr: 1, color: accent }} />
-                    {t("hr.profile.personal", "Personal Information")}
-                  </Typography>
-                  <Stack spacing={2}>
-                    <Row
-                      icon={<CalendarMonthIcon fontSize="small" />}
-                      label={t(
-                        "employees.fields.DATE_OF_BIRTH",
-                        "Date of Birth"
-                      )}
-                      value={fmtDate(selected.DATE_OF_BIRTH)}
-                    />
-                    <Row
-                      icon={<BadgeIcon fontSize="small" />}
-                      label={t("employees.fields.NATIONALITY", "Nationality")}
-                      value={selected.NATIONALITY}
-                    />
-                    <Row
-                      icon={<PersonAddIcon fontSize="small" />}
-                      label={t(
-                        "employees.fields.MARITAL_STATUS",
-                        "Marital Status"
-                      )}
-                      value={
-                        selected.MARITAL_STATUS
-                          ? t(
-                              `employees.enums.${selected.MARITAL_STATUS}`,
-                              selected.MARITAL_STATUS
-                            )
-                          : null
-                      }
-                    />
-                  </Stack>
-                </Box>
-              </Card>
-            </Box>
-          </Box>
+            <SquareCard title={t("employees.sections.compensation", "Compensation") as any}>
+              <Box sx={{ display: "grid", gap: 2, width: "100%" }}>
+                <Row
+                  icon={<LocalAtmIcon fontSize="small" />}
+                  label={t("employees.fields.BASIC_SALARY", "Basic Salary")}
+                  value={currency(selected.BASIC_SALARY)}
+                />
+                <Row
+                  icon={<LocalAtmIcon fontSize="small" />}
+                  label={t("employees.fields.BASIC_SALARY_USD", "Salary (USD)")}
+                  value={
+                    selected.BASIC_SALARY_USD != null && Number(selected.BASIC_SALARY_USD) > 0
+                      ? `${currency(selected.BASIC_SALARY_USD)} USD`
+                      : null
+                  }
+                />
+                <Row
+                  icon={<LocalAtmIcon fontSize="small" />}
+                  label={t("employees.fields.ACCOUNT_NUMBER", "Account")}
+                  value={selected.ACCOUNT_NUMBER}
+                />
+              </Box>
+            </SquareCard>
+
+            <SquareCard title={t("hr.profile.personal", "Personal Information") as any}>
+              <Box sx={{ display: "grid", gap: 2, width: "100%" }}>
+                <Row
+                  icon={<CalendarMonthIcon fontSize="small" />}
+                  label={t("employees.fields.DATE_OF_BIRTH", "Date of Birth")}
+                  value={fmtDate(selected.DATE_OF_BIRTH)}
+                />
+                <Row
+                  icon={<BadgeIcon fontSize="small" />}
+                  label={t("employees.fields.NATIONALITY", "Nationality")}
+                  value={selected.NATIONALITY}
+                />
+                <Row
+                  icon={<PersonAddIcon fontSize="small" />}
+                  label={t("employees.fields.MARITAL_STATUS", "Marital Status")}
+                  value={
+                    selected.MARITAL_STATUS
+                      ? t(`employees.enums.${selected.MARITAL_STATUS}`, selected.MARITAL_STATUS)
+                      : null
+                  }
+                />
+                <Row
+                  icon={<ApartmentIcon fontSize="small" />}
+                  label={t("employees.fields.ADDRESS", "Address")}
+                  value={selected.ADDRESS}
+                />
+              </Box>
+            </SquareCard>
+          </SquareGrid>
 
           <Accordion
             sx={{
@@ -2773,6 +2901,11 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
               iconPosition="start"
               label={t("hr.tabs.org", "Org Chart")}
             />
+            <Tab
+              icon={<AdminPanelSettingsIcon />}
+              iconPosition="start"
+              label={t("hr.tabs.roles", "Roles")}
+            />
           </Tabs>
           <Box sx={{ flex: 1 }} />
         </Toolbar>
@@ -2816,6 +2949,12 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                     reassignEmployee(empId, newMgrId)
                   }
                 />
+              </Box>
+            )}
+
+            {tab === 3 && (
+              <Box sx={{ p: 2 }}>
+                <UsersDialog />
               </Box>
             )}
           </>

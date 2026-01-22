@@ -9,29 +9,27 @@ export type Employee = {
   [key: string]: any; // Allow other fields
 };
 
-const API_BASE = (process.env.REACT_APP_API_IP || "").replace(/\/+$/, "");
+const API_BASE = (
+  (process.env.REACT_APP_API_BASE_URL as string | undefined) ||
+  (process.env.REACT_APP_API_IP as string | undefined) ||
+  "https://system.gaja.ly/api"
+).replace(/\/+$/, "");
 
 /** Build an absolute URL from API_BASE + path */
 function absolute(url: string): string {
   const path = url.startsWith("/") ? url : `/${url}`;
   // Prefer explicit API base when provided
   if (API_BASE && /^https?:\/\//i.test(API_BASE)) return `${API_BASE}${path}`;
-  // Fallback: infer backend at :9000 on the current host
-  try {
-    if (typeof window !== "undefined" && window.location) {
-      const base = `${window.location.protocol}//${window.location.hostname}:9000`;
-      return `${base}${path}`;
-    }
-  } catch {}
-  // Last resort: relative path (may fail without a dev proxy)
   return path;
 }
 
 /** Auth + JSON headers */
 function authHeaders(): HeadersInit {
   const token =
-    localStorage.getItem("token") || localStorage.getItem("accessToken");
-  const h: HeadersInit = { Accept: "application/json" };
+    localStorage.getItem("token") ||
+    localStorage.getItem("accessToken") ||
+    localStorage.getItem("access_token");
+  const h: HeadersInit = { Accept: "application/json", "Content-Type": "application/json" };
   if (token) (h as any).Authorization = `Bearer ${token}`;
   return h;
 }
@@ -134,16 +132,43 @@ export async function listActiveEmployees(): Promise<Employee[]> {
 
 /** Get a single employee by id, with graceful fallbacks */
 export async function getEmployeeById(id: number): Promise<Employee | null> {
+  // Some deployments do not support GET /employees/:id (404), while PATCH/PUT may still exist.
+  // Cache support so we don't spam the server/console.
+  // null = unknown, true = supported, false = not supported
+  // eslint-disable-next-line prefer-const
+  let _supports: boolean | null = (getEmployeeById as any)._supportsEmployeeByIdGet ?? null;
+
   // Preferred: /employees/:id
-  try {
-    const payload = await http<any>(absolute(`/employees/${id}`), {
-      headers: authHeaders(),
-    });
-    // Some APIs also wrap single objects in { data: {...} }
-    const obj = payload?.data ?? payload;
-    if (obj && typeof obj === "object") return obj as Employee;
-  } catch {
-    // ignore; we'll fall back to list
+  if (_supports !== false) {
+    try {
+      const payload = await http<any>(absolute(`/employees/${id}`), {
+        headers: authHeaders(),
+      });
+
+      (getEmployeeById as any)._supportsEmployeeByIdGet = true;
+
+      // Some APIs wrap single objects in various shapes
+      const obj =
+        payload?.data?.employee ??
+        payload?.employee ??
+        payload?.data?.data ??
+        payload?.data ??
+        payload;
+
+      if (obj && typeof obj === "object") {
+        const maybe =
+          (obj as any)?.data && typeof (obj as any).data === "object"
+            ? (obj as any).data
+            : obj;
+        return maybe as Employee;
+      }
+    } catch (e: any) {
+      const msg = String(e?.message || "");
+      if (/\b404\b/.test(msg)) {
+        (getEmployeeById as any)._supportsEmployeeByIdGet = false;
+      }
+      // ignore; we'll fall back to list
+    }
   }
 
   // Fallback: search in full list (costly, but last-resort)

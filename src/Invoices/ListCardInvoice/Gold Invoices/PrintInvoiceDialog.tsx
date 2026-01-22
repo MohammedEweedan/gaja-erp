@@ -7,6 +7,7 @@ import {
   Button,
   Checkbox,
   FormControlLabel,
+  Radio,
   TextField,
 } from "@mui/material";
 import { Box } from "@mui/system";
@@ -208,6 +209,8 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
     React.useState(false);
   const [showImage] = React.useState(true);
   const [showGoldUnitPrices, setShowGoldUnitPrices] = React.useState(false);
+  const [showDiscountValues, setShowDiscountValues] = React.useState(true);
+  const [showSurchargeValues, setShowSurchargeValues] = React.useState(true);
 
   // Initialize invoice number from the provided invoice when available
   React.useEffect(() => {
@@ -243,16 +246,13 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           <title>Invoice Print</title>
           ${styles}
           <style>
-            @page { size: A5 portrait; margin: 10mm; }
+            @page { size: A4 portrait; margin: 10mm; }
             body, .MuiDialogContent-root, .invoice-content {
               background: #fff !important;
               color: #000 !important;
             }
-            * {
-              color: #000 !important;
-              background: transparent !important;
-              box-shadow: none !important;
-            }
+            * { box-shadow: none !important; }
+            html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             .MuiDialogActions-root, .MuiDialogTitle-root { display: none !important; }
             /* Ensure tables and layout look good */
             table { width: 100%; border-collapse: collapse; }
@@ -263,6 +263,7 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
             .MuiTableCell-root:empty, .MuiTableCell-root[aria-hidden="true"] { display: none !important; border: none !important; padding: 0 !important; }
             /* Avoid page margins creating phantom columns */
             .invoice-content { overflow: hidden !important; }
+            img { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             /* Add more print-specific styles as needed */
           </style>
         </head>
@@ -292,16 +293,47 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
                 });
               } catch (e) { /* ignore */ }
             })();
+
+            (function() {
+              function waitForImages() {
+                var imgs = Array.prototype.slice.call(document.images || []);
+                if (!imgs.length) return Promise.resolve();
+                return Promise.all(imgs.map(function(img) {
+                  try {
+                    if (img.complete && img.naturalWidth > 0) {
+                      if (img.decode) return img.decode().catch(function(){ });
+                      return Promise.resolve();
+                    }
+                    return new Promise(function(resolve) {
+                      var done = function() { resolve(); };
+                      img.addEventListener('load', done, { once: true });
+                      img.addEventListener('error', done, { once: true });
+                    });
+                  } catch (e) {
+                    return Promise.resolve();
+                  }
+                }));
+              }
+
+              function doPrint() {
+                try { window.focus(); } catch (e) {}
+                try { window.print(); } catch (e) {}
+              }
+
+              // Wait a bit for layout + fonts + images
+              setTimeout(function() {
+                waitForImages().then(function() {
+                  setTimeout(doPrint, 100);
+                });
+              }, 250);
+            })();
           </script>
         </body>
       </html>
     `);
     printWindow.document.close();
     printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-      // printWindow.close();
-    }, 300);
+    // printing is triggered inside the print window after images load
   };
 
   const goldWeightInfo = React.useMemo(() => {
@@ -819,6 +851,30 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
             sx={{ mr: 1 }}
           />
 
+          <FormControlLabel
+            control={
+              <Radio
+                checked={showDiscountValues}
+                onClick={() => setShowDiscountValues((v) => !v)}
+                size="small"
+              />
+            }
+            label="Show Discount"
+            sx={{ mr: 1 }}
+          />
+
+          <FormControlLabel
+            control={
+              <Radio
+                checked={showSurchargeValues}
+                onClick={() => setShowSurchargeValues((v) => !v)}
+                size="small"
+              />
+            }
+            label="Show Surcharge"
+            sx={{ mr: 1 }}
+          />
+
           {/* {!showCloseInvoiceActions &&
             (!invoiceNumFact || invoiceNumFact === 0) && (
               <Button
@@ -840,6 +896,8 @@ const PrintInvoiceDialog: React.FC<PrintInvoiceDialogProps> = ({
           key={invoiceNumFact ?? invoice?.num_fact ?? "default"}
           showImage={showImage}
           showGoldUnitPrices={showGoldUnitPrices}
+          showDiscountValues={showDiscountValues}
+          showSurchargeValues={showSurchargeValues}
           createdBy={createdBy}
         />
       </DialogContent>
