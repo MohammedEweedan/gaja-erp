@@ -1,0 +1,247 @@
+{
+  "2025-11": {
+    "1": [
+      {
+        "type": "deduction",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-11-18T09:05:55.231Z",
+        "id": 1765961867509
+      },
+      {
+        "type": "bonus",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-11-18T09:06:02.734Z",
+        "id": 1765961867916
+      },
+      {
+        "type": "advance",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "advance",
+        "ts": "2025-11-18T11:31:23.622Z",
+        "id": 1765961861646
+      }
+    ],
+    "30": [
+      {
+        "type": "advance",
+        "amount": 750,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-11-23T15:11:33.496Z",
+        "id": 1765961864198
+      },
+      {
+        "type": "advance",
+        "amount": 900,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-11-23T15:11:39.488Z",
+        "id": 1765961865725
+      }
+    ],
+    "31": [
+      {
+        "type": "advance",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "advance",
+        "ts": "2025-11-20T09:28:49.603Z",
+        "id": 1765961866969
+      },
+      {
+        "type": "advance",
+        "amount": 1500,
+        "currency": "LYD",
+        "note": "advance",
+        "ts": "2025-11-22T14:59:19.392Z",
+        "id": 1765961869678
+      }
+    ],
+    "39": [
+      {
+        "type": "advance",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-11-25T10:48:48.340Z",
+        "id": 1765961865847
+      }
+    ]
+  },
+  "2025-12": {
+    "16": [
+      {
+        "id": 1766046059162,
+        "type": "advance",
+        "recurring": false,
+        "amount": 1000,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-12-18T08:20:59.150Z"
+      },
+      {
+        "id": 1766046217567,
+        "type": "custom",
+        "label": "Test deduction",
+        "direction": "DEDUCT",
+        "recurring": false,
+        "amount": 301,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-18T08:23:37.350Z",
+        "updatedAt": "2025-12-18T08:23:59.051Z"
+      },
+      {
+        "id": 1766046287768,
+        "type": "bonus",
+        "label": "Bonus",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 1,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-18T08:24:47.034Z"
+      }
+    ],
+    "32": [],
+    "39": [
+      {
+        "type": "bonus",
+        "amount": 100,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-08T14:46:02.193Z",
+        "id": 1765961866589,
+        "updatedAt": "2025-12-17T10:15:15.299Z"
+      },
+      {
+        "type": "deduction",
+        "amount": 50,
+        "currency": "USD",
+        "note": "",
+        "ts": "2025-12-08T14:49:17.796Z",
+        "id": 1765961860441
+      },
+      {
+        "type": "deduction",
+        "amount": 50,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-08T14:51:42.044Z",
+        "id": 1765961869416
+      },
+      {
+        "type": "eid_bonus",
+        "amount": 5000,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-13T08:15:04.705Z",
+        "id": 1765961862920
+      },
+      {
+        "type": "deduction",
+        "amount": 250,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-13T15:05:16.099Z",
+        "id": 1765961862855
+      },
+      {
+        "type": "deduction",
+        "amount": 33.3,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-15T09:50:38.347Z",
+        "id": 1765961866746
+      },
+      {
+        "id": 1765980958459,
+        "type": "bonus",
+        "amount": 100,
+        "currency": "USD",
+        "note": "",
+        "ts": "2025-12-17T14:15:57.740Z"
+      },
+      {
+        "id": 1765985430299,
+        "type": "custom",
+        "label": "TEST",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 250,
+        "currency": "LYD",
+        "note": "123",
+        "ts": "2025-12-17T15:30:29.875Z"
+      }
+    ],
+    "46": [
+      {
+        "type": "eid_bonus",
+        "amount": 1000,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-11T14:45:23.012Z",
+        "id": 1765961868054
+      }
+    ],
+    "48": [
+      {
+        "type": "advance",
+        "amount": 625,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-12-06T10:40:51.573Z",
+        "id": 1765961860398
+      }
+    ],
+    "52": [
+      {
+        "type": "deduction",
+        "amount": 500,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2025-12-11T15:49:34.147Z",
+        "id": 1765961864602
+      }
+    ],
+    "89": [
+      {
+        "id": 1766242045104,
+        "type": "advance",
+        "recurring": false,
+        "amount": 500,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2025-12-20T14:47:25.006Z"
+      },
+      {
+        "id": 1766242114635,
+        "type": "bonus",
+        "label": "Bonus",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 500,
+        "currency": "LYD",
+        "note": "Bonus test",
+        "ts": "2025-12-20T14:48:34.516Z"
+      },
+      {
+        "id": 1766242172536,
+        "type": "deduction",
+        "label": "Deduction",
+        "direction": "DEDUCT",
+        "recurring": false,
+        "amount": 230,
+        "currency": "LYD",
+        "note": "For breaking equipment",
+        "ts": "2025-12-20T14:49:31.972Z",
+        "updatedAt": "2025-12-20T14:50:44.635Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "loans": [
+    {
+      "id": "1763478338911",
+      "id_emp": 1,
+      "principal": 3000,
+      "remaining": 3000,
+      "startYear": 2025,
+      "startMonth": 10,
+      "monthlyPercent": 0.25,
+      "capMultiple": 3,
+      "skipMonths": [],
+      "note": "",
+      "createdAt": "2025-11-18T15:05:38.911Z",
+      "closed": false
+    }
+  ]
+}
