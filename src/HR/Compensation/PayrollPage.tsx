@@ -61,6 +61,21 @@ function formatPs(ps: any): string | undefined {
   return sUp;
 }
 
+const LEAVE_FULL_CODES = new Set([
+  "AL",
+  "SL",
+  "EL",
+  "ML",
+  "UL",
+  "BM",
+  "XL",
+  "B1",
+  "B2",
+  "PP",
+  "PL",
+]);
+const LEAVE_HALF_CODES = new Set(["HL"]);
+
 function useNowYM() {
   const now = dayjs();
   return { year: now.year(), month: now.month() + 1 };
@@ -68,6 +83,114 @@ function useNowYM() {
 
 const months = Array.from({ length: 12 }, (_, i) => i + 1);
 const years = Array.from({ length: 7 }, (_, i) => dayjs().year() - 3 + i);
+
+function parseLooseBoolean(value: any): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value == null) return undefined;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return undefined;
+  }
+  const s = String(value).trim().toLowerCase();
+  if (!s) return undefined;
+  if (["true", "1", "yes", "y", "on"].includes(s)) return true;
+  if (["false", "0", "no", "n", "off"].includes(s)) return false;
+  return undefined;
+}
+
+function toFiniteNumber(value: any): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeFingerprintPayrollRow(row: any, fingerprintOn: boolean) {
+  if (fingerprintOn) return row;
+
+  const absenceLyd = toFiniteNumber(row?.absence_lyd);
+  const absenceUsd = toFiniteNumber(row?.absence_usd);
+  const latencyLyd = toFiniteNumber(row?.missing_lyd ?? row?.latency_lyd);
+  const latencyUsd = toFiniteNumber(row?.missing_usd ?? row?.latency_usd);
+  const reimbLyd = absenceLyd + latencyLyd;
+  const reimbUsd = absenceUsd + latencyUsd;
+
+  const next = { ...row } as any;
+  next.absence_days = 0;
+  next.absence_lyd = 0;
+  next.absence_usd = 0;
+  next.missing_lyd = 0;
+  next.missing_usd = 0;
+  next.latency_lyd = 0;
+  next.latency_usd = 0;
+  next.missing_minutes = 0;
+  next.latencyMinutes = 0;
+
+  if (reimbLyd) {
+    const totalLyd = toFiniteNumber(row?.total_salary_lyd ?? row?.totalLyd ?? row?.D7);
+    const netLyd = toFiniteNumber(row?.net_salary_lyd ?? row?.netLyd ?? row?.D16);
+    next.total_salary_lyd = Number((totalLyd + reimbLyd).toFixed(2));
+    next.net_salary_lyd = Number((netLyd + reimbLyd).toFixed(2));
+    if (row?.D7 !== undefined) next.D7 = Number((toFiniteNumber(row?.D7) + reimbLyd).toFixed(2));
+    if (row?.D16 !== undefined) next.D16 = Number((toFiniteNumber(row?.D16) + reimbLyd).toFixed(2));
+  }
+
+  if (reimbUsd) {
+    const totalUsd = toFiniteNumber(row?.total_salary_usd ?? row?.totalUsd ?? row?.C7);
+    const netUsd = toFiniteNumber(row?.net_salary_usd ?? row?.netUsd ?? row?.C16);
+    next.total_salary_usd = Number((totalUsd + reimbUsd).toFixed(2));
+    next.net_salary_usd = Number((netUsd + reimbUsd).toFixed(2));
+    if (row?.C7 !== undefined) next.C7 = Number((toFiniteNumber(row?.C7) + reimbUsd).toFixed(2));
+    if (row?.C16 !== undefined) next.C16 = Number((toFiniteNumber(row?.C16) + reimbUsd).toFixed(2));
+  }
+
+  const fallbackDays = toFiniteNumber(row?.workingDays ?? row?.food_days ?? row?.wd_food_days ?? 0);
+  if (fallbackDays > 0) {
+    next.p_days = fallbackDays;
+    if (!toFiniteNumber(next.food_days)) next.food_days = fallbackDays;
+  } else if (!Number.isFinite(toFiniteNumber(next.p_days))) {
+    next.p_days = 0;
+  }
+
+  return next;
+}
+
+function pickField(obj: any, keys: string[]): any {
+  if (!obj) return undefined;
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(obj, k) && (obj as any)[k] !== undefined) {
+      return (obj as any)[k];
+    }
+  }
+  return undefined;
+}
+
+function extractFingerprintRaw(obj: any): any {
+  const direct = pickField(obj, [
+    "FINGERPRINT_NEEDED",
+    "fingerprint_needed",
+    "fingerprintNeeded",
+    "FP_REQUIRED",
+    "fp_required",
+    "NEED_FINGERPRINT",
+    "need_fingerprint",
+    "IS_FP_REQUIRED",
+    "is_fp_required",
+    "FINGERPRINT",
+    "fingerprint",
+    "FP",
+    "fp",
+  ]);
+  if (direct !== undefined) return direct;
+
+  try {
+    for (const k of Object.keys(obj || {})) {
+      const lk = k.toLowerCase();
+      if (lk.includes("finger") || lk === "fp" || lk.includes("biometric")) return (obj as any)[k];
+    }
+  } catch {}
+  return undefined;
+}
 
 export default function PayrollPage() {
   const { t } = useTranslation();
@@ -86,6 +209,17 @@ export default function PayrollPage() {
   const [result, setResult] = React.useState<PayrollRunResponse | null>(null);
   const [v2Rows, setV2Rows] = React.useState<any[]>([]);
   const [viewOnly, setViewOnly] = React.useState<boolean>(false);
+
+  const workingDaysExcludingFridays = React.useMemo(() => {
+    const start = dayjs(`${year}-${String(month).padStart(2, "0")}-01`);
+    const daysInMonth = start.daysInMonth();
+    let nonFridays = 0;
+    for (let i = 1; i <= daysInMonth; i++) {
+      const day = start.date(i);
+      if (day.day() !== 5) nonFridays += 1;
+    }
+    return nonFridays;
+  }, [year, month]);
 
   const [calOpen, setCalOpen] = React.useState(false);
   const [calEmp, setCalEmp] = React.useState<{ id_emp: number; name: string } | null>(null);
@@ -224,6 +358,14 @@ export default function PayrollPage() {
   const [loanAmount, setLoanAmount] = React.useState<string>("");
   const [existingAdvances, setExistingAdvances] = React.useState<number>(0);
   const [presentDaysMap, setPresentDaysMap] = React.useState<Record<number, number>>({});
+  const [fingerprintRequiredMap, setFingerprintRequiredMap] = React.useState<Record<number, boolean>>({});
+  const requiresFingerprint = React.useCallback((id: number, fallback?: boolean) => {
+    if (Object.prototype.hasOwnProperty.call(fingerprintRequiredMap, id)) {
+      return fingerprintRequiredMap[id];
+    }
+    if (fallback !== undefined) return fallback;
+    return false;
+  }, [fingerprintRequiredMap]);
 
   const [advMap, setAdvMap] = React.useState<Record<number, number>>({});
   const [adjSumsByEmp, setAdjSumsByEmp] = React.useState<Record<number, { earnLyd: number; earnUsd: number; dedLyd: number; dedUsd: number }>>({});
@@ -374,6 +516,9 @@ export default function PayrollPage() {
     absenceDays: number;
     // Total missing minutes from timesheet (sum of negative deltaMin, mirrored from TimeSheetsPage)
     missingMinutes: number;
+    leaveUnits: number;
+    foodEligibleNonFpDays: number;
+    displayMissingMinutes: number;
   }>>({});
 
 const computePPhPhf = (e: Payslip): PPhPhfVals => {
@@ -452,8 +597,28 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     const defaultPer = Number((emp as any).FOOD || (emp as any).FOOD_ALLOWANCE || 0);
     let perDay = defaultPer;
     if (!perDay) perDay = workingDaysFood > 0 ? foodTotal / workingDaysFood : 0;
-    const paidDaysRaw = Number((v2 as any).p_days ?? tsAgg?.[Number(emp.id_emp)]?.presentP ?? emp.presentWorkdays ?? 0) || 0;
-    const paidDays = workingDaysFood > 0 ? Math.min(paidDaysRaw, workingDaysFood) : paidDaysRaw;
+    const empId = Number(emp.id_emp);
+    const hasFingerprint = requiresFingerprint(empId, true);
+    const agg = tsAgg?.[empId];
+    const presentStrict = Number(agg?.presentStrict ?? 0);
+    const paidDaysRaw = Number((v2 as any).p_days ?? agg?.presentP ?? emp.presentWorkdays ?? 0) || 0;
+    const leaveUnits = Number(agg?.leaveUnits ?? 0);
+    const scheduleDays = workingDaysFood || Number(emp.workingDays ?? 0) || workingDaysExcludingFridays || 0;
+    let paidDays = paidDaysRaw;
+    if (hasFingerprint) {
+      let fpDays = presentStrict;
+      if (!fpDays) fpDays = Number(agg?.presentP ?? 0);
+      if (!fpDays) fpDays = paidDaysRaw;
+      if (!fpDays && scheduleDays) {
+        fpDays = Math.max(0, scheduleDays - Number(agg?.absenceDays ?? 0));
+      }
+      if (scheduleDays) fpDays = Math.min(fpDays, scheduleDays);
+      paidDays = Math.max(0, fpDays);
+    } else {
+      const eligibleDerived = Number(agg?.foodEligibleNonFpDays ?? 0);
+      let baseline = Math.max(eligibleDerived, scheduleDays, paidDaysRaw);
+      paidDays = Math.max(0, baseline - leaveUnits);
+    }
     const allowance = Number((perDay * paidDays).toFixed(2));
     return { allowance, perDay, paidDays };
   }
@@ -490,8 +655,9 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
       const base = Math.max(0, Number(v2.base_salary_lyd || emp.baseSalary || 0));
       const baseUsd = Math.max(0, Number((v2 as any).base_salary_usd || (emp as any).baseSalaryUsd || 0));
       const { lyd: ph, usd: phUsd } = getPhAmounts(id_emp, { emp, v2, workingDays: W, baseLyd: base, baseUsd });
-      const absence = Math.max(0, Number(v2.absence_lyd || 0));
-      const absenceUsd = Math.max(0, Number((v2 as any).absence_usd || 0));
+      const hasFingerprint = requiresFingerprint(id_emp, true);
+      const absence = hasFingerprint ? Math.max(0, Number(v2.absence_lyd || 0)) : 0;
+      const absenceUsd = hasFingerprint ? Math.max(0, Number((v2 as any).absence_usd || 0)) : 0;
       const commissionUi = commissionMapUI[id_emp];
       const gold = preferCommissionValue(
         commissionUi?.goldBonusLyd,
@@ -523,8 +689,8 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
 
       // Latency deduction: use backend-calculated amounts (legacy approach)
       // so Net matches the original payroll engine.
-      const latencyLyd = Math.max(0, Number((v2 as any).missing_lyd || (v2 as any).latency_lyd || 0));
-      const latencyUsd = Math.max(0, Number((v2 as any).missing_usd || (v2 as any).latency_usd || 0));
+      const latencyLyd = hasFingerprint ? Math.max(0, Number((v2 as any).missing_lyd || (v2 as any).latency_lyd || 0)) : 0;
+      const latencyUsd = hasFingerprint ? Math.max(0, Number((v2 as any).missing_usd || (v2 as any).latency_usd || 0)) : 0;
       // Transportation (FUEL) and Communication allowances — flat monthly amounts
       const fuelMonthly = Number(((emp as any).FUEL ?? (v2 as any).FUEL) || 0);
       const commMonthly = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
@@ -629,6 +795,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
 
       const dayNum = Number(day?.day || 1);
       const ymd = String(day?.date || `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`).slice(0, 10);
+      const dayMoment = dayjs(ymd);
       
       for (const leave of leaveRequestsCache[empId]) {
         const status = String(leave.status || leave.state || '').toLowerCase();
@@ -684,13 +851,25 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
           return leaveCode;
         }
       }
+    } else {
+      const dayNum = Number(day?.day || 1);
+      const ymd = String(day?.date || `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`).slice(0, 10);
+      const dayMoment = dayjs(ymd);
+      if (dayMoment.isAfter(dayjs(), 'day')) {
+        return '';
+      }
+    }
+
+    const dayNum = Number(day?.day || 1);
+    const ymd = String(day?.date || `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`).slice(0, 10);
+    const dayMoment = dayjs(ymd);
+    if (dayMoment.isAfter(dayjs(), 'day')) {
+      return '';
     }
     
     // PRIORITY 3: Compute from punch data (fallback when no backend code)
     const present = !!day.present;
     
-    const dayNum = Number(day?.day || 1);
-    const ymd = String(day?.date || `${year}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`).slice(0, 10);
     const isHoliday = holidaySet.has(ymd) || !!day.isHoliday || /holiday/i.test(String(day.type||day.reason||''));
     if (!present && isHoliday) return '';
     
@@ -712,6 +891,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     const worked = (entryMin != null && exitMin != null && exitMin > entryMin) ? (exitMin - entryMin) : 0;
     const late = (entryMin != null) ? Math.max(0, entryMin - expStart) : 0;
     const miss = Number(day.deltaMin || 0) < 0 ? Math.abs(Number(day.deltaMin||0)) : 0;
+    const toleranceMinutes = 30;
     const tol = 5;
     
     if (!present) return 'A';
@@ -719,7 +899,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
       return (worked >= Math.max(0, expDur - tol)) ? 'PHF' : 'PH';
     }
     if (late > tol) return 'PL';
-    if (miss > tol) return 'PT';
+    if (miss > tol && miss > toleranceMinutes) return 'PT';
     return 'P';
   }
 
@@ -936,7 +1116,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         }
         if (tab === 'advances') {
           try {
-            const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+            const url = `http://localhost:9000/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -948,7 +1128,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         }
         try {
           const q = new URLSearchParams({ employeeId: String(adjEmpId) });
-          const res = await fetch(`https://system.gaja.ly/api/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://localhost:9000/api/hr/payroll/history/total?${q.toString()}`, { headers: authHeader() as unknown as HeadersInit });
           const js = await res.json();
           if (res.ok) setHistoryPoints(Array.isArray(js?.points) ? js.points : []);
           else setHistoryPoints([]);
@@ -965,7 +1145,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     }
     (async () => {
       try {
-        const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
+        const url = `http://localhost:9000/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${adjEmpId}`;
         const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
         if (!res.ok) {
           setAdjRows([]);
@@ -1034,7 +1214,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
   React.useEffect(() => {
   (async () => {
     try {
-      const res = await fetch(`${process.env.REACT_APP_API_IP || 'https://system.gaja.ly/api'}/jobs/jobs`, {
+      const res = await fetch(`${process.env.REACT_APP_API_IP || 'http://localhost:9000/api'}/jobs/jobs`, {
         headers: authHeader() as any,
       });
       if (!res.ok) return;
@@ -1073,7 +1253,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         currency: isLydOnly ? 'LYD' : adjForm.currency,
         note: adjForm.note,
       };
-      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
+      const res = await fetch(`http://localhost:9000/api/hr/payroll/adjustments`, { method: 'POST', headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), body: JSON.stringify(payload) });
       if (!res.ok) throw new Error('Failed to add adjustment');
       const js = await res.json();
       setAdjRows(prev => [...prev, js.entry]);
@@ -1119,7 +1299,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         currency: isLydOnly ? 'LYD' : adjForm.currency,
         note: adjForm.note,
       };
-      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments/${adjEditId}`, { 
+      const res = await fetch(`http://localhost:9000/api/hr/payroll/adjustments/${adjEditId}`, { 
         method: 'PUT', 
         headers: ({ 'Content-Type': 'application/json', ...authHeader() } as unknown as HeadersInit), 
         body: JSON.stringify(payload) 
@@ -1150,7 +1330,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
   const deleteAdjustment = async (id: number) => {
     setAdjLoading(true);
     try {
-      const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments/${id}`, { 
+      const res = await fetch(`http://localhost:9000/api/hr/payroll/adjustments/${id}`, { 
         method: 'DELETE', 
         headers: authHeader() as unknown as HeadersInit 
       });
@@ -1327,39 +1507,9 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  React.useEffect(() => {
-    if (!isFullscreen) return;
-    if (tab !== "payroll") return;
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as any;
-      const tag = String(target?.tagName || "").toLowerCase();
-      if (target?.isContentEditable) return;
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
-
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        shiftMonth(-1);
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        shiftMonth(1);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        shiftPs(-1);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        shiftPs(1);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isFullscreen, tab, shiftMonth, shiftPs]);
-
-  // Fetch sales metrics for the current window
   const fetchSales = React.useCallback(async () => {
     try {
-      const url = `https://system.gaja.ly/api/hr/payroll/sales-metrics?year=${year}&month=${month}`;
+      const url = `http://localhost:9000/api/hr/payroll/sales-metrics?year=${year}&month=${month}`;
       const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
       if (!res.ok) return setSales({});
       const js = await res.json();
@@ -1398,7 +1548,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
       setCommLoading(true);
       (async () => {
         try {
-          const res = await fetch(`https://system.gaja.ly/api/employees`, { headers: authHeader() as unknown as HeadersInit });
+          const res = await fetch(`http://localhost:9000/api/employees`, { headers: authHeader() as unknown as HeadersInit });
           if (res.ok) {
             const js = await res.json();
             const arr: any[] = Array.isArray(js) ? js : (Array.isArray(js?.data) ? js.data : []);
@@ -1431,7 +1581,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
             mp[e.id_emp] = days.filter((d: any) => !!d?.present).length;
           } catch {}
           try {
-            const r = await fetch(`https://system.gaja.ly/api/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+            const r = await fetch(`http://localhost:9000/api/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
             if (r.ok) {
               const js = await r.json();
               const obj = js?.data ?? js;
@@ -1487,7 +1637,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         let rowsAll: any[] = [];
         try {
           const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-          const r = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+          const r = await fetch(`http://localhost:9000/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
           if (r.ok) rowsAll = await r.json();
         } catch {}
         const gramsByUser = new Map<number, number>();
@@ -1651,10 +1801,17 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
           } else {
             rows = [];
           }
-        } else {
-          rows = [];
         }
       }
+    }
+    // Filter by PS
+    if (ps && ps.trim() !== "") {
+      const formattedSelectedPs = formatPs(ps) || ps;
+      rows = rows.filter((r) => {
+        const empPs = (r as any).PS;
+        const formattedEmpPs = formatPs(empPs) || empPs;
+        return empPs != null && formattedEmpPs === formattedSelectedPs;
+      });
     }
     // Filter by search text
     const f = String(filterText || '').toLowerCase();
@@ -1665,7 +1822,7 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         })
       : rows;
     return sortRows(filtered);
-  }, [result, positionFilter, filterText, sortRows, nameMap, jobs, employeesByTitle]);
+  }, [result, positionFilter, filterText, sortRows, nameMap, jobs, employeesByTitle, ps]);
 
   type CommissionResult = {
   sellerUserId: number | null;
@@ -1905,7 +2062,7 @@ React.useEffect(() => {
       const monthEndISO = dayjs(periodStart).endOf("month").format("YYYY-MM-DD");
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
 
-      const invRes = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, {
+      const invRes = await fetch(`http://localhost:9000/api/invoices/allDetailsP?${qs}`, {
         headers: authHeader() as unknown as HeadersInit,
       });
 
@@ -1921,7 +2078,7 @@ React.useEffect(() => {
 
           let empObj: any = null;
           try {
-            const r = await fetch(`https://system.gaja.ly/api/employees/${empId}`, {
+            const r = await fetch(`http://localhost:9000/api/employees/${empId}`, {
               headers: authHeader() as unknown as HeadersInit,
             });
             if (r.ok) {
@@ -1983,6 +2140,7 @@ React.useEffect(() => {
       latencyMinutes: 0,
     };
     displayedRows.forEach(e => {
+      const id = Number(e.id_emp);
       t.workingDays += Number(e.workingDays || 0);
       const vr = (v2Rows||[]).find((x:any)=> Number(x.id_emp)===Number(e.id_emp)) || {} as any;
       t.deductionDays += Number(vr.absence_days || 0);
@@ -2031,7 +2189,7 @@ React.useEffect(() => {
       // Latency minutes for totals row: use backend attendance minutes so
       // that the displayed hours match the monetary latency_lyd value.
       const backendLatMin =
-        Number((vr as any).latencyMinutes ?? (vr as any).missing_minutes ?? 0) || 0;
+        Number((vr as any).latencyMinutes ?? (vr as any).missing_minutes ?? tsAgg?.[id]?.displayMissingMinutes ?? 0) || 0;
       t.latencyMinutes += backendLatMin;
     });
     return t;
@@ -2044,6 +2202,8 @@ React.useEffect(() => {
     try {
       // Always compute fresh for active employees (ignore any saved data)
       const v2 = await computePayrollV2({ year, month });
+      const rawRows = Array.isArray(v2.rows) ? v2.rows : [];
+      let normalizedRows: any[] = rawRows;
       
       // Persist computed rows for this open month so backend tables stay in sync
       try {
@@ -2053,9 +2213,9 @@ React.useEffect(() => {
       } catch {}
       const start = `${v2.year}-${String(v2.month).padStart(2,'0')}-01`;
       const end = `${v2.year}-${String(v2.month).padStart(2,'0')}-${String(new Date(v2.year, v2.month, 0).getDate()).padStart(2,'0')}`;
-      setV2Rows(v2.rows || []);
       // Load employee allowances (FUEL, COMMUNICATION) once and index by id
       let allowMap: Record<number, { fuel: number; comm: number }> = {};
+      const fingerprintMap: Record<number, boolean> = {};
       try {
         const empList = await listEmployees();
         const nm: Record<number, string> = {};
@@ -2068,6 +2228,9 @@ React.useEffect(() => {
               fuel: Number(e?.FUEL || 0),
               comm: Number(e?.COMMUNICATION || 0),
             };
+            const fpRaw = extractFingerprintRaw(e);
+            const fpBool = parseLooseBoolean(fpRaw);
+            if (fpBool !== undefined) fingerprintMap[id] = fpBool;
             const disp = chooseDisplayName(String(e?.NAME || ''), String(e?.NAME_ENGLISH || ''), id);
             if (disp) nm[id] = disp;
             const title = String((e as any).TITLE || '').trim();
@@ -2079,9 +2242,16 @@ React.useEffect(() => {
         }
         setNameMap(nm);
         setEmployeesByTitle(byTitle);
+        setFingerprintRequiredMap(fingerprintMap);
+        normalizedRows = rawRows.map((row: any) => {
+          const id = Number(row?.id_emp ?? row?.ID_EMP ?? row?.ID);
+          const fpOn = fingerprintMap[id] ?? true;
+          return normalizeFingerprintPayrollRow(row, fpOn);
+        });
       } catch {}
+      setV2Rows(normalizedRows);
       setViewOnly(!!v2.viewOnly);
-      const employees: Payslip[] = (v2.rows || []).map((r: any) => {
+      const employees: Payslip[] = normalizedRows.map((r: any) => {
         const baseSalary = Number(r.base_salary_lyd ?? r.baseLyd ?? 0);
         const workingDays = Number(r.food_days ?? r.workingDays ?? 0) || 0;
         const wdFoodLyd = Number(r.wd_food_lyd ?? r.wdFoodLyd ?? 0);
@@ -2095,6 +2265,7 @@ React.useEffect(() => {
         const presentW = Math.max(0, Number(workingDays || 0) - Number(absenceDays || 0));
         const idEmpNum = Number(r.id_emp);
         const extra = allowMap[idEmpNum] || { fuel: 0, comm: 0 };
+        const fingerprintTracked = fingerprintMap[idEmpNum] ?? true;
         return {
           ok: true,
           id_emp: idEmpNum,
@@ -2134,6 +2305,7 @@ React.useEffect(() => {
             return s ? s : null;
           })(),
           costCenter: null,
+          fingerprintTracked,
         } as Payslip;
       });
       // Fallback fetch per-employee allowances if missing
@@ -2143,7 +2315,7 @@ React.useEffect(() => {
           const hasComm = Number((empRow as any).COMMUNICATION || 0) > 0;
           if (!hasFuel || !hasComm) {
             try {
-              const res = await fetch(`https://system.gaja.ly/api/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+              const res = await fetch(`http://localhost:9000/api/employees/${empRow.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
               if (res.ok) {
                 const payload = await res.json();
                 const obj = payload?.data ?? payload;
@@ -2168,7 +2340,7 @@ React.useEffect(() => {
           let dedUsd = 0;
           let advSum = 0;
           try {
-            const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
+            const url = `http://localhost:9000/api/hr/payroll/adjustments?year=${v2.year}&month=${v2.month}&employeeId=${e.id_emp}`;
             const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
             if (res.ok) {
               const js = await res.json();
@@ -2205,14 +2377,14 @@ React.useEffect(() => {
 
       // Build per-employee timesheet aggregates used by UI to mirror PDF calculations
       try {
-        const agg: Record<number, { presentP: number; presentStrict: number; phUnits: number; fridayA: number; missRatio: number; phFullDays: number; phPartDays: number; absenceDays: number; missingMinutes: number }> = {};
+        const agg: Record<number, { presentP: number; presentStrict: number; phUnits: number; fridayA: number; missRatio: number; phFullDays: number; phPartDays: number; absenceDays: number; missingMinutes: number; leaveUnits: number; foodEligibleNonFpDays: number; displayMissingMinutes: number }> = {};
         await Promise.all(
           employees.map(async (e) => {
             try {
               const days = await ensureTimesheetDays(e.id_emp);
 
               const vr =
-                (v2.rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) ||
+                normalizedRows.find((x: any) => Number(x.id_emp) === Number(e.id_emp)) ||
                 {};
 
               const pick = (s: any): number | null => {
@@ -2244,10 +2416,13 @@ React.useEffect(() => {
                 phUnits = 0,
                 fridayA = 0,
                 missAll = 0,
+                missDisplay = 0,
                 missNoPT = 0,
                 phFullDays = 0,
                 phPartDays = 0,
-                absenceDays = 0;
+                absenceDays = 0,
+                leaveUnits = 0,
+                foodEligibleNonFpDays = 0;
 
               for (let i = 0; i < days.length; i++) {
                 const d: any = days[i];
@@ -2285,11 +2460,23 @@ React.useEffect(() => {
                 // Friday absent count (kept)
                 if (dayDate.day() === 5 && c === "A") fridayA += 1;
 
+                if (LEAVE_FULL_CODES.has(c)) {
+                  leaveUnits += 1;
+                } else if (LEAVE_HALF_CODES.has(c)) {
+                  leaveUnits += 0.5;
+                }
+
+                if (!isFriday) {
+                  const isLeave = LEAVE_FULL_CODES.has(c) || LEAVE_HALF_CODES.has(c);
+                  if (!isLeave) foodEligibleNonFpDays += 1;
+                }
+
                 // Existing delta stats
                 const dm = Number(d?.deltaMin || 0);
                 if (dm < 0) {
                   const abs = Math.abs(dm);
                   missAll += abs;
+                  if (abs > 30) missDisplay += abs;
                   if (c !== "PT") missNoPT += abs;
                 }
               }
@@ -2307,6 +2494,9 @@ React.useEffect(() => {
                 absenceDays,
                 // Missing minutes from timesheet (sum of negative deltaMin)
                 missingMinutes: missAll,
+                leaveUnits,
+                foodEligibleNonFpDays,
+                displayMissingMinutes: missDisplay,
               };
             } catch {
               // ignore per-employee errors
@@ -2730,7 +2920,7 @@ React.useEffect(() => {
   try {
     // Resolve Position (TITLE) before drawing header
     try {
-      const resTitle = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resTitle = await fetch(`http://localhost:9000/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resTitle.ok) {
         const payload = await resTitle.json();
         const obj = payload?.data ?? payload;
@@ -2740,7 +2930,7 @@ React.useEffect(() => {
       }
     } catch {}
     const psTxt = emp?.PS != null ? (formatPs((v2 as any)?.ps ?? emp.PS) || String(emp.PS)) : '-';
-    const branchMap: Record<string, string> = { P1: 'Jraba Mall', P2: 'Jraba Main', P3: 'Ben Ashour' };
+    const branchMap: Record<string, string> = { P1: 'Jraba Mall', P2: 'Jraba Main', P3: 'Ben Ashour', P4: 'HQ', P0: 'Headquarters' };
     const branchName = (() => {
       const pRaw = (v2 as any).ps ?? emp.PS;
       const code = formatPs(pRaw) || (Number(pRaw) ? `P${Number(pRaw)}` : String(pRaw || ''));
@@ -2955,7 +3145,7 @@ React.useEffect(() => {
   let commMonthlyPDF = Number(((emp as any).COMMUNICATION ?? (v2 as any).COMMUNICATION) || 0);
   if (!fuelMonthlyPDF && !commMonthlyPDF) {
     try {
-      const resEmp = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+      const resEmp = await fetch(`http://localhost:9000/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
       if (resEmp.ok) {
         const payload = await resEmp.json();
         const obj = payload?.data ?? payload;
@@ -2971,7 +3161,7 @@ React.useEffect(() => {
   // Fetch this month's Salary Advances total for this employee (to deduct from Net Pay)
   let advSumLYD = 0;
   try {
-    const adjUrlSum = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const adjUrlSum = `http://localhost:9000/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(adjUrlSum, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -2989,7 +3179,7 @@ React.useEffect(() => {
   let commissionRole: string = '';
   let commissionPs: number[] = [];
   try {
-    const resEmp = await fetch(`https://system.gaja.ly/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
+    const resEmp = await fetch(`http://localhost:9000/api/employees/${emp.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
     if (resEmp.ok) {
       const payload = await resEmp.json();
       const obj = payload?.data ?? payload;
@@ -3027,7 +3217,7 @@ React.useEffect(() => {
   if (sellerUserId != null) {
     try {
       const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-      const r = await fetch(`https://system.gaja.ly/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
+      const r = await fetch(`http://localhost:9000/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
       if (r.ok) {
         const js = await r.json();
         const rowsAll: any[] = Array.isArray(js) ? js : [];
@@ -3165,7 +3355,7 @@ React.useEffect(() => {
   // --- Load period adjustments for this employee and map into earnings/deductions rows ---
   let adjRowsPdf: Array<{ type: string; label?: string; direction?: string; amount: number; currency: string; note?: string; ts?: string }> = [];
   try {
-    const url = `https://system.gaja.ly/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
+    const url = `http://localhost:9000/api/hr/payroll/adjustments?year=${year}&month=${month}&employeeId=${emp.id_emp}`;
     const res = await fetch(url, { headers: authHeader() as unknown as HeadersInit });
     if (res.ok) {
       const js = await res.json();
@@ -3953,7 +4143,7 @@ React.useEffect(() => {
       // Missing hours indicator at top-right of cell (only if not on leave/holiday marker)
       if (!isLeaveCode && badge !== 'H') {
         const dm = Number((day as any)?.deltaMin ?? 0);
-        const show = dm < 0 && Math.abs(dm) >= 1; // Only show negative deltas
+        const show = dm < 0 && Math.abs(dm) > 30; // Apply tolerance
         const sgn = '-'; // Always negative
         const abs = Math.abs(dm);
         const hh = Math.floor(abs / 60);
@@ -4801,7 +4991,8 @@ React.useEffect(() => {
                   </Button>
 
                   <Button
-                    variant="outlined"
+                    variant="contained"
+                    color="success"
                     onClick={() => {
                   const sel: Record<number, boolean> = {};
                   (displayedRows || []).forEach((e) => {
@@ -4816,6 +5007,7 @@ React.useEffect(() => {
 
                   <Button
                     variant="contained"
+                    color="error"
                     disabled={viewOnly}
                     onClick={async () => {
                   if (viewOnly) return;
@@ -4918,7 +5110,7 @@ React.useEffect(() => {
                           currency: "LYD",
                           note: "salary advance",
                         };
-                        const res = await fetch(`https://system.gaja.ly/api/hr/payroll/adjustments`, {
+                        const res = await fetch(`http://localhost:9000/api/hr/payroll/adjustments`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json", ...authHeader() } as unknown as HeadersInit,
                           body: JSON.stringify(payload),
@@ -5943,8 +6135,8 @@ React.useEffect(() => {
 
                 {/* Basic Salary */}
                 {cols.baseSalary && (
-                  <TableCell align="right" sortDirection={sortKey === "baseSalary" ? sortDir : (false as any)} sx={{ width: 110 }}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                  <TableCell align="right" sortDirection={sortKey === "baseSalary" ? sortDir : (false as any)} sx={{ width: 140 }}>
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
                       <TableSortLabel
                         active={sortKey === "baseSalary"}
                         direction={sortKey === "baseSalary" ? sortDir : "asc"}
@@ -5961,16 +6153,6 @@ React.useEffect(() => {
                           <span style={{ fontSize: 9 }}>(LYD) | (USD)</span>
                         </Box>
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, baseSalary: !c.baseSalary }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6022,16 +6204,6 @@ React.useEffect(() => {
                       >
                         {t("Food") || "Food"}
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, food: !c.food }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6039,7 +6211,7 @@ React.useEffect(() => {
                 {/* Transportation */}
                 {cols.fuel && (
                   <TableCell align="right" sortDirection={sortKey === "fuel" ? sortDir : (false as any)} sx={{ width: 72 }}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
                       <TableSortLabel
                         active={sortKey === "fuel"}
                         direction={sortKey === "fuel" ? sortDir : "asc"}
@@ -6053,16 +6225,6 @@ React.useEffect(() => {
                       >
                         {t("Transport") || "Transport"}
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, fuel: !c.fuel }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6070,7 +6232,7 @@ React.useEffect(() => {
                 {/* Communication */}
                 {cols.comm && (
                   <TableCell align="right" sortDirection={sortKey === "comm" ? sortDir : (false as any)} sx={{ width: 72 }}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
                       <TableSortLabel
                         active={sortKey === "comm"}
                         direction={sortKey === "comm" ? sortDir : "asc"}
@@ -6084,16 +6246,6 @@ React.useEffect(() => {
                       >
                         {t("Comm") || "Comm"}
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, comm: !c.comm }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6101,7 +6253,7 @@ React.useEffect(() => {
                 {/* Gold Commission */}
                 {cols.gold && (
                   <TableCell align="right" sortDirection={sortKey === "gold" ? sortDir : (false as any)} sx={{ width: 96 }}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
                       <TableSortLabel
                         active={sortKey === "gold"}
                         direction={sortKey === "gold" ? sortDir : "asc"}
@@ -6115,16 +6267,6 @@ React.useEffect(() => {
                       >
                         {t("Gold") || "Gold"}
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, gold: !c.gold }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6132,7 +6274,7 @@ React.useEffect(() => {
                 {/* Diamond Commission */}
                 {cols.diamond && (
                   <TableCell align="right" sortDirection={sortKey === "diamond" ? sortDir : (false as any)} sx={{ width: 96 }}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
                       <TableSortLabel
                         active={sortKey === "diamond"}
                         direction={sortKey === "diamond" ? sortDir : "asc"}
@@ -6146,16 +6288,6 @@ React.useEffect(() => {
                       >
                         {t("Diamond") || "Diamond"}
                       </TableSortLabel>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, diamond: !c.diamond }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6165,16 +6297,6 @@ React.useEffect(() => {
                   <TableCell align="right" sx={{ width: 84 }}>
                     <Box display="flex" alignItems="center" justifyContent="space-between">
                       <span>{t("Watch") || "Watch"}</span>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, watchComm: !c.watchComm }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6184,16 +6306,6 @@ React.useEffect(() => {
                   <TableCell align="right" sx={{ width: 78 }}>
                     <Box display="flex" alignItems="center" justifyContent="space-between">
                       <span>{t("Advance") || "Advance"}</span>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, advances: !c.advances }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6203,16 +6315,6 @@ React.useEffect(() => {
                   <TableCell align="right" sx={{ width: 78 }}>
                     <Box display="flex" alignItems="center" justifyContent="space-between">
                       <span>{t("Loans") || "Loans"}</span>
-                      <IconButton
-                        size="small"
-                        sx={{ ml: 0.5, p: 0.25 }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCols((c) => ({ ...c, loans: !c.loans }));
-                        }}
-                      >
-                        <VisibilityOffIcon fontSize="inherit" />
-                      </IconButton>
                     </Box>
                   </TableCell>
                 )}
@@ -6260,11 +6362,10 @@ React.useEffect(() => {
 
                 <TableCell
                   align="right"
-                  sx={{ width: 220, position: "sticky", right: 0, zIndex: 6, bgcolor: "background.paper" }}
+                  sx={{ width: 90, position: "sticky", right: 0, zIndex: 6, bgcolor: "background.paper" }}
                 >
-                  <Box display="flex" alignItems="center" justifyContent="flex-end" gap={0.5}>
-                    <span>{t("Actions") || "Actions"}</span>
-                    <IconButton size="small" onClick={(e) => setColsAnchor(e.currentTarget)}>
+                  <Box display="center" alignItems="center" justifyContent="center" gap={0.5}>
+                    <IconButton onClick={(e) => setColsAnchor(e.currentTarget)}>
                       <SettingsIcon fontSize="inherit" />
                     </IconButton>
                   </Box>
@@ -6294,7 +6395,7 @@ React.useEffect(() => {
                     >
                       <Box display="flex" alignItems="center" gap={1.25}>
                         <Avatar
-                          src={`https://system.gaja.ly/api/employees/${e.id_emp}/picture`}
+                          src={`http://localhost:9000/api/employees/${e.id_emp}/picture`}
                           sx={{ width: 28, height: 28 }}
                         />
                         <Box
@@ -6731,18 +6832,28 @@ React.useEffect(() => {
 
         <TableCell
           align="right"
-          sx={{ width: 90, position: "sticky", right: 0, zIndex: 2, bgcolor: "background.paper" }}
+          sx={{ width: 60, position: "sticky", right: 0, zIndex: 2, bgcolor: "background.paper" }}
         >
-          <Box display="flex" flexDirection="row" gap={1} alignItems="center" justifyContent="flex-end">
+          <Box display="flex" flexDirection="row" gap={0.5} alignItems="center" justifyContent="flex-end">
             {savingRows[e.id_emp] && <CircularProgress size={14} />}
-            <Button
-              startIcon={<PictureAsPdfOutlinedIcon />}
+            <IconButton
+              size="small"
+              color="success"
               onClick={() => exportPdfClient(e)}
-              />
-            <Button
-              startIcon={<SendOutlinedIcon />}
-              onClick={() => sendPayslipEmailClient(e)}
-            />
+            >
+              <PictureAsPdfOutlinedIcon fontSize="small" />
+            </IconButton>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => {
+                if (window.confirm(`${t("Are you sure you want to send the payslip email?") || "Are you sure you want to send the payslip email?"}`)) {
+                  sendPayslipEmailClient(e);
+                }
+              }}
+            >
+              <SendOutlinedIcon fontSize="small" />
+            </IconButton>
           </Box>
         </TableCell>
       </TableRow>
@@ -7278,7 +7389,8 @@ React.useEffect(() => {
                                   : (leaveCode && (badge0 === 'A' || badge0 === 'P' || badge0 === ''))
                                       ? leaveCode
                                       : badge0;
-                              const delta = roundedHoursWithSign(day?.deltaMin ?? null);
+                              const dm = Number(day?.deltaMin ?? 0);
+                              const delta = dm < 0 && Math.abs(dm) > 30 ? roundedHoursWithSign(dm) : "";
                               const leaveDesc = (day as any)?.leave_description || (day as any)?.leaveDescription || "";
 
                               const isLeave = ["AL", "SL", "EL", "ML", "UL", "HL", "BM", "XL", "B1", "B2"].includes(String(badge));
@@ -7422,55 +7534,141 @@ React.useEffect(() => {
                   maxWidth="lg"
                   PaperProps={{ sx: { width: 'min(1100px, 92vw)' } }}
                 >
-                  <DialogTitle>{t("Send Payslips") || "Send Payslips"}</DialogTitle>
+                  <DialogTitle>
+                    <Box display="flex" justifyContent="space-between" alignItems="center">
+                      {t("Send Payslips") || "Send Payslips"}
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => {
+                          const allSelected = (displayedRows || []).every((e) => sendSelection[e.id_emp]);
+                          const newSelection: Record<number, boolean> = {};
+                          (displayedRows || []).forEach((emp) => {
+                            newSelection[emp.id_emp] = !allSelected;
+                          });
+                          setSendSelection(newSelection);
+                        }}
+                      >
+                        {(() => {
+                          const allSelected = (displayedRows || []).every((e) => sendSelection[e.id_emp]);
+                          return allSelected ? (t("Deselect All") || "Deselect All") : (t("Select All") || "Select All");
+                        })()}
+                      </Button>
+                    </Box>
+                  </DialogTitle>
                   <DialogContent dividers>
-                    <Typography variant="body2" sx={{ mb: 1 }}>
+                    <Typography variant="body2" sx={{ mb: 2 }}>
                       {t("Select employees to send payslips to for this period.") ||
                         "Select employees to send payslips to for this period."}
                     </Typography>
-                    <Box sx={{ maxHeight: 360, overflow: "auto" }}>
-                      {(displayedRows || []).map((emp) => (
-                        <FormControlLabel
-                          key={emp.id_emp}
-                          control={
-                            <Checkbox
-                              size="small"
-                              checked={!!sendSelection[emp.id_emp]}
-                              onChange={(e) => {
-                                const checked = e.target.checked;
-                                setSendSelection((prev) => ({ ...prev, [emp.id_emp]: checked }));
-                              }}
-                            />
-                          }
-                          label={`${nameMap[emp.id_emp] ?? emp.name} (ID: ${emp.id_emp})`}
-                        />
-                      ))}
+                    <Box sx={{ maxHeight: 400, overflow: "auto" }}>
+                      {(() => {
+                        const employeesByPs: Record<string, any[]> = {};
+                        (displayedRows || []).forEach((emp) => {
+                          const ps = formatPs(emp.PS) || emp.PS || 'Unknown';
+                          if (!employeesByPs[ps]) employeesByPs[ps] = [];
+                          employeesByPs[ps].push(emp);
+                        });
+                        // Sort employees within each PS by ID
+                        Object.keys(employeesByPs).forEach((ps: string) => {
+                          employeesByPs[ps].sort((a: any, b: any) => a.id_emp - b.id_emp);
+                        });
+                        // Sort PS groups
+                        const sortedPsKeys = Object.keys(employeesByPs).sort((a: string, b: string) => {
+                          if (a === 'Unknown') return 1;
+                          if (b === 'Unknown') return -1;
+                          const aNum = Number(a.replace('P', ''));
+                          const bNum = Number(b.replace('P', ''));
+                          if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
+                          return a.localeCompare(b);
+                        });
+
+                        return sortedPsKeys.map((ps: string, index: number) => (
+                          <Box key={ps} sx={{ mb: 2 }}>
+                            {index > 0 && (
+                              <Divider sx={{ mb: 2, borderColor: 'divider' }} />
+                            )}
+                            <Box display="flex" justifyContent="center" sx={{ mb: 1 }}>
+                              <Typography variant="subtitle2" sx={{ 
+                                fontWeight: 600, 
+                                color: 'primary.main',
+                                px: 2,
+                                py: 0.5,
+                                bgcolor: 'background.paper',
+                                borderRadius: 1,
+                                border: 1,
+                                borderColor: 'primary.light'
+                              }}>
+                                {ps === 'Unknown' ? (t("Unknown PS") || "Unknown PS") : ps}
+                              </Typography>
+                            </Box>
+                            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 1 }}>
+                              {employeesByPs[ps].map((emp: any) => (
+                                <FormControlLabel
+                                  key={emp.id_emp}
+                                  control={
+                                    <Checkbox
+                                      size="small"
+                                      checked={!!sendSelection[emp.id_emp]}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setSendSelection((prev) => ({ ...prev, [emp.id_emp]: checked }));
+                                      }}
+                                    />
+                                  }
+                                  label={
+                                    <Box>
+                                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                        {nameMap[emp.id_emp] ?? emp.name}
+                                      </Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        ID: {emp.id_emp}
+                                      </Typography>
+                                    </Box>
+                                  }
+                                  sx={{ alignItems: 'flex-start', py: 0.5 }}
+                                />
+                              ))}
+                            </Box>
+                          </Box>
+                        ));
+                      })()}
                     </Box>
                   </DialogContent>
                   <DialogActions>
-                    <Button onClick={() => setSendDialogOpen(false)}>{t("Cancel") || "Cancel"}</Button>
-                    <Button
-                      variant="contained"
-                      onClick={async () => {
-                        const list = (displayedRows || []).filter((e) => sendSelection[e.id_emp]);
-                        if (!list.length) {
-                          alert(t("No employees selected") || "No employees selected");
-                          return;
-                        }
-                        try {
-                          for (const emp of list) {
-                            await sendPayslipEmailClient(emp);
-                          }
-                          alert(t("Payslips sent") || "Payslips sent");
-                        } catch (e: any) {
-                          alert(e?.message || "Failed to send some payslips");
-                        } finally {
-                          setSendDialogOpen(false);
-                        }
-                      }}
-                    >
-                      {t("Send") || "Send"}
-                    </Button>
+                    <Box display="flex" justifyContent="space-between" width="100%">
+                      <Typography variant="body2" color="text.secondary">
+                        {(displayedRows || []).filter((e) => sendSelection[e.id_emp]).length} {(displayedRows || []).filter((e) => sendSelection[e.id_emp]).length === 1 ? (t("employee selected") || "employee selected") : (t("employees selected") || "employees selected")}
+                      </Typography>
+                      <Box>
+                        <Button onClick={() => setSendDialogOpen(false)}>{t("Cancel") || "Cancel"}</Button>
+                        <Button
+                          variant="contained"
+                          onClick={async () => {
+                            const list = (displayedRows || []).filter((e) => sendSelection[e.id_emp]);
+                            if (!list.length) {
+                              alert(t("No employees selected") || "No employees selected");
+                              return;
+                            }
+                            const confirmed = window.confirm(`${t("Are you sure you want to send payslips to") || "Are you sure you want to send payslips to"} ${list.length} ${list.length === 1 ? (t("employee") || "employee") : (t("employees") || "employees")}?`);
+                            if (!confirmed) return;
+                            
+                            try {
+                              for (const emp of list) {
+                                await sendPayslipEmailClient(emp);
+                              }
+                              alert(t("Payslips sent") || "Payslips sent");
+                            } catch (e: any) {
+                              alert(e?.message || "Failed to send some payslips");
+                            } finally {
+                              setSendDialogOpen(false);
+                            }
+                          }}
+                        >
+                          {t("Send") || "Send"}
+                        </Button>
+                      </Box>
+                    </Box>
                   </DialogActions>
                 </Dialog>
 

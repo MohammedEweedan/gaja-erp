@@ -32,7 +32,7 @@ interface AttchDiamondFilesProps {
   token: string;
 }
 
-const apiUrl = "https://system.gaja.ly/api";
+const apiUrl = "http://localhost:9000/api";
 
 const AttchDiamondFiles: React.FC<AttchDiamondFilesProps> = ({
   open,

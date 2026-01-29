@@ -21,7 +21,6 @@ import EditOutlined from "@mui/icons-material/EditOutlined";
 import DeleteOutline from "@mui/icons-material/DeleteOutline";
 import WorkOutline from "@mui/icons-material/WorkOutline";
 import AccessTimeOutlined from "@mui/icons-material/AccessTimeOutlined";
-import CalendarMonthOutlined from "@mui/icons-material/CalendarMonthOutlined";
 import StorefrontOutlined from "@mui/icons-material/StorefrontOutlined";
 import PersonOutline from "@mui/icons-material/PersonOutline";
 import CheckRounded from "@mui/icons-material/CheckRounded";
@@ -40,7 +39,7 @@ export type MinimalEmployee = {
   DATE_OF_BIRTH?: string | null;
   CONTRACT_START?: string | null;
   CONTRACT_END?: string | null;
-  T_START?: string | null; // "HH:mm" | "HH:mm:ss" | ISO
+  T_START?: string | null;
   T_END?: string | null;
   PS?: string | number | null;
   BASIC_SALARY?: number | string | null;
@@ -83,12 +82,6 @@ const safeDate = (s?: string | null): Date | null => {
   return isNaN(d.getTime()) ? null : d;
 };
 
-const fmtDate = (s?: string | null) => {
-  const d = safeDate(s);
-  return d ? d.toLocaleDateString() : "—";
-};
-
-// Accept "HH:mm", "HH:mm:ss", "YYYY-MM-DDTHH:mm:ss", etc. -> "hh:mm am/pm"
 const display12h = (val?: string | null) => {
   if (!val) return "—";
   let hh = 0,
@@ -184,6 +177,30 @@ const SmallBadge = ({
   />
 );
 
+const DetailPanel: React.FC<{ title: string; children: React.ReactNode }> = ({
+  title,
+  children,
+}) => (
+  <Box
+    sx={{
+      border: "1px solid",
+      borderColor: "divider",
+      borderRadius: 2,
+      p: 1,
+      bgcolor: "background.default",
+      minHeight: 130,
+    }}
+  >
+    <Typography
+      variant="subtitle2"
+      sx={{ fontWeight: 800, mb: 0.75, textTransform: "uppercase", fontSize: 12 }}
+    >
+      {title}
+    </Typography>
+    <Stack spacing={0.5}>{children}</Stack>
+  </Box>
+);
+
 /* ---------- Card component ---------- */
 export const EmployeeCard = <T extends MinimalEmployee>({
   employee: e,
@@ -197,13 +214,15 @@ export const EmployeeCard = <T extends MinimalEmployee>({
   const theme = useTheme();
   const { t } = useTranslation();
 
+  const isActive = !!e.STATE;
+
   const [broken, setBroken] = React.useState(false);
   const [editing, setEditing] = React.useState<boolean>(false);
+  const [savingTimes, setSavingTimes] = React.useState(false);
 
   const [tStart, setTStart] = React.useState<string | null>(null);
   const [tEnd, setTEnd] = React.useState<string | null>(null);
 
-  // toast
   const [toast, setToast] = React.useState<{
     open: boolean;
     msg: string;
@@ -246,24 +265,30 @@ export const EmployeeCard = <T extends MinimalEmployee>({
       .toLowerCase();
   };
 
+  const handleCardClick = React.useCallback(
+    (event: React.MouseEvent | React.KeyboardEvent) => {
+      if (editing) return;
+      const target = event.target as HTMLElement;
+      if (target.closest('[data-interactive="true"]')) return;
+      onOpenProfile?.(e);
+    },
+    [editing, onOpenProfile, e]
+  );
+
   const saveTimes = async () => {
-    if (!onUpdateTimes || !e.ID_EMP) return;
+    if (!onUpdateTimes || !e.ID_EMP || savingTimes) return;
     const prevStart = e.T_START;
     const prevEnd = e.T_END;
 
     const nextStart = tStart ? `${tStart}:00` : null;
     const nextEnd = tEnd ? `${tEnd}:00` : null;
 
-    // optimistic: no mutation of 'e' object (parent owns data), just fire and toast
     try {
-      await onUpdateTimes(e.ID_EMP, {
-        T_START: nextStart,
-        T_END: nextEnd,
-      });
+      setSavingTimes(true);
+      await onUpdateTimes(e.ID_EMP, { T_START: nextStart, T_END: nextEnd });
       setToast({ open: true, msg: t("common.saved", "Saved"), sev: "success" });
       setEditing(false);
     } catch (err: any) {
-      // rollback UI state to prev visual values
       setTStart(to24hSeconds(prevStart)?.slice(0, 5) || "");
       setTEnd(to24hSeconds(prevEnd)?.slice(0, 5) || "");
       setToast({
@@ -271,6 +296,8 @@ export const EmployeeCard = <T extends MinimalEmployee>({
         msg: err?.message || t("common.error", "Failed to save"),
         sev: "error",
       });
+    } finally {
+      setSavingTimes(false);
     }
   };
 
@@ -286,9 +313,18 @@ export const EmployeeCard = <T extends MinimalEmployee>({
         overflow: "hidden",
         bgcolor: "background.paper",
         transition: (t) =>
-          t.transitions.create(["box-shadow", "transform", "border-color"], {
-            duration: t.transitions.duration.shorter,
-          }),
+          t.transitions.create(
+            ["box-shadow", "transform", "border-color", "filter", "opacity"],
+            { duration: t.transitions.duration.shorter }
+          ),
+        // inactive: darker + muted
+        ...(isActive
+          ? {}
+          : {
+              opacity: 0.78,
+              filter: "saturate(0.6)",
+              bgcolor: "action.hover",
+            }),
         "&:hover": {
           boxShadow: 8,
           transform: "translateY(-1px)",
@@ -296,29 +332,73 @@ export const EmployeeCard = <T extends MinimalEmployee>({
         },
         display: "flex",
         flexDirection: "column",
+        position: "relative",
       }}
     >
-      {/* Header */}
-      <Box sx={{ position: "relative", p: dense ? 1.25 : 1.5 }}>
+      {/* X overlay for inactive */}
+      {!isActive && (
         <Box
+          aria-hidden
+          sx={{
+            pointerEvents: "none",
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            opacity: 0.18, // slightly opaque X
+            backgroundImage: `
+              linear-gradient(45deg, transparent 48%, currentColor 49%, currentColor 51%, transparent 52%),
+              linear-gradient(-45deg, transparent 48%, currentColor 49%, currentColor 51%, transparent 52%)
+            `,
+            color: theme.palette.text.primary,
+          }}
+        />
+      )}
+
+      {/* Header */}
+      <Box
+        sx={{ position: "relative", p: dense ? 1.25 : 1.5, zIndex: 3 }}
+        role={onOpenProfile ? "button" : undefined}
+        tabIndex={onOpenProfile ? 0 : undefined}
+        onClick={onOpenProfile ? handleCardClick : undefined}
+        onKeyDown={
+          onOpenProfile
+            ? (ev) => {
+                if (ev.key === "Enter" || ev.key === " ") {
+                  ev.preventDefault();
+                  handleCardClick(ev);
+                }
+              }
+            : undefined
+        }
+      >
+        {/* ACTIVE neon pill OR INACTIVE grey pill (replaces the circle) */}
+        <Chip
+          size="small"
+          label={
+            isActive ? t("common.active", "ACTIVE") : t("common.inactive", "INACTIVE")
+          }
           sx={{
             position: "absolute",
             top: 8,
             right: 8,
-            width: 10,
-            height: 10,
-            borderRadius: "50%",
-            bgcolor: e.STATE ? "success.main" : "action.disabled",
-            boxShadow: `0 0 0 2px ${theme.palette.background.paper}`,
+            height: 22,
+            borderRadius: 999,
+            fontWeight: 900,
+            letterSpacing: 0.4,
+            ...(isActive
+              ? {
+                  bgcolor: "#39ff14",
+                  color: "black",
+                  boxShadow: "0 0 14px rgba(57,255,20,.55)",
+                }
+              : {
+                  bgcolor: "action.disabledBackground",
+                  color: "text.secondary",
+                }),
           }}
         />
-        <Stack
-          direction="row"
-          spacing={1.25}
-          alignItems="center"
-          sx={{ cursor: "pointer" }}
-          onClick={() => onOpenProfile?.(e)}
-        >
+
+        <Stack direction="row" spacing={1.25} alignItems="center">
           <Avatar
             src={imgSrc}
             onError={() => setBroken(true)}
@@ -337,6 +417,7 @@ export const EmployeeCard = <T extends MinimalEmployee>({
           >
             {initials(e.NAME)}
           </Avatar>
+
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography
               variant="h6"
@@ -350,13 +431,9 @@ export const EmployeeCard = <T extends MinimalEmployee>({
             >
               {e.NAME}
             </Typography>
+
             {e.TITLE ? (
-              <Stack
-                direction="row"
-                spacing={0.5}
-                alignItems="center"
-                sx={{ mt: 0.5 }}
-              >
+              <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5 }}>
                 <WorkOutline fontSize="small" />
                 <Typography variant="body2" color="text.secondary">
                   {e.TITLE}
@@ -368,7 +445,7 @@ export const EmployeeCard = <T extends MinimalEmployee>({
       </Box>
 
       {/* Badges */}
-      <Box sx={{ px: 1.25 }}>
+      <Box sx={{ px: 1.25, zIndex: 3 }}>
         <Stack
           direction="row"
           spacing={0.5}
@@ -377,88 +454,97 @@ export const EmployeeCard = <T extends MinimalEmployee>({
           flexWrap="wrap"
           sx={{ mb: 1, width: "100%" }}
         >
-          {e.ID_EMP != null && (
-            <SmallBadge icon={<Numbers />} label={`#${e.ID_EMP}`} />
-          )}
-          {psChipLabel && (
-            <SmallBadge icon={<StorefrontOutlined />} label={psChipLabel} />
-          )}
-          {fmtMoney(e.BASIC_SALARY) && (
-            <SmallBadge icon={<Paid />} label={fmtMoney(e.BASIC_SALARY)} />
-          )}
+          {e.ID_EMP != null && <SmallBadge icon={<Numbers />} label={`#${e.ID_EMP}`} />}
+          {psChipLabel && <SmallBadge icon={<StorefrontOutlined />} label={psChipLabel} />}
+          {fmtMoney(e.BASIC_SALARY) && <SmallBadge icon={<Paid />} label={fmtMoney(e.BASIC_SALARY)} />}
           {e.PHONE && <SmallBadge icon={<PhoneIphone />} label={e.PHONE} />}
           {e.EMAIL && <SmallBadge icon={<AlternateEmail />} label={e.EMAIL} />}
-          {age != null && (
-            <SmallBadge icon={<PersonOutline />} label={`${age}`} />
-          )}
+          {age != null && <SmallBadge icon={<PersonOutline />} label={`${age}`} />}
         </Stack>
       </Box>
 
       <Divider />
 
       {/* Details */}
-      <Box sx={{ px: 1.25, py: 1 }}>
-        <Stack spacing={0.75} sx={{ mb: 0.75 }}>
-          <Row
-            icon={<CalendarMonthOutlined fontSize="small" />}
-            label="Start"
-            value={fmtDate(e.CONTRACT_START)}
-          />
-          <Row
-            icon={<CalendarMonthOutlined fontSize="small" />}
-            label="End"
-            value={fmtDate(e.CONTRACT_END)}
-          />
+      <Box
+        sx={{ px: 1.25, py: 1.25, zIndex: 3 }}
+        data-interactive="true"
+        onClick={(ev) => ev.stopPropagation()}
+      >
+        <Box
+          sx={{
+            display: "grid",
+            gap: 1,
+            gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+          }}
+        >
+          <DetailPanel title={t("common.shift", "Shift")}>
+            {!editing ? (
+              <Stack spacing={0.25}>
+                <Row
+                  icon={<AccessTimeOutlined fontSize="small" />}
+                  label={t("hr.employee.shiftStart", "Start")}
+                  value={display12h(e.T_START)}
+                />
+                <Row
+                  icon={<AccessTimeOutlined fontSize="small" />}
+                  label={t("hr.employee.shiftEnd", "End")}
+                  value={display12h(e.T_END)}
+                />
+              </Stack>
+            ) : (
+              <Stack spacing={1} sx={{ mt: 0.25 }} data-interactive="true">
+                <InlineTimeRow
+                  label={t("hr.employee.shiftStart", "Start")}
+                  value={tStart ?? ""}
+                  pretty={fmt12(tStart)}
+                  onChange={setTStart}
+                />
+                <InlineTimeRow
+                  label={t("hr.employee.shiftEnd", "End")}
+                  value={tEnd ?? ""}
+                  pretty={fmt12(tEnd)}
+                  onChange={setTEnd}
+                />
+                <Box sx={{ display: "flex", gap: 1 }}>
+                  <Button
+                    onClick={saveTimes}
+                    startIcon={<CheckRounded />}
+                    variant="contained"
+                    size="small"
+                    disabled={savingTimes}
+                    sx={{ textTransform: "none", borderRadius: 999 }}
+                    data-interactive="true"
+                  >
+                    {savingTimes ? t("common.saving", "Saving…") : t("common.save", "Save")}
+                  </Button>
+                  <Button
+                    onClick={() => setEditing(false)}
+                    variant="text"
+                    size="small"
+                    sx={{ textTransform: "none", borderRadius: 999 }}
+                    data-interactive="true"
+                  >
+                    {t("common.cancel", "Cancel")}
+                  </Button>
+                </Box>
+              </Stack>
+            )}
+          </DetailPanel>
 
-          {!editing ? (
-            <Stack spacing={0.25}>
-              <Row
-                icon={<AccessTimeOutlined fontSize="small" />}
-                label="Shift start"
-                value={display12h(e.T_START)}
-              />
-              <Row
-                icon={<AccessTimeOutlined fontSize="small" />}
-                label="Shift end"
-                value={display12h(e.T_END)}
-              />
-            </Stack>
-          ) : (
-            <Stack spacing={1} sx={{ mt: 0.25 }}>
-              <InlineTimeRow
-                label="Start"
-                value={tStart ?? ""}
-                pretty={fmt12(tStart)}
-                onChange={setTStart}
-              />
-              <InlineTimeRow
-                label="End"
-                value={tEnd ?? ""}
-                pretty={fmt12(tEnd)}
-                onChange={setTEnd}
-              />
-              <Box sx={{ display: "flex", gap: 1 }}>
-                <Button
-                  onClick={saveTimes}
-                  startIcon={<CheckRounded />}
-                  variant="contained"
-                  size="small"
-                  sx={{ textTransform: "none", borderRadius: 999 }}
-                >
-                  {t("common.save", "Save")}
-                </Button>
-                <Button
-                  onClick={() => setEditing(false)}
-                  variant="text"
-                  size="small"
-                  sx={{ textTransform: "none", borderRadius: 999 }}
-                >
-                  {t("common.cancel", "Cancel")}
-                </Button>
-              </Box>
-            </Stack>
-          )}
-        </Stack>
+          <DetailPanel title={t("common.contact", "Contact")}>
+            <Row
+              icon={<PhoneIphone fontSize="small" />}
+              label={t("common.phone", "Phone")}
+              value={e.PHONE || "—"}
+            />
+            <Row
+              icon={<AlternateEmail fontSize="small" />}
+              label={t("common.email", "Email")}
+              value={e.EMAIL || "—"}
+            />
+          </DetailPanel>
+        </Box>
       </Box>
 
       {/* action bar */}
@@ -473,8 +559,10 @@ export const EmployeeCard = <T extends MinimalEmployee>({
           gap: 0.75,
           alignItems: "center",
           justifyContent: "space-between",
+          zIndex: 3,
         }}
       >
+        {/* Edit button stays neutral */}
         <Button
           size="small"
           variant="outlined"
@@ -483,12 +571,15 @@ export const EmployeeCard = <T extends MinimalEmployee>({
             setEditing((s) => !s);
           }}
           startIcon={<AccessTimeOutlined />}
-          sx={{ textTransform: "none", fontWeight: 800, borderRadius: 999 }}
+          sx={{
+            textTransform: "none",
+            fontWeight: 900,
+            borderRadius: 999,
+          }}
         >
-          {editing
-            ? t("common.editOff", "Edit off")
-            : t("common.editTime", "Edit time")}
+          {editing ? t("common.editOff", "Edit off") : t("common.editTime", "Edit time")}
         </Button>
+
         <Box>
           <Tooltip title={t("common.edit", "Edit")}>
             <IconButton
@@ -545,12 +636,7 @@ const Row: React.FC<{
   value?: string | number | null;
 }> = ({ icon, label, value }) =>
   value == null || value === "" ? null : (
-    <Stack
-      direction="row"
-      spacing={0.75}
-      alignItems="center"
-      sx={{ color: "text.secondary" }}
-    >
+    <Stack direction="row" spacing={0.75} alignItems="center" sx={{ color: "text.secondary" }}>
       <Box sx={{ display: "grid", placeItems: "center" }}>{icon}</Box>
       <Typography variant="body2" fontWeight={700}>
         {label}:
@@ -573,7 +659,14 @@ const InlineTimeRow = ({
   pretty: string;
   onChange: (v: string | null) => void;
 }) => (
-  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+  <Stack
+    direction="row"
+    spacing={1}
+    alignItems="center"
+    flexWrap="wrap"
+    data-interactive="true"
+    onClick={(ev) => ev.stopPropagation()}
+  >
     <AccessTimeOutlined fontSize="small" />
     <Typography variant="caption" color="text.secondary">
       {label}
@@ -582,6 +675,8 @@ const InlineTimeRow = ({
       type="time"
       value={value}
       onChange={(ev) => onChange(ev.target.value || null)}
+      onClick={(ev) => ev.stopPropagation()}
+      onFocus={(ev) => ev.stopPropagation()}
       data-interactive="true"
       style={{
         border: "1px solid var(--mui-palette-divider)",
@@ -609,9 +704,7 @@ export const EmployeeGrid = <T extends MinimalEmployee>({
 }) => (
   <Grid container spacing={spacing}>
     {rows.map((r) => (
-      <Grid key={r.ID_EMP ?? r.NAME}>
-        {renderCard(r)}
-      </Grid>
+      <Grid key={r.ID_EMP ?? r.NAME}>{renderCard(r)}</Grid>
     ))}
   </Grid>
 );

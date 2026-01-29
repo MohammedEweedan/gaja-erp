@@ -41,7 +41,7 @@ export default function Specialities() {
   const accent: string = (muiTheme.palette as any)?.gaja?.[100] || muiTheme.palette.primary.main;
   const accent2: string = (muiTheme.palette as any)?.gaja?.[200] || muiTheme.palette.primary.light;
 
-  const apiUrl = "https://system.gaja.ly/api/specialites";
+  const apiUrl = "http://localhost:9000/api/specialites";
 
   const [data, setData] = useState<Speciality[]>([]);
   const [loading, setLoading] = useState(true);

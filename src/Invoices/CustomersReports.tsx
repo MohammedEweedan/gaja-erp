@@ -272,7 +272,7 @@ const CustomersReports = ({
                   try {
                     const hostIdx = out.indexOf("system.gaja.ly") + "system.gaja.ly".length;
                     const trailing = out.substring(hostIdx);
-                    out = `https://system.gaja.ly${trailing}`;
+                    out = `http://localhost:9000${trailing}`;
                   } catch {
                     /* ignore */
                   }

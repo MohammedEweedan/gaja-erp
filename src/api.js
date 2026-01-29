@@ -2,7 +2,7 @@
 import axios from "axios";
 
 // Prefer env var, fallback to production API. Override with REACT_APP_API_BASE_URL for local/dev.
-const baseURL = "https://system.gaja.ly/api";
+const baseURL = "http://localhost:9000/api";
 
 const api = axios.create({
   baseURL,

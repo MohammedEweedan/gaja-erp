@@ -12,7 +12,7 @@ export type Employee = {
 const API_BASE = (
   (process.env.REACT_APP_API_BASE_URL as string | undefined) ||
   (process.env.REACT_APP_API_IP as string | undefined) ||
-  "https://system.gaja.ly/api"
+  "http://localhost:9000/api"
 ).replace(/\/+$/, "");
 
 /** Build an absolute URL from API_BASE + path */
@@ -126,8 +126,34 @@ export function isActiveEmployee(e: any): boolean {
 
 /** Convenience: list only active employees */
 export async function listActiveEmployees(): Promise<Employee[]> {
-  const list = await listEmployees();
-  return (Array.isArray(list) ? list : []).filter(isActiveEmployee);
+  const url = absolute("/employees?state=active");
+  try {
+    const payload = await http<any>(url, { headers: authHeaders() });
+    const list = unwrapList<Employee>(payload);
+    if (Array.isArray(list) && list.length) {
+      return list.filter(isActiveEmployee);
+    }
+  } catch (err) {
+    console.warn("GET /employees?state=active failed, falling back to local filter:", err);
+  }
+  const fallbackList = await listEmployees();
+  return (Array.isArray(fallbackList) ? fallbackList : []).filter(isActiveEmployee);
+}
+
+/** Convenience: list only inactive employees */
+export async function listInactiveEmployees(): Promise<Employee[]> {
+  const url = absolute("/employees?state=inactive");
+  try {
+    const payload = await http<any>(url, { headers: authHeaders() });
+    const list = unwrapList<Employee>(payload);
+    if (Array.isArray(list) && list.length) {
+      return list.filter((emp) => !isActiveEmployee(emp));
+    }
+  } catch (err) {
+    console.warn("GET /employees?state=inactive failed, falling back to local filter:", err);
+  }
+  const fallbackList = await listEmployees();
+  return (Array.isArray(fallbackList) ? fallbackList : []).filter((emp) => !isActiveEmployee(emp));
 }
 
 /** Get a single employee by id, with graceful fallbacks */

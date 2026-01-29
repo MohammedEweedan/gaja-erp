@@ -3,7 +3,6 @@
 // src/components/LeaveManagement/LeaveBalanceScreen.tsx
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { getAuthHeader } from "../../utils/auth";
 import { isActiveEmployee } from "../../api/employees";
 import {
   Box,
@@ -20,16 +19,12 @@ import {
   CircularProgress,
   Alert,
   Button,
-  Tabs,
-  Tab,
-  Grid,
   Stack,
   Snackbar,
   IconButton,
   Tooltip,
   Chip,
   Dialog,
-  DialogTitle,
   DialogContent,
   DialogActions,
   TextField,

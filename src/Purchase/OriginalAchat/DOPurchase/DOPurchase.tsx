@@ -48,7 +48,7 @@ import AttchDiamondFiles from "./AttchDiamondFiles";
 // Simple in-memory cache to avoid refetching thumbnails repeatedly
 const thumbCache = new Map<number, string>();
 //const API_BASE = (process.env.REACT_APP_API_IP as string) || '';
-const API_BASEI = "https://system.gaja.ly/api";
+const API_BASEI = "http://localhost:9000/api";
 const Thumb: React.FC<{ idAchat: number; onClick?: () => void }> = ({
   idAchat,
   onClick,

@@ -121,10 +121,10 @@ async function fetchImageListForExport(id: number): Promise<string[]> {
           .map((u: string) => {
             if (typeof u !== "string") return "";
             if (
-              u.startsWith("https://system.gaja.ly")
+              u.startsWith("http://localhost:9000")
             ) {
               u =
-                "https://system.gaja.ly" +
+                "http://localhost:9000" +
                 u.substring(
                   u.indexOf("system.gaja.ly") + "system.gaja.ly".length
                 );
@@ -279,7 +279,7 @@ const ensureHttpsSystemGaja = (u?: string | null): string => {
         parsed.pathname + (parsed.search || "") + (parsed.hash || "");
       // If hostname looks like 'images' (no domain) or equals 'images', rewrite to system.gaja.ly
       if (host === "images" || /^images$/i.test(host)) {
-        return `https://system.gaja.ly${pathAndQuery}`;
+        return `http://localhost:9000${pathAndQuery}`;
       }
       // If host is system.gaja.ly but using http, upgrade to https
       if (/^system\.gaja\.ly$/i.test(host)) {
@@ -291,7 +291,7 @@ const ensureHttpsSystemGaja = (u?: string | null): string => {
       // Not an absolute URL; handle common relative forms like '/images/...' or 'images/...'
       const rel = s.replace(/^\/+/, ""); // strip leading slashes
       if (/^images\//i.test(rel)) {
-        return `https://system.gaja.ly/${rel}`;
+        return `http://localhost:9000/${rel}`;
       }
       return s;
     }

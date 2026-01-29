@@ -498,7 +498,7 @@ const InventoryReports: React.FC = () => {
                 try {
                     const psArray = Array.from(psSet);
                     const reqs = psArray.map((psVal) =>
-                        axios.get(`https://system.gaja.ly/api/Inventory/allActiveDesactive`, { headers, params: { ps: Number(psVal) } })
+                        axios.get(`http://localhost:9000/api/Inventory/allActiveDesactive`, { headers, params: { ps: Number(psVal) } })
                             .then(res => Array.isArray(res?.data) ? res.data : (res?.data?.rows || res?.data?.data || []))
                             .catch(() => [])
                     );

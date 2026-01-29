@@ -1283,7 +1283,7 @@ const WOPurchase = () => {
               try {
                 // Use explicit backend base to avoid hitting the front-end dev server origin (e.g. localhost:3000)
                 // when running locally. Falls back to production base. Keep trailing segment off.
-                const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "https://system.gaja.ly/api").replace(/\/+$/,'');
+                const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "http://localhost:9000/api").replace(/\/+$/,'');
                 // Build full URL; server strips optional /api prefix internally.
                 const listUrl = `${apiBaseRaw}/images/list/${id_achat}`;
                 const res = await axios.get(listUrl, {

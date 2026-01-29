@@ -2,7 +2,12 @@
 /* eslint-disable */
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import type { SelectChangeEvent } from "@mui/material/Select";
-import { listEmployees, updateEmployeeTimes } from "../../api/employees";
+import {
+  listEmployees,
+  listActiveEmployees,
+  updateEmployeeTimes,
+  isActiveEmployee as inferActiveEmployee,
+} from "../../api/employees";
 import ScheduleDialog from "../../components/ScheduleDialog";
 import {
   AppBar,
@@ -52,6 +57,7 @@ import {
   FormHelperText,
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
+import PersonOutlineOutlinedIcon from '@mui/icons-material/PersonOutlineOutlined';
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import GridViewIcon from "@mui/icons-material/GridView";
 import AddIcon from "@mui/icons-material/Add";
@@ -93,6 +99,7 @@ import EmployeeCard, {
   EmployeeGrid,
   MinimalEmployee,
 } from "../../components/EmployeeCard";
+import { EmployeeList } from "../../components/EmployeeList"; // <-- adjust path
 
 // --- Square layout helpers ---
 const SquareGrid: React.FC<React.PropsWithChildren<{cols?: number}>> = ({ cols = 2, children }) => (
@@ -265,23 +272,69 @@ export type Employee = {
 };
 
 // Central helper: determine whether an employee is considered "active".
-// Treat STATE === false as inactive. NULL/undefined means active by default.
-// Additionally, if CONTRACT_END is in the past, consider them inactive.
-const isActiveEmployee = (e: Employee): boolean => {
-  const stateFlag = e.STATE;
-  const baseActive = stateFlag === false ? false : true;
-  if (!baseActive) return false;
-  if (!e.CONTRACT_END) return true;
-  try {
-    const end = new Date(e.CONTRACT_END as string);
-    if (!Number.isFinite(end.getTime())) return true;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    end.setHours(0, 0, 0, 0);
-    return end.getTime() >= today.getTime();
-  } catch {
-    return true;
+const normalizeBoolean = (val: unknown): boolean | undefined => {
+  if (val === undefined || val === null || val === "") return undefined;
+  if (typeof val === "boolean") return val;
+  if (typeof val === "number") {
+    if (Number.isNaN(val)) return undefined;
+    return val !== 0;
   }
+  const lowered = String(val).trim().toLowerCase();
+  if (!lowered) return undefined;
+  if (["active", "true", "yes", "y", "1"].includes(lowered)) return true;
+  if (["inactive", "false", "no", "n", "0"].includes(lowered)) return false;
+  return undefined;
+};
+
+const safeInferActive = (e: Employee): boolean | undefined => {
+  try {
+    return inferActiveEmployee(e);
+  } catch {
+    return undefined;
+  }
+};
+
+const contractVerdict = (e: Employee): boolean | undefined => {
+  const endLike =
+    e.T_END ??
+    e.CONTRACT_END ??
+    (e as any).contract_end ??
+    (e as any).CONTRACT_END ??
+    (e as any).contractEnd;
+  if (!endLike) return undefined;
+  const end = new Date(String(endLike));
+  if (!Number.isFinite(end.getTime())) return undefined;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  return end.getTime() >= today.getTime();
+};
+
+const isActiveEmployee = (e: Employee): boolean => {
+  const stateVerdict =
+    normalizeBoolean(e.STATE) ??
+    normalizeBoolean((e as any).state) ??
+    normalizeBoolean((e as any).ACTIVE) ??
+    normalizeBoolean((e as any).active);
+  if (stateVerdict === false) return false;
+
+  const statusVerdict =
+    normalizeBoolean((e as any).STATUS) ??
+    normalizeBoolean((e as any).Status) ??
+    normalizeBoolean((e as any).status);
+  if (statusVerdict === false) return false;
+
+  const explicitVerdict =
+    stateVerdict ?? statusVerdict ?? contractVerdict(e);
+
+  if (explicitVerdict === undefined) {
+    // No explicit signals -> treat as inactive by default
+    return false;
+  }
+
+  const inferred = safeInferActive(e);
+  if (explicitVerdict === true && inferred === false) return false;
+  return explicitVerdict;
 };
 
 export type ScheduleSlot = {
@@ -622,7 +675,7 @@ const OrgCard: React.FC<{ e: Employee; posName?: string }> = ({
           src={
             (e.PICTURE_URL ||
               (e.ID_EMP
-                ? `https://system.gaja.ly/api/employees/${e.ID_EMP}/picture`
+                ? `http://localhost:9000/api/employees/${e.ID_EMP}/picture`
                 : undefined)) as string | undefined
           }
           sx={{
@@ -861,7 +914,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
 
   const [data, setData] = useState<Employee[]>([]);
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+    const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<"all" | "active" | "inactive">(
@@ -979,6 +1032,36 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
   const [salaryInUSD, setSalaryInUSD] = useState<boolean>(false);
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+
+  const [activeEmployees, setActiveEmployees] = useState<Employee[]>([]);
+  const dedupedSource = useMemo(
+    () => dedupeEmployees((allEmployees.length ? allEmployees : data) ?? []),
+    [allEmployees, data]
+  );
+
+   const orgEmployees = useMemo(() => {
+    const active = dedupedSource.filter((employee) => isActiveEmployee(employee));
+    const unique = new Map<string, Employee>();
+    active.forEach((emp) => {
+      const key = employeeKey(emp);
+      if (!unique.has(key)) unique.set(key, emp);
+    });
+    return Array.from(unique.values());
+  }, [dedupedSource]);
+  
+  const inactiveDisplay = useMemo(() => {
+    const activeKeys = new Set(orgEmployees.map((emp) => employeeKey(emp)));
+    return dedupedSource.filter((employee) => !activeKeys.has(employeeKey(employee)));
+  }, [dedupedSource, orgEmployees]);
+
+  const orgActiveCount = orgEmployees.length;
+  const orgTotalCount = dedupedSource.length;
+
+  const inactiveEmployees = useMemo(() => {
+    if (!dedupedSource.length) return [];
+    const activeKeys = new Set(orgEmployees.map((emp) => employeeKey(emp)));
+    return dedupedSource.filter((employee) => !activeKeys.has(employeeKey(employee)));
+  }, [dedupedSource, orgEmployees]);
   const [psFilter, setPsFilter] = useState("");
   const [sortField, setSortField] = useState<"name" | "id" | "ps">("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -1219,6 +1302,20 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
         ? res.data
         : res.data.data || [];
       setAllEmployees(employeesData);
+
+      try {
+        const activeList = await listActiveEmployees();
+        if (Array.isArray(activeList)) {
+          setActiveEmployees(activeList as Employee[]);
+        } else {
+          setActiveEmployees([]);
+        }
+      } catch (activeErr) {
+        console.warn("Active employees fetch failed, falling back to heuristic:", activeErr);
+        setActiveEmployees(
+          employeesData.filter((emp: Employee) => isActiveEmployee(emp))
+        );
+      }
     } catch (err) {
       console.error("All employees fetch failed:", err);
     }
@@ -1791,93 +1888,20 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
   const DirectoryList = () => (
     <Box sx={{ p: 1, width: "100%" }}>
       <ViewToggle />
-      <TableContainer component={Paper} sx={{ mt: 2, width: "100%" }}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>ID</TableCell>
-              <TableCell>Photo</TableCell>
-              <TableCell>Name</TableCell>
-              <TableCell>Title</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Point of Sale</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {filteredEmployees.map((employee) => {
-              const imgSrc =
-                employee.PICTURE_URL ||
-                (employee.ID_EMP
-                  ? `${apiBase}/employees/${employee.ID_EMP}/picture?v=${employee.ID_EMP}`
-                  : undefined);
-
-              return (
-                <TableRow
-                  key={employeeKey(employee)}
-                  hover
-                  onClick={() => {
-                    setSelected(employee);
-                    setTab(1);
-                  }}
-                  sx={{ cursor: "pointer" }}
-                >
-                  <TableCell>{employee.ID_EMP}</TableCell>
-                  <TableCell>
-                    <Avatar
-                      src={imgSrc}
-                      alt={employee.NAME || ""}
-                      sx={{ width: 40, height: 40 }}
-                      imgProps={{
-                        crossOrigin: "anonymous",
-                        referrerPolicy: "no-referrer",
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography fontWeight="medium">{employee.NAME}</Typography>
-                  </TableCell>
-                  <TableCell>{employee.TITLE || "-"}</TableCell>
-                  <TableCell>{employee.PHONE || "-"}</TableCell>
-                  <TableCell>{employee.EMAIL || "-"}</TableCell>
-                  <TableCell>
-                    {employee.PS ? formatPs(employee.PS) : "-"}
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={employee.STATE ? "Active" : "Inactive"}
-                      color={employee.STATE ? "success" : "default"}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEdit(employee);
-                      }}
-                    >
-                      <EditOutlined fontSize="small" />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(employee);
-                      }}
-                    >
-                      <DeleteOutline fontSize="small" color="error" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
+      <Box sx={{ mt: 2, width: "100%" }}>
+        <EmployeeList
+          rows={filteredEmployees}
+          apiBase={apiBase}
+          dense={false}
+          onOpenProfile={(employee) => {
+            setSelected(employee);
+            setTab(1);
+          }}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
+          onUpdateTimes={async (id, t) => updateEmployeeTimes(id, t)}
+        />
+      </Box>
     </Box>
   );
 
@@ -2470,7 +2494,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                   src={
                     (selected.PICTURE_URL ||
                       (selected.ID_EMP
-                        ? `https://system.gaja.ly/api/employees/${selected.ID_EMP}/picture`
+                        ? `http://localhost:9000/api/employees/${selected.ID_EMP}/picture`
                         : undefined)) as string | undefined
                   }
                   sx={{
@@ -2561,7 +2585,7 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
                       src={
                         (c.PICTURE_URL ||
                           (c.ID_EMP
-                            ? `https://system.gaja.ly/api/employees/${c.ID_EMP}/picture`
+                            ? `http://localhost:9000/api/employees/${c.ID_EMP}/picture`
                             : undefined)) as string | undefined
                       }
                       sx={{ width: 40, height: 40 }}
@@ -2934,21 +2958,162 @@ const Employees: React.FC<{ id?: number }> = ({ id }) => {
             {tab === 2 && (
               <Box sx={{ p: 2 }}>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-                  <Typography fontWeight={700}>
-                    {t("hr.org.title", "Organization Chart")}
-                  </Typography>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                    <Box>
+                      <Typography fontWeight={700}>
+                        {t("hr.org.title", "Organization Chart")}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {t("hr.org.activeOnly", "Showing active employees only")}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      color="primary"
+                      variant="outlined"
+                      label={t("hr.org.activeCount", "{{count}} Active", {
+                        count: orgActiveCount,
+                      })}
+                    />
+                  </Stack>
                 </Paper>
-                <OrgChartAll
-                  employees={allEmployees.length ? allEmployees : data}
-                  posNameById={posNameById}
-                  onSelect={(e) => {
-                    setSelected(e);
-                    setTab(1);
-                  }}
-                  onReassign={(empId, newMgrId) =>
-                    reassignEmployee(empId, newMgrId)
-                  }
-                />
+                {orgEmployees.length ? (
+                  <OrgChartAll
+                    employees={orgEmployees}
+                    posNameById={posNameById}
+                    onSelect={(e) => {
+                      setSelected(e);
+                      setTab(1);
+                    }}
+                    onReassign={(empId, newMgrId) =>
+                      reassignEmployee(empId, newMgrId)
+                    }
+                  />
+                ) : (
+                  <Alert severity="info" sx={{ borderRadius: 2 }}>
+                    {t("hr.org.emptyActive", "No active employees available to display.")}
+                  </Alert>
+                )}
+
+                {inactiveEmployees.length > 0 && (
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
+                      {t("hr.org.inactiveBand", "Inactive Employees")}
+                    </Typography>
+                    <Paper
+                      variant="outlined"
+                      sx={{
+                        p: 2,
+                        borderRadius: 2,
+                        bgcolor: "background.default",
+                      }}
+                    >
+                      <Stack
+                        direction="row"
+                        spacing={2}
+                        flexWrap="wrap"
+                        useFlexGap
+                        justifyContent="flex-start"
+                      >
+                        {inactiveEmployees.slice(0, 50).map((emp) => (
+                          <Box
+                            key={employeeKey(emp)}
+                            sx={{
+                              width: 220,
+                              minHeight: 96,
+                              border: "1px dashed",
+                              borderColor: "divider",
+                              borderRadius: 2,
+                              position: "relative",
+                              p: 1.5,
+                              bgcolor: (theme) =>
+                                theme.palette.mode === "dark"
+                                  ? "action.selected"
+                                  : "action.hover",
+                              color: "text.secondary",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1.25,
+                              filter: "grayscale(0.9)",
+                            }}
+                          >
+                            <Box
+                              sx={{
+                                position: "absolute",
+                                inset: 0,
+                                pointerEvents: "none",
+                                backgroundImage: `
+                                  linear-gradient(45deg, transparent 48%, rgba(128,128,128,0.4) 49%, rgba(128,128,128,0.4) 51%, transparent 52%),
+                                  linear-gradient(-45deg, transparent 48%, rgba(128,128,128,0.4) 49%, rgba(128,128,128,0.4) 51%, transparent 52%)
+                                `,
+                                opacity: 0.4,
+                                borderRadius: 2,
+                              }}
+                            />
+                            <Avatar
+                              src={
+                                (emp.PICTURE_URL ||
+                                  (emp.ID_EMP ? `http://localhost:9000/api/employees/${emp.ID_EMP}/picture` : undefined)) as string | undefined
+                              }
+                              variant="rounded"
+                              sx={{
+                                width: 48,
+                                height: 48,
+                                border: "2px solid",
+                                borderColor: "divider",
+                                bgcolor: "grey.200",
+                                color: "grey.600",
+                              }}
+                            >
+                              {!emp.PICTURE_URL && !emp.ID_EMP ? <PersonOutlineOutlinedIcon  /> : null}
+                            </Avatar>
+                            <Box sx={{ zIndex: 1 }}>
+                              <Typography
+                                fontWeight={700}
+                                sx={{
+                                  color: "text.secondary",
+                                  textDecoration: "line-through",
+                                }}
+                              >
+                                {emp.NAME || t("common.unknown", "Unknown")}
+                              </Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                {emp.TITLE || t("common.noTitle", "No title")}
+                              </Typography>
+                              <Typography variant="caption" color="text.disabled">
+                                ID #{emp.ID_EMP || "—"}
+                              </Typography>
+                            </Box>
+                            <Box
+                              sx={{
+                                position: "absolute",
+                                top: 8,
+                                right: 8,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 0.5,
+                                color: "text.disabled",
+                                fontWeight: 700,
+                              }}
+                            >
+                              <CancelIcon fontSize="small" />
+                              <Typography variant="caption">
+                                {t("common.inactive", "Inactive")}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        ))}
+                        {inactiveEmployees.length > 50 && (
+                          <Chip
+                            label={t("hr.org.moreInactive", "+{{count}} more inactive", {
+                              count: inactiveEmployees.length - 50,
+                            })}
+                            sx={{ alignSelf: "center" }}
+                          />
+                        )}
+                      </Stack>
+                    </Paper>
+                  </Box>
+                )}
               </Box>
             )}
 

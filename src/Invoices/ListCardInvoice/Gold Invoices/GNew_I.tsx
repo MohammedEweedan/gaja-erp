@@ -624,7 +624,7 @@ const DNew_I = () => {
       let success = false;
       let lastErr: any = null;
       const results: Array<{ usdPerOz: number; usdPerGram: number; source: string; updatedAt: Date }> = [];
-      const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "https://system.gaja.ly/api").replace(/\/+$/, "");
+      const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "http://localhost:9000/api").replace(/\/+$/, "");
 
       // 1) Try backend proxy
       try {
@@ -2139,7 +2139,7 @@ const DNew_I = () => {
         let success = false;
         let lastErr: any = null;
         const results: Array<{ usdPerOz: number; usdPerGram: number; source: string; updatedAt: Date }> = [];
-        const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "https://system.gaja.ly/api").replace(/\/+$/, "");
+        const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "http://localhost:9000/api").replace(/\/+$/, "");
 
         // 1) Try backend proxy
         try {
@@ -2862,7 +2862,7 @@ const DNew_I = () => {
                             // https://<origin>/uploads/WatchPic/<id>/<filename>
                             const basePart = String(url).split('?')[0];
                             const fileName = basePart.split('/').pop() || '';
-                            const apiBaseRaw = ('https://system.gaja.ly/api/');
+                            const apiBaseRaw = ('http://localhost:9000/api/');
                             let origin = '';
                             try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
                             const originHttps = origin.replace(/^http:\/\//i, 'https://');
@@ -4282,7 +4282,7 @@ const DNew_I = () => {
                                   const original = urls[idx];
 
                                   const fileName = (original || '').split('?')[0].split('/').pop() || '';
-                                  const apiBaseRaw = ('https://system.gaja.ly/api/');
+                                  const apiBaseRaw = ('http://localhost:9000/api/');
                                   let origin = '';
                                   try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
                                   const originHttps = origin.replace(/^http:\/\//i, 'https://');
@@ -4315,7 +4315,7 @@ const DNew_I = () => {
                                         onClick={() => {
                                           // Open dialog with ALL watch images for this product (no marketing/invoice filtering)
                                           const token2 = localStorage.getItem("token");
-                                          const apiBaseRaw = ('https://system.gaja.ly/api/');
+                                          const apiBaseRaw = ('http://localhost:9000/api/');
                                           let origin = '';
                                           try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
                                           const originHttps = origin.replace(/^http:\/\//i, 'https://');
@@ -5377,7 +5377,7 @@ const DNew_I = () => {
                             const idx = pickPreferredImageIndex(urls);
                             const original = urls[idx];
                             const fileName = (original || '').split('?')[0].split('/').pop() || '';
-                            const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || 'https://system.gaja.ly/api').replace(/\/+$/, '');
+                            const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || 'http://localhost:9000/api').replace(/\/+$/, '');
                             let origin = '';
                             try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
                             const originHttps = origin.replace(/^http:\/\//i, 'https://');

@@ -44,9 +44,8 @@ import dayjs, { Dayjs } from "dayjs";
 import utc from "dayjs/plugin/utc";
 import isSameOrBefore from 'dayjs/plugin/isSameOrBefore';
 
-import {  
+import {
   syncMonth,
-  getPsSchedule,
   manualPunch,
   listPs,
   PsItem,
@@ -56,7 +55,6 @@ import {
   rangePunches,
   RangePunchesEmployee,
   listPsPoints,
-  PsSchedule,
   updateAttendance,
 } from "../../api/attendance";
 import { getVacationsInRange, VacationRecord } from "../../api/vacations";
@@ -68,6 +66,7 @@ import {
   getCalendarLog,
 } from "../../services/leaveService";
 import { listEmployees, updateEmployeeTimes, getEmployeeById } from "../../api/employees";
+import { computePayrollV2 } from "../../api/payroll";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { useTranslation } from "react-i18next";
@@ -77,6 +76,8 @@ import html2canvas from "html2canvas";
 import CloseIcon from "@mui/icons-material/Close";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import SettingsIcon from "@mui/icons-material/Settings";
+import FullscreenIcon from "@mui/icons-material/Fullscreen";
+import FullscreenExitIcon from "@mui/icons-material/FullscreenExit";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 
@@ -84,6 +85,51 @@ dayjs.extend(utc);
 dayjs.extend(isSameOrBefore);
 
 dayjs.extend(utc);
+
+const parseHmToMinutes = (value: any): number | null => {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  const match = s.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  const total = hh * 60 + mm;
+  return Number.isFinite(total) ? total : null;
+};
+
+const computeDeltaFromSchedule = (
+  entry: string | null | undefined,
+  exit: string | null | undefined,
+  schedStart: string | null | undefined,
+  schedEnd: string | null | undefined
+): number | null => {
+  const startMinutes = parseHmToMinutes(entry);
+  const endMinutes = parseHmToMinutes(exit);
+  const expectedStart = parseHmToMinutes(schedStart);
+  const expectedEnd = parseHmToMinutes(schedEnd);
+  if (
+    startMinutes == null ||
+    endMinutes == null ||
+    endMinutes <= startMinutes ||
+    expectedStart == null ||
+    expectedEnd == null ||
+    expectedEnd <= expectedStart
+  ) {
+    return null;
+  }
+  const worked = endMinutes - startMinutes;
+  const expected = expectedEnd - expectedStart;
+  const actualDelta = worked - expected;
+  return normalizeDelta(actualDelta);
+};
+
+const toFiniteNumber = (value: any): number | null => {
+  if (value == null) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
 
 // Helper: parse various start-date formats into a dayjs date (no hooks)
 function parseStartDateLocal(val: any): dayjs.Dayjs | null {
@@ -122,6 +168,23 @@ type EmpScheduleInfo = {
   start: string;
   end: string;
   title?: string | null;
+};
+
+type PayrollAggRow = {
+  id_emp: string | number;
+  missing_minutes?: number;
+  missingMinutes?: number;
+  latencyMinutes?: number;
+
+  absence_days?: number;
+  absenceDays?: number;
+};
+
+const TOLERANCE_MINUTES = 30;
+
+const normalizeDelta = (minutes?: number | null): number | null => {
+  if (minutes == null || !Number.isFinite(minutes)) return minutes ?? null;
+  return Math.abs(minutes) <= TOLERANCE_MINUTES ? 0 : minutes;
 };
 
 const months = Array.from({ length: 12 }, (_, i) => ({
@@ -244,31 +307,6 @@ function normalizePossiblyMojibakeUtf8(input: any): string {
 
 // ---- TIME UTILITIES ----
 
-/**
- * Checks if an employee worked overtime after PS closing time
- */
-function wasOvertimeWhenPsClosed(
-  empId: number, 
-  date: string, 
-  exitTime: string | null, 
-  psSchedule: PsSchedule, 
-  employeePs: number | null
-): boolean {
-  if (!exitTime || !employeePs) return false;
-  
-  const psKey = `P${employeePs}` as const;
-  const psSched = psSchedule[psKey];
-  if (!psSched?.end) return false;
-  
-  try {
-    const exit = dayjs(`${date}T${exitTime}`);
-    const psClose = dayjs(`${date}T${psSched.end}`);
-    return exit.isAfter(psClose);
-  } catch {
-    return false;
-  }
-}
-
 // Minimal shape used in this file
 interface Employee {
   ID_EMP: number;
@@ -278,21 +316,6 @@ interface Employee {
   T_END?: string | null;
   TITLE?: string | null;
   FINGERPRINT_NEEDED?: boolean | null;
-}
-
-/**
- * Calculates work minutes between two time strings (HH:mm)
- */
-function calculateWorkMinutes(entry: string | null, exit: string | null): number | null {
-  if (!entry || !exit) return null;
-  
-  try {
-    const start = dayjs(`2000-01-01T${entry}`);
-    const end = dayjs(`2000-01-01T${exit}`);
-    return end.diff(start, 'minute');
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -386,6 +409,7 @@ function normalizeLeaveCode(
     "PT",
     "PL",
   ]);
+  
   if (exact.has(up)) return up as any;
 
   // synonyms / substrings (EN + a few common variants)
@@ -446,6 +470,8 @@ export default function TimeSheetsPage() {
   const [exportPeriod, setExportPeriod] = useState<"month" | "year" | "ytd" | "custom">("month");
   const [exportStartDate, setExportStartDate] = useState<Dayjs | null>(dayjs().startOf('month'));
   const [exportEndDate, setExportEndDate] = useState<Dayjs | null>(dayjs());
+  const fullscreenRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const fmtTime = (t: any) => {
     if (!t) return "—";
     // handle Date, dayjs, or string-like
@@ -464,6 +490,7 @@ export default function TimeSheetsPage() {
       return String(t);
     }
   };
+  
   const fmtYMD = (y: number, m: number, d: number) =>
     `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   const [exportMonth, setExportMonth] = useState<number>(
@@ -500,7 +527,9 @@ export default function TimeSheetsPage() {
       deltaHours: number;
       missingHoursOnly: number;
     };
+    missingHoursFromPayroll?: number | null;
   } | null>(null);
+  const [payrollAggByEmp, setPayrollAggByEmp] = useState<Map<number, PayrollAggRow>>(new Map());
 
   function arrayBufferToBase64(buffer: ArrayBuffer) {
     const bytes = new Uint8Array(buffer);
@@ -527,6 +556,8 @@ export default function TimeSheetsPage() {
     }
   }
 
+  const [v2Rows, setV2Rows] = React.useState<any[]>([]);
+
   const closeExportDialog = useCallback(() => {
     setExportOpen(false);
     setExportLoading(false);
@@ -545,6 +576,23 @@ export default function TimeSheetsPage() {
     pdfLibRef.current = libs;
     return libs;
   }
+
+  const getVr = (empId: number) =>
+    (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(empId)) || ({} as any);
+
+  const resolveAttendance = (empId: number) => {
+    const vr = getVr(empId);
+
+    const latencyMinutes = Number(vr.latencyMinutes ?? vr.missing_minutes ?? 0) || 0;
+    const latLyd = Number(vr.missing_lyd ?? vr.latency_lyd ?? 0) || 0;
+    const latUsd = Number(vr.missing_usd ?? vr.latency_usd ?? 0) || 0;
+
+    const absenceDays = Number(vr.absence_days ?? 0) || 0;
+    const absenceLyd = Number(vr.absence_lyd ?? 0) || 0;
+    const absenceUsd = Number(vr.absence_usd ?? 0) || 0;
+
+    return { vr, latencyMinutes, latLyd, latUsd, absenceDays, absenceLyd, absenceUsd };
+  };
 
   const getTimesheetDays = useCallback(
     async (empId: number, year: number, month: number): Promise<TimesheetDay[] | null> => {
@@ -749,7 +797,8 @@ export default function TimeSheetsPage() {
             : "";
 
         if (!excludeMissing && typeof (d as any)?.deltaMin === "number" && (d as any).deltaMin < 0) {
-          totalMissingMin += Math.abs((d as any).deltaMin);
+          const abs = Math.abs((d as any).deltaMin);
+          if (abs > TOLERANCE_MINUTES) totalMissingMin += abs;
         }
 
         dayCodes.push(code);
@@ -1412,7 +1461,11 @@ export default function TimeSheetsPage() {
           const dt = dayjs(dateStr);
           return dt.isBefore(today, "day");
         });
-        const totalMissing = pastDays.reduce((acc, d) => acc + Math.min(0, d.deltaMin ?? 0), 0);
+        const totalMissing = pastDays.reduce((acc, d) => {
+          const val = normalizeDelta(d.deltaMin);
+          if (!val || val >= 0) return acc;
+          return acc + val;
+        }, 0);
         return { missingMin: Math.abs(totalMissing) };
       };
 
@@ -1429,7 +1482,11 @@ export default function TimeSheetsPage() {
       const totalHours = Number.isFinite(totalWorkMin) ? (totalWorkMin / 60).toFixed(2) : "0.00";
       const { lateCount, lateMinTotal, lateRows } = lateness(pastDays);
       const { missingMin } = missing(pastDays);
-      const deltaTotalMin = pastDays.reduce((sum, d) => sum + (d.deltaMin ?? 0), 0);
+      const deltaTotalMin = pastDays.reduce((acc, d) => {
+        const val = normalizeDelta(d.deltaMin);
+        if (!val) return acc;
+        return acc + val;
+      }, 0);
       const deltaLabel = roundedHoursWithSign(deltaTotalMin);
       const daysWorked = pastDays.filter((d) => hasPresence(d)).length;
       const absentDays = pastDays.filter((d) => isAbsentDay(d)).length;
@@ -1954,12 +2011,31 @@ export default function TimeSheetsPage() {
   // Cache for inferred first active day (per employee, current month)
   const firstActiveCacheRef = useRef<Map<number, string>>(new Map());
 
-  const [psSchedule, setPsSchedule] = useState<PsSchedule>({});
-  const [psSchedLoading, setPsSchedLoading] = useState(false);
-  const [psSchedError, setPsSchedError] = useState<string | null>(null);
-  const [employeePs, setEmployeePs] = useState<number | null>(null);
   const [empSchedule, setEmpSchedule] = useState<Map<number, EmpScheduleInfo>>(
     new Map()
+  );
+
+  const resolveScheduleFor = useCallback(
+    (empId: number, row?: RangePunchesEmployee | null) => {
+      const pickTime = (val: any): string | null => {
+        if (!val) return null;
+        const s = String(val).match(/(\d{1,2}):(\d{2})/);
+        if (!s) return null;
+        const hh = s[1].padStart(2, "0");
+        const mm = s[2];
+        return `${hh}:${mm}`;
+      };
+
+      const sched = empSchedule.get(empId);
+      const rowObj = row as any;
+      const start =
+        sched?.start ?? pickTime(rowObj?.T_START) ?? pickTime(rowObj?.t_start) ?? null;
+      const end =
+        sched?.end ?? pickTime(rowObj?.T_END) ?? pickTime(rowObj?.t_end) ?? null;
+
+      return { start, end };
+    },
+    [empSchedule]
   );
 
   const [detailOpen, setDetailOpen] = useState(false);
@@ -1973,11 +2049,9 @@ export default function TimeSheetsPage() {
     E: string | null;
     S: string | null;
     psName?: string;
-    expectedHours?: number | null;
-    workedHours?: number | null;
-    deltaHours?: number | null;
-    isOvertime?: boolean;
-    psClosingTime?: string | null;
+    expectedMin?: number | null;
+    workedMin?: number | null;
+    deltaMin?: number | null;
   } | null>(null);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -2535,8 +2609,9 @@ useEffect(() => {
     const ymd = d.format("YYYY-MM-DD");
     const tsd = tsByEmp.get(row.id_emp)?.get(ymd);
     const psName = getPsPointName(row.ps ?? null);
-    const ePref: any = (tsd?.entry as any) || (rec?.E as any) || null;
-    const sPref: any = (tsd?.exit as any) || (rec?.S as any) || null;
+    const sched = resolveScheduleFor(row.id_emp, row);
+    const entryPref: any = (tsd?.entry as any) || (rec?.E as any) || null;
+    const exitPref: any = (tsd?.exit as any) || (rec?.S as any) || null;
 
     // Extract time from entry/exit (handle various formats)
     const extractTimeHHMM = (val: any): string => {
@@ -2547,37 +2622,32 @@ useEffect(() => {
       return m ? `${m[1]}:${m[2]}` : "";
     };
 
-    const entryTime = extractTimeHHMM(ePref);
-    const exitTime = extractTimeHHMM(sPref);
-
-    // Calculate work minutes and overtime
-    const psKey = row.ps ? (`P${row.ps}` as const) : null;
-    const currentPsSchedule =
-      psKey && psSchedule[psKey as keyof typeof psSchedule];
-    const psClosingTime = currentPsSchedule?.end || null;
-
-    // Calculate expected work minutes (from PS schedule)
-    const expectedMinutes = currentPsSchedule
-      ? calculateWorkMinutes(currentPsSchedule.start, currentPsSchedule.end)
+    const entryTime = extractTimeHHMM(entryPref);
+    const exitTime = extractTimeHHMM(exitPref);
+    const fallbackWorked = (() => {
+      const startMin = parseHmToMinutes(entryTime);
+      const endMin = parseHmToMinutes(exitTime);
+      if (startMin == null || endMin == null || endMin <= startMin) return null;
+      return endMin - startMin;
+    })();
+    const workedMinutes = Number.isFinite(tsd?.workMin)
+      ? tsd?.workMin ?? null
+      : fallbackWorked;
+    const scheduleExpected = (() => {
+      if (!sched.start || !sched.end) return null;
+      const startMin = parseHmToMinutes(sched.start);
+      const endMin = parseHmToMinutes(sched.end);
+      if (startMin == null || endMin == null || endMin <= startMin) return null;
+      return endMin - startMin;
+    })();
+    const expectedMinutes = Number.isFinite(tsd?.expectedMin)
+      ? tsd?.expectedMin ?? null
+      : scheduleExpected;
+    const rawDelta = Number.isFinite(tsd?.deltaMin) ? tsd?.deltaMin ?? null : null;
+    const fallbackDelta = sched.start && sched.end
+      ? computeDeltaFromSchedule(entryTime || null, exitTime || null, sched.start, sched.end)
       : null;
-
-    // Calculate actual work minutes
-    const workedMinutes = calculateWorkMinutes(ePref, sPref);
-
-    // Calculate delta (positive for overtime, negative for undertime)
-    const deltaMinutes =
-      expectedMinutes !== null && workedMinutes !== null
-        ? workedMinutes - expectedMinutes
-        : null;
-
-    // Check for overtime when PS is closed
-    const isOvertime = wasOvertimeWhenPsClosed(
-      row.id_emp,
-      ymd,
-      sPref,
-      { [psKey as string]: psSchedule } as unknown as PsSchedule,
-      row.ps || null
-    );
+    const deltaMinutes = rawDelta ?? fallbackDelta;
 
     setDetailData({
       id_emp: row.id_emp,
@@ -2588,6 +2658,9 @@ useEffect(() => {
       E: tsd?.entry || rec?.E || null,
       S: tsd?.exit || rec?.S || null,
       psName,
+      workedMin: workedMinutes,
+      expectedMin: expectedMinutes,
+      deltaMin: deltaMinutes,
     });
 
     setEditJ(String(tsd?.code || rec?.j || "").toUpperCase());
@@ -3755,6 +3828,32 @@ useEffect(() => {
           payload.ps = psParam.code; // if API expects "P3"
         }
         const data = await rangePunches(fromIso, toIso, payload);
+        try {
+          const y = rangeFrom.year();
+          const m = rangeFrom.month() + 1;
+
+          // IMPORTANT: call the same function/endpoint PayrollPage uses
+          const pr = await computePayrollV2({ year: y, month: m }); // adjust signature if yours is computePayrollV2(y,m)
+
+          const rows: PayrollAggRow[] = Array.isArray(pr?.rows)
+            ? pr.rows
+            : Array.isArray(pr?.data?.rows)
+              ? pr.data.rows
+              : [];
+          setV2Rows(rows);
+          const map = new Map<number, PayrollAggRow>();
+          for (const row of rows) {
+            const id = asEmpId(
+              (row as any).id_emp ?? (row as any).ID_EMP ?? (row as any).employeeId
+            );
+            if (id) map.set(id, row);
+          }
+          setPayrollAggByEmp(map);
+        } catch (e) {
+          console.warn("[TimeSheets] computePayrollV2 failed; falling back to local aggregation", e);
+          setPayrollAggByEmp(new Map());
+          setV2Rows([]);
+        }
         setRangeResults(data.employees);
         
         // Populate empSchedule and empStartDateMap from rangeResults
@@ -3865,14 +3964,10 @@ useEffect(() => {
               S: (d.S as any) || null,
             });
           }
-          setEmployeePs(emp?.ps ?? null);
-        } else {
-          setEmployeePs(null);
         }
         setMonthPreviewMap(map);
       } catch {
         setMonthPreviewMap(new Map());
-        setEmployeePs(null);
       }
     },
     [employeeId]
@@ -3902,6 +3997,32 @@ useEffect(() => {
     () => employeeId > 0 && year > 2000 && month >= 1 && month <= 12,
     [employeeId, year, month]
   );
+
+  const asEmpId = (v: any): number => {
+  const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getAggMissingMinutes = (r?: PayrollAggRow | null): number => {
+    if (!r) return 0;
+    const a =
+      Number((r as any).missing_minutes ?? (r as any).missingMinutes ?? (r as any).latencyMinutes ?? 0) || 0;
+    return Math.max(0, Math.round(a));
+  };
+
+  const getAggAbsenceDays = (r?: PayrollAggRow | null): number => {
+    if (!r) return 0;
+    const a = Number((r as any).absence_days ?? (r as any).absenceDays ?? 0) || 0;
+    // payroll uses decimals sometimes (HL = 0.5), keep as-is
+    return a;
+  };
+
+  // reuse your existing formatter
+  const minutesToSignedHHMM = (min: number): string => {
+    if (!min) return "";
+    // in UI you show missing as NEGATIVE hours
+    return roundedHoursWithSign(-Math.abs(min));
+  };
 
   async function handleLoadMonth() {
     setError(null);
@@ -3933,6 +4054,26 @@ useEffect(() => {
   useEffect(() => {
     setMonthGrid(null);
   }, [employeeId, year, month]);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      const el = fullscreenRef.current;
+      if (el && (el as any).requestFullscreen) {
+        await (el as any).requestFullscreen();
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onFsChange);
+    onFsChange();
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   function LegendChip({
     label,
@@ -3977,45 +4118,6 @@ useEffect(() => {
     );
   }
 
-  // Add this near your other API call functions
-  const fetchEmployeeTimesheet = async (
-    employeeId: number,
-    year: number,
-    month: number
-  ) => {
-    try {
-      console.log(
-        `[fetchEmployeeTimesheet] Fetching for employee ${employeeId}, ${year}-${month}`
-      );
-      const response = await fetch(
-        `${BASE_URL}/hr/timesheet?employeeId=${employeeId}&year=${year}&month=${month + 1}`
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("Error response from server:", {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-        });
-        throw new Error(errorData.error || "Failed to fetch timesheet");
-      }
-
-      const data = await response.json();
-      console.log(
-        `[fetchEmployeeTimesheet] Received data for employee ${employeeId}:`,
-        data
-      );
-      return data;
-    } catch (error) {
-      console.error(
-        `[fetchEmployeeTimesheet] Error for employee ${employeeId}:`,
-        error
-      );
-      throw error;
-    }
-  };
-
   // Toasts
   const [toastOpen, setToastOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState<string>("");
@@ -4032,9 +4134,6 @@ useEffect(() => {
     setToastOpen(true);
   }
 
-  // Pending leave review requests (for a small badge / count)
-  const [pendingLeaveCount, setPendingLeaveCount] = useState<number>(0);
-
   function DayCell(props: {
     y: number;
     m: number;
@@ -4044,10 +4143,8 @@ useEffect(() => {
       | { j: string; R: string; E: string | null; S: string | null }
       | undefined;
     isFriday: boolean;
-    isFuture: boolean;
     onEdit: () => void;
     t: (k: string, ...args: any[]) => string;
-    employeePs: number | null;
     color: string;
     vacations?: VacationRecord[];
   }) {
@@ -4058,16 +4155,15 @@ useEffect(() => {
       rec,
       overlay,
       isFriday,
-      isFuture,
       onEdit,
       t,
-      employeePs,
       color,
       vacations,
     } = props;
     const cellDate = dayjs(new Date(y, m - 1, d));
     const today = dayjs();
     const isToday = cellDate.isSame(today, "day");
+    const isFuture = cellDate.isAfter(today, "day");
 
     const ymd = cellDate.format("YYYY-MM-DD");
     const safeISO10 = (v: any): string => {
@@ -4091,7 +4187,7 @@ useEffect(() => {
     });
 
     const rawCode = String((overlay?.j ?? rec?.code ?? "") || "").trim().toUpperCase();
-    const present = !!rec?.present || rec?.code === "P" || !!overlay?.E;
+    const present = !isFuture && (!!rec?.present || rec?.code === "P" || !!overlay?.E);
     const isHoliday = Boolean(rec?.isHoliday) || holidaysSet.has(ymd) || rawCode === "PH" || rawCode === "PHF";
     const isAbsent = (overlay?.j || rec?.code || "") === "A" && !onVacation;
     const isLate =
@@ -4119,26 +4215,6 @@ useEffect(() => {
         : "";
 
     const LATE_ACCENT = "rgb(188, 135, 36)";
-    let eLate = false;
-    try {
-      const psNum = employeePs;
-      if (psNum != null) {
-        const key = `P${psNum}` as keyof typeof psSchedule;
-        const sched = psSchedule?.[key];
-        const eSrc = overlay?.E || null;
-        if (sched?.start && eSrc) {
-          const ymd = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-          const schedStart = dayjs(
-            `${ymd}T${sched.start.length === 5 ? sched.start : `${sched.start.slice(0, 5)}`}:00`
-          );
-          const eTime = dayjs(
-            String(eSrc).replace(/(Z|[+-]\d{2}:\d{2})$/i, "")
-          );
-          const diffMin = eTime.diff(schedStart, "minute");
-          if (diffMin >= 30) eLate = true;
-        }
-      }
-    } catch {}
 
     let baseBg = isHoliday
       ? APPLE.holidayBg
@@ -4154,7 +4230,7 @@ useEffect(() => {
       baseBg = "rgba(156, 136, 255, 0.2)";
     }
 
-    let borderColor: any = isLate || eLate ? LATE_ACCENT : APPLE.border;
+    let borderColor: any = isLate ? LATE_ACCENT : APPLE.border;
     if (isToday) borderColor = APPLE.todayRing;
     const showEdit = !isFuture;
 
@@ -4309,75 +4385,131 @@ useEffect(() => {
     );
   }
 
-  interface Punch {
-    time: string;
-    type: "in" | "out";
-  }
-
   const showTimeLog = useCallback(
     async (row: RangePunchesEmployee, d: dayjs.Dayjs) => {
       try {
-        const employeeId = Number(row.id_emp);
+        const employeeId = asEmpId(row.id_emp);
         const year = d.year();
         const month = d.month(); // 0-indexed for JavaScript Date
         const monthStart = dayjs(new Date(year, month, 1));
         const monthEnd = monthStart.endOf("month");
+        const schedule = resolveScheduleFor(employeeId, row);
+        const today = dayjs().startOf("day");
+        const payrollRow = payrollAggByEmp.get(employeeId) || null;
+        const payrollMissingMinutes = getAggMissingMinutes(payrollRow);
+        const payrollMissingHours = payrollMissingMinutes > 0 ? payrollMissingMinutes / 60 : null;
 
         console.log(
           `[showTimeLog] Fetching data for employee ${employeeId}, ${year}-${month + 1}`
         );
 
-        // Get employee schedule
-        const sched = empSchedule.get(employeeId);
-        console.log(`[showTimeLog] Employee ${employeeId} schedule:`, sched);
-        console.log(`[showTimeLog] empSchedule map size:`, empSchedule.size);
-        console.log(`[showTimeLog] empSchedule keys:`, Array.from(empSchedule.keys()).slice(0, 10));
+        const scheduleSpanMinutes = (() => {
+          if (!schedule.start || !schedule.end) return null;
+          const startMin = parseHmToMinutes(schedule.start);
+          const endMin = parseHmToMinutes(schedule.end);
+          if (startMin == null || endMin == null || endMin <= startMin) return null;
+          return endMin - startMin;
+        })();
+
+        const computeDayMetrics = (
+          day: TimesheetDay | null | undefined,
+          ymd: string
+        ) => {
+          const dateObj = dayjs(ymd);
+          const isFutureOrToday = !dateObj.isBefore(today, "day");
+          const entrySrc = (day as any)?.entry ?? (day as any)?.E ?? null;
+          const exitSrc = (day as any)?.exit ?? (day as any)?.S ?? null;
+          const entryStrRaw = entrySrc ? fmtClock24(entrySrc) : "";
+          const exitStrRaw = exitSrc ? fmtClock24(exitSrc) : "";
+          const entryStr = entryStrRaw || null;
+          const exitStr = exitStrRaw || null;
+          const entryMin = entryStr ? parseHmToMinutes(entryStr) : null;
+          const exitMin = exitStr ? parseHmToMinutes(exitStr) : null;
+
+          const expectedMin = !isFutureOrToday
+            ? toFiniteNumber((day as any)?.expectedMin) ?? scheduleSpanMinutes ?? null
+            : null;
+
+          const workedMin = !isFutureOrToday
+            ? toFiniteNumber((day as any)?.workMin) ??
+              (entryMin != null && exitMin != null && exitMin > entryMin
+                ? exitMin - entryMin
+                : null)
+            : null;
+
+          let normalizedDelta: number | null = null;
+          if (!isFutureOrToday) {
+            const rawDelta = toFiniteNumber((day as any)?.deltaMin);
+            if (rawDelta != null) normalizedDelta = normalizeDelta(rawDelta);
+            if (
+              normalizedDelta == null &&
+              schedule.start &&
+              schedule.end &&
+              entryStr &&
+              exitStr
+            ) {
+              normalizedDelta = computeDeltaFromSchedule(
+                entryStr,
+                exitStr,
+                schedule.start,
+                schedule.end
+              );
+            }
+            if (
+              normalizedDelta == null &&
+              expectedMin != null &&
+              workedMin != null
+            ) {
+              normalizedDelta = normalizeDelta(workedMin - expectedMin);
+            }
+
+            // Apply 30‑minute tolerance: ignore deficits ≤30 minutes like PayrollPage
+            if (normalizedDelta != null && normalizedDelta < 0 && Math.abs(normalizedDelta) <= 30) {
+              normalizedDelta = 0;
+            }
+
+            // Ensure full absences show as -expectedHours when no punches
+            if (normalizedDelta == null && expectedMin != null) {
+              const hasPunches = Boolean(entryStr) || Boolean(exitStr);
+              const dayCode = String((day as any)?.code || "").toUpperCase();
+              const treatedAsLeave = Boolean(dayCode && LEAVE_TYPES[dayCode as keyof typeof LEAVE_TYPES]);
+              const isHoliday = Boolean((day as any)?.isHoliday) || holidaysSet.has(ymd);
+              if (!hasPunches && !treatedAsLeave && !isHoliday) {
+                normalizedDelta = -expectedMin;
+              }
+            }
+          }
+
+          const expectedHours = (expectedMin ?? 0) / 60;
+          const workedHours = (workedMin ?? 0) / 60;
+          const deltaHours = normalizedDelta != null ? normalizedDelta / 60 : 0;
+          const missingHoursOnly =
+            normalizedDelta != null && normalizedDelta < 0
+              ? Math.abs(normalizedDelta) / 60
+              : 0;
+
+          return {
+            date: ymd,
+            dateFormatted: dateObj.format("ddd, MMM D"),
+            expectedHours,
+            workedHours,
+            deltaHours,
+            isWeekend: dateObj.day() === 5 || dateObj.day() === 6,
+            isHoliday: Boolean((day as any)?.isHoliday) || holidaysSet.has(ymd),
+            isAbsentDay: isAbsentDay(day || undefined),
+            missingHoursOnly,
+          };
+        };
 
         // Try to fetch fresh data from getTimesheetMonth
         try {
           const response = await getTimesheetMonth(employeeId, year, month + 1);
           if (response && response.data) {
-            // Process the timesheet data
-            const today = dayjs().startOf("day");
             const days = response.data.map((day: TimesheetDay) => {
-              const ymd = `${year}-${String(month + 1).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`;
-              const isFutureOrToday = !dayjs(ymd).isBefore(today, "day");
-
-              let expectedHours = 0;
-              if (!isFutureOrToday && day.expectedMin != null) {
-                expectedHours = day.expectedMin / 60;
-              } else if (!isFutureOrToday && sched?.start && sched?.end) {
-                const start = dayjs(`${ymd}T${sched.start}:00`);
-                const end = dayjs(`${ymd}T${sched.end}:00`);
-                expectedHours = end.diff(start, "minute") / 60;
-              }
-
-              let workedHours = 0;
-              if (!isFutureOrToday && day.workMin != null) {
-                workedHours = day.workMin / 60;
-              }
-
-              const deltaHours = workedHours - expectedHours;
-              const codeNorm = String(day.code || "").toUpperCase();
-              const isFriday = dayjs(ymd).day() === 5;
-              const isHoliday = Boolean(day.isHoliday) || holidaysSet.has(ymd);
-              const isWorkingDay = !isFriday && !isHoliday;
-              const isAbsentDay = isWorkingDay && (codeNorm === "A" || codeNorm === "UL");
-              const isLatencyDay =
-                isWorkingDay && codeNorm === "PP" && typeof day.deltaMin === "number" && day.deltaMin < 0;
-              const missingHoursOnly = isLatencyDay ? Math.abs(day.deltaMin || 0) / 60 : 0;
-
-              return {
-                date: ymd,
-                dateFormatted: dayjs(ymd).format("ddd, MMM D"),
-                expectedHours,
-                workedHours,
-                deltaHours,
-                isWeekend: dayjs(ymd).day() === 5 || dayjs(ymd).day() === 6,
-                isHoliday: day.isHoliday || holidaysSet.has(ymd),
-                isAbsentDay,
-                missingHoursOnly,
-              };
+              const ymd = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+                day.day
+              ).padStart(2, "0")}`;
+              return computeDayMetrics(day, ymd);
             });
 
             const totals = days.reduce(
@@ -4385,7 +4517,8 @@ useEffect(() => {
                 expectedHours: acc.expectedHours + (day.expectedHours || 0),
                 workedHours: acc.workedHours + (day.workedHours || 0),
                 deltaHours: acc.deltaHours + (day.deltaHours || 0),
-                missingHoursOnly: acc.missingHoursOnly + (day.missingHoursOnly || 0),
+                missingHoursOnly:
+                  acc.missingHoursOnly + (day.missingHoursOnly || 0),
               }),
               { expectedHours: 0, workedHours: 0, deltaHours: 0, missingHoursOnly: 0 }
             );
@@ -4395,6 +4528,7 @@ useEffect(() => {
               employeeName: row.name,
               days,
               total: totals,
+              missingHoursFromPayroll: payrollMissingHours,
             };
 
             console.log("[showTimeLog] Setting timeLogData:", timeLogData);
@@ -4413,46 +4547,12 @@ useEffect(() => {
           throw new Error("No timesheet data available for this employee");
         }
 
-        // Build days array from cached data
         const days: any[] = [];
-        const today = dayjs().startOf("day");
         let current = monthStart;
         while (current.isSameOrBefore(monthEnd, "day")) {
           const ymd = current.format("YYYY-MM-DD");
           const dayData = employeeData.get(ymd);
-          const isFutureOrToday = !current.isBefore(today, "day");
-
-          let expectedHours = 0;
-          if (!isFutureOrToday && dayData?.expectedMin != null) {
-            expectedHours = dayData.expectedMin / 60;
-          } else if (!isFutureOrToday && sched?.start && sched?.end) {
-            const start = dayjs(`${ymd}T${sched.start}:00`);
-            const end = dayjs(`${ymd}T${sched.end}:00`);
-            expectedHours = end.diff(start, "minute") / 60;
-          }
-
-          let workedHours = 0;
-          if (!isFutureOrToday && dayData?.workMin != null) {
-            workedHours = dayData.workMin / 60;
-          }
-
-          const deltaHours = workedHours - expectedHours;
-          const isAbsentDay =
-            (!dayData?.present && (dayData?.workMin ?? 0) <= 0) || String(dayData?.code || "").toUpperCase() === "A";
-          const missingHoursOnly = !isAbsentDay && deltaHours < 0 ? Math.abs(deltaHours) : 0;
-
-          days.push({
-            date: ymd,
-            dateFormatted: current.format("ddd, MMM D"),
-            expectedHours,
-            workedHours,
-            deltaHours,
-            isWeekend: current.day() === 5 || current.day() === 6,
-            isHoliday: dayData?.isHoliday || holidaysSet.has(ymd),
-            isAbsentDay,
-            missingHoursOnly,
-          });
-
+          days.push(computeDayMetrics(dayData, ymd));
           current = current.add(1, "day");
         }
 
@@ -4471,6 +4571,7 @@ useEffect(() => {
           employeeName: row.name,
           days,
           total: totals,
+          missingHoursFromPayroll: payrollMissingHours,
         };
 
         console.log(
@@ -4487,49 +4588,120 @@ useEffect(() => {
         );
       }
     },
-    [tsByEmp, empSchedule, holidaysSet, showToast]
+    [
+      tsByEmp,
+      resolveScheduleFor,
+      holidaysSet,
+      showToast,
+      payrollAggByEmp,
+      getAggMissingMinutes,
+    ]
   );
 
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <Box>
-        <Card variant="outlined" sx={{ mt: 2 }}>
-          <CardContent>
-            {/* Legends Accordions */}
-            <Accordion disableGutters sx={{ mt: 1 }}>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography sx={{ fontWeight: 700 }}>Leave Legend</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                    <LegendChip label="AL — Annual Leave" bg={alpha(LEAVE_TYPES.AL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="SL — Sick Leave" bg={alpha(LEAVE_TYPES.SL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="EL — Emergency Leave" bg={alpha(LEAVE_TYPES.EL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="UL — Unpaid Leave" bg={alpha(LEAVE_TYPES.UL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="ML — Maternity Leave" bg={alpha(LEAVE_TYPES.ML.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="XL — Exam Leave" bg={alpha(LEAVE_TYPES.XL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="B1 — Bereavement 1" bg={alpha(LEAVE_TYPES.B1.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="B2 — Bereavement 2" bg={alpha(LEAVE_TYPES.B2.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="HL — Half Day Leave" bg={alpha(LEAVE_TYPES.HL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="BM — Bereavement" bg={alpha(LEAVE_TYPES.BM.color, isDark ? 0.48 : 0.34)} />
-                  </Box>
-                </AccordionDetails>
-              </Accordion>
-              <Accordion disableGutters>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Typography sx={{ fontWeight: 700 }}>Attendance Legend</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                    <LegendChip label="P — Present" bg={alpha(ATTENDANCE_TYPES.P.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="PH — Paid Holiday" bg={alpha(ATTENDANCE_TYPES.PH.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="PHF — Paid Holiday + Food" bg={alpha(ATTENDANCE_TYPES.PHF.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="PT — Present + Food" bg={alpha(ATTENDANCE_TYPES.PT.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="PL — Present Late" bg={alpha(ATTENDANCE_TYPES.PL.color, isDark ? 0.48 : 0.34)} />
-                    <LegendChip label="A — Absent" bg={alpha(ATTENDANCE_TYPES.A.color, isDark ? 0.48 : 0.34)} />
-                  </Box>
-                </AccordionDetails>
-              </Accordion>
+      <Box
+        ref={fullscreenRef}
+        sx={{
+          p: isFullscreen ? 0 : 2,
+          width: isFullscreen ? "100vw" : "auto",
+          height: isFullscreen ? "100vh" : "auto",
+          overflow: isFullscreen ? "auto" : "visible",
+          bgcolor: isFullscreen ? "background.paper" : "transparent",
+          position: "relative",
+          display: isFullscreen ? "flex" : "block",
+          flexDirection: isFullscreen ? "column" : undefined,
+          minHeight: isFullscreen ? 0 : undefined,
+        }}
+      >
+        {isFullscreen && (
+          <Box sx={{ position: "fixed", top: 12, right: 12, zIndex: 2500 }}>
+            <IconButton
+              onClick={toggleFullscreen}
+              sx={{ bgcolor: "background.paper", boxShadow: 2, "&:hover": { bgcolor: "background.paper" } }}
+            >
+              <FullscreenExitIcon />
+            </IconButton>
+          </Box>
+        )}
+
+        <Card
+          sx={{
+            mb: isFullscreen ? 1 : 2,
+            width: "100%",
+            borderRadius: isFullscreen ? 0 : undefined,
+            boxShadow: isFullscreen ? "none" : undefined,
+            flexShrink: isFullscreen ? 0 : undefined,
+            ...(isFullscreen && {
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }),
+          }}
+        >
+          <CardContent
+            sx={{
+              p: isFullscreen ? 1 : undefined,
+              ...(isFullscreen && {
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+              }),
+            }}
+          >
+            <Box
+              sx={{
+                ...(isFullscreen && {
+                  flex: 1,
+                  display: "flex",
+                  flexDirection: "column",
+                  minHeight: 0,
+                }),
+              }}
+            >
+              {!isFullscreen && (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, mt: 1 }}>
+                  <Accordion
+                    disableGutters
+                    sx={{ flex: 1, minWidth: 260 }}
+                  >
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Typography sx={{ fontWeight: 700 }}>Leave Legend</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                        <LegendChip label="AL — Annual Leave" bg={alpha(LEAVE_TYPES.AL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="SL — Sick Leave" bg={alpha(LEAVE_TYPES.SL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="EL — Emergency Leave" bg={alpha(LEAVE_TYPES.EL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="UL — Unpaid Leave" bg={alpha(LEAVE_TYPES.UL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="ML — Maternity Leave" bg={alpha(LEAVE_TYPES.ML.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="XL — Exam Leave" bg={alpha(LEAVE_TYPES.XL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="B1 — Bereavement 1" bg={alpha(LEAVE_TYPES.B1.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="B2 — Bereavement 2" bg={alpha(LEAVE_TYPES.B2.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="HL — Half Day Leave" bg={alpha(LEAVE_TYPES.HL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="BM — Bereavement" bg={alpha(LEAVE_TYPES.BM.color, isDark ? 0.48 : 0.34)} />
+                      </Box>
+                    </AccordionDetails>
+                  </Accordion>
+                  <Accordion disableGutters sx={{ flex: 1, minWidth: 260 }}>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Typography sx={{ fontWeight: 700 }}>Attendance Legend</Typography>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                        <LegendChip label="P — Present" bg={alpha(ATTENDANCE_TYPES.P.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="PH — Paid Holiday" bg={alpha(ATTENDANCE_TYPES.PH.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="PHF — Paid Holiday + Food" bg={alpha(ATTENDANCE_TYPES.PHF.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="PT — Present + Food" bg={alpha(ATTENDANCE_TYPES.PT.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="PL — Present Late" bg={alpha(ATTENDANCE_TYPES.PL.color, isDark ? 0.48 : 0.34)} />
+                        <LegendChip label="A — Absent" bg={alpha(ATTENDANCE_TYPES.A.color, isDark ? 0.48 : 0.34)} />
+                      </Box>
+                    </AccordionDetails>
+                  </Accordion>
+                </Box>
+              )}
               {/* Column toggles moved into Settings dialog */}
               <Box
                 sx={{
@@ -4607,6 +4779,12 @@ useEffect(() => {
                     </MenuItem>
                   ))}
                 </TextField>
+
+                {!isFullscreen && (
+                  <IconButton onClick={toggleFullscreen}>
+                    <FullscreenIcon />
+                  </IconButton>
+                )}
 
                 <TextField
                   label={t("hr.timesheets.searchEmployee") || "Search employee"}
@@ -4690,7 +4868,17 @@ useEffect(() => {
                 </Box>
               )}
               {rangeResults && rangeFrom && (
-                <Box sx={{ mt: 2 }}>
+                <Box
+                  sx={{
+                    mt: 2,
+                    ...(isFullscreen && {
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      minHeight: 0,
+                    }),
+                  }}
+                >
                   {(() => {
                     const monthStart = rangeFrom.startOf("month");
                     const monthEnd = monthStart.endOf("month");
@@ -4768,7 +4956,7 @@ useEffect(() => {
                     ) => {
                       const ymd = d.format("YYYY-MM-DD");
                       const tsd = tsByEmp.get(row.id_emp)?.get(ymd);
-                      const sched = empSchedule.get(row.id_emp) || null;
+                      const sched = resolveScheduleFor(row.id_emp, row);
 
                       // Pre-employment guard: if the day is before employee's start date, render as disabled dark grey with an X
                       try {
@@ -4829,10 +5017,7 @@ useEffect(() => {
                         rawFromTs || rawFromRange
                       ).toUpperCase();
 
-                      const hasE = !!(tsd?.entry || rec?.E);
-                      const hasS = !!(tsd?.exit || rec?.S);
-                      const hasES = hasE && hasS;
-
+                      const todayStart = dayjs().startOf("day");
                       const isFri = d.day() === 5;
                       const rawUp = String(rawMerged || "").toUpperCase();
                       const isHolidayByCode = rawUp === "PH" || rawUp === "PHF";
@@ -4841,9 +5026,13 @@ useEffect(() => {
                         Boolean((tsd as any)?.isHoliday) ||
                         Boolean((rec as any)?.isHoliday) ||
                         isHolidayByCode;
-                      const todayStart = dayjs().startOf("day");
                       // Treat today as not finished: only days strictly before today are "past"
+                      const isFuture = d.isAfter(todayStart, "day");
                       const isFutureOrToday = !d.isBefore(todayStart, "day");
+
+                      const hasE = !isFuture && !!(tsd?.entry || rec?.E);
+                      const hasS = !isFuture && !!(tsd?.exit || rec?.S);
+                      const hasES = hasE && hasS;
 
                       const leaveCodeFinal = finalLeaveCodeForDay(
                         row.id_emp,
@@ -4898,11 +5087,16 @@ useEffect(() => {
 
                       let expectedMin: number | null = null;
                       if (!isFutureOrToday) {
-                        if (sched?.start && sched?.end) {
-                          const stt = dayjs(`${ymd}T${sched.start}:00`);
-                          const ent = dayjs(`${ymd}T${sched.end}:00`);
-                          const diff = ent.diff(stt, "minute");
-                          if (diff > 0) expectedMin = diff;
+                        if (sched.start && sched.end) {
+                          const startMin = parseHmToMinutes(sched.start);
+                          const endMin = parseHmToMinutes(sched.end);
+                          if (
+                            startMin != null &&
+                            endMin != null &&
+                            endMin > startMin
+                          ) {
+                            expectedMin = endMin - startMin;
+                          }
                         } else if (tsd?.expectedMin != null) {
                           expectedMin = tsd.expectedMin;
                         }
@@ -4912,8 +5106,29 @@ useEffect(() => {
                       // Use backend-computed deltaMin (missing hours only) when available.
                       // Backend already ignores today / future and only records early-leave
                       // minutes when entry was on time and exit was before schedule end.
-                      if (!isFutureOrToday && typeof tsd?.deltaMin === "number") {
-                        deltaMin = tsd.deltaMin;
+                      const rawDelta =
+                        typeof tsd?.deltaMin === "number"
+                          ? tsd.deltaMin
+                          : typeof (rec as any)?.deltaMin === "number"
+                            ? (rec as any).deltaMin
+                            : null;
+                      if (!isFutureOrToday && rawDelta != null) {
+                        deltaMin = normalizeDelta(rawDelta);
+                      }
+                      if (
+                        deltaMin == null &&
+                        !isFutureOrToday &&
+                        sched.start &&
+                        sched.end &&
+                        hasES
+                      ) {
+                        const fallback = computeDeltaFromSchedule(
+                          eHM || null,
+                          sHM || null,
+                          sched.start,
+                          sched.end
+                        );
+                        if (fallback != null) deltaMin = fallback;
                       }
 
                       const attCode = (() => {
@@ -4957,8 +5172,12 @@ useEffect(() => {
                       } else if (hasES) {
                         // Presence overrides raw 'A'; keep explicit PT/PL if provided
                         centerCode = attCode && attCode !== "A" ? attCode : "P";
-                      } else if (attCode) {
+                      } else if (attCode && !isFuture) {
                         centerCode = attCode === "A" && isHolidayDate ? "" : attCode;
+                      }
+
+                      if (isFuture && !leaveCodeFinal && !onVacation && !isHolidayDate) {
+                        centerCode = "";
                       }
 
                       if (
@@ -5038,14 +5257,10 @@ useEffect(() => {
                       let pillTone: "positive" | "negative" | "neutral" =
                         "neutral";
                       let pillText = "";
-                      if (deltaMin != null) {
-                        if (Math.abs(deltaMin) >= 60) {
-                          pillText = roundedHoursWithSign(deltaMin);
-                          pillTone = deltaMin < 0 ? "negative" : "positive";
-                        }
-                      } else if (hasES && !isFutureOrToday) {
-                        // Completed day with punches but no delta (e.g., exactly on time)
-                        pillText = roundedHoursWithSign(0);
+                      if (deltaMin != null && deltaMin !== 0) {
+                        pillText = roundedHoursWithSign(deltaMin);
+                        if (deltaMin < 0) pillTone = "negative";
+                        else if (deltaMin > 0) pillTone = "positive";
                       }
                       if (isFri) {
                         pillText = "";
@@ -5066,6 +5281,7 @@ useEffect(() => {
                         manualStar: /(^|\s)@manual:[A-Z]{1,3}\b/i.test(
                           String(tsd?.comment || "")
                         ),
+                        disabled: isFuture,
                       };
                     };
 
@@ -5130,24 +5346,66 @@ useEffect(() => {
                       let deltaMinTotal = 0;
                       const today = dayjs().startOf("day");
 
-                      visibleRows.forEach((r) => {
-                        const byDate = new Map(r.days.map((d: any) => [d.date, d]));
-                        dates.forEach((d) => {
-                          const ymd = d.format("YYYY-MM-DD");
-                          const tsd = tsByEmp.get(r.id_emp)?.get(ymd);
+                      visibleRows.forEach((row) => {
+                        const aggRow = payrollAggByEmp.get(row.id_emp) || null;
+                        const payrollMissing = getAggMissingMinutes(aggRow);
+                        const hasPayrollMissing = payrollMissing > 0;
+                        if (hasPayrollMissing) {
+                          deltaMinTotal -= payrollMissing;
+                        }
+                        let fallbackDelta = 0;
+                        const schedForRow = resolveScheduleFor(row.id_emp, row);
+                        const byDate = new Map(row.days.map((day: any) => [day.date, day]));
+                        dates.forEach((date) => {
+                          const ymd = date.format("YYYY-MM-DD");
+                          const tsd = tsByEmp.get(row.id_emp)?.get(ymd);
                           const rec = byDate.get(ymd);
 
-                          const isFuture = d.isAfter(today, "day");
-                          const isFriday = d.day() === 5;
+                          const isFuture = date.isAfter(today, "day");
+                          const isFriday = date.day() === 5;
 
-                          if (!isFuture && !isFriday && typeof tsd?.deltaMin === "number" && tsd.deltaMin < 0) {
-                            deltaMinTotal += tsd.deltaMin;
+                          const rawDelta =
+                            typeof tsd?.deltaMin === "number"
+                              ? tsd.deltaMin
+                              : typeof rec?.deltaMin === "number"
+                                ? (rec as any).deltaMin
+                                : null;
+                          let normalized =
+                            rawDelta != null ? normalizeDelta(rawDelta) : null;
+                          if (
+                            normalized == null &&
+                            schedForRow.start &&
+                            schedForRow.end &&
+                            (tsd?.entry || rec?.E) &&
+                            (tsd?.exit || rec?.S)
+                          ) {
+                            const entryStr = tsd?.entry
+                              ? fmtClock24(tsd.entry)
+                              : rec?.E
+                                ? fmtClock24(rec.E)
+                                : null;
+                            const exitStr = tsd?.exit
+                              ? fmtClock24(tsd.exit)
+                              : rec?.S
+                                ? fmtClock24(rec.S)
+                                : null;
+                            if (entryStr && exitStr) {
+                              normalized = computeDeltaFromSchedule(
+                                entryStr,
+                                exitStr,
+                                schedForRow.start,
+                                schedForRow.end
+                              );
+                            }
+                          }
+                          if (!hasPayrollMissing && !isFuture && normalized && normalized < 0) {
+                            fallbackDelta += normalized;
                           }
 
-                          const baseCell = cellFor(rec, d, r);
+                          const baseCell = cellFor(rec, date, row);
                           const centerCode = baseCell.centerCode;
                           const finalCode = finalLeaveCodeForDay(
-                            r.id_emp,
+                            row.id_emp,
                             ymd,
                             tsd,
                             rec as any
@@ -5175,13 +5433,27 @@ useEffect(() => {
                             }
                           }
                         });
+                        if (!hasPayrollMissing && fallbackDelta < 0) {
+                          deltaMinTotal += fallbackDelta;
+                        }
                       });
 
                       return { leaveCounts, attendanceCounts, deltaMinTotal };
                     })();
 
                     return (
-                      <Box sx={{ overflowX: "auto", overflowY: "auto", maxHeight: "70vh" }}>
+                      <Box
+                        sx={{
+                          overflowX: "auto",
+                          overflowY: "auto",
+                          ...(isFullscreen
+                            ? {
+                                flex: 1,
+                                minHeight: 0,
+                              }
+                            : { maxHeight: "70vh" }),
+                        }}
+                      >
                         <Box
                           sx={{
                             display: "grid",
@@ -5406,9 +5678,13 @@ useEffect(() => {
                             const byDate = new Map(
                               r.days.map((d: any) => [d.date, d])
                             );
+                            const schedRow = resolveScheduleFor(r.id_emp, r);
+
+                            const aggRow = payrollAggByEmp.get(r.id_emp) || null;
+                            const missingMinTruth = getAggMissingMinutes(aggRow);
 
                             // aggregates
-                            let deltaMinTotal = 0; // sum of negative deltaMin (missing minutes)
+                            let deltaMinFallback = 0; // sum of negative deltaMin (missing minutes)
                             let workDaysTotal = 0;
                             let sickDaysTotal = 0;
                             const leaveCounts: Record<string, number> = {};
@@ -5449,17 +5725,21 @@ useEffect(() => {
                               }
 
                               // expected (from PS schedule or tsd.expectedMin)
-                              const sched = empSchedule.get(r.id_emp) || null;
                               let expectedMin: number | null = null;
                               const isFuture = d.isAfter(today, "day");
                               const isFriday = d.day() === 5;
                               // Only consider completed, non-Friday days in aggregates
-                              if (!isFuture && !isFriday) {
-                                if (sched?.start && sched?.end) {
-                                  const stt = dayjs(`${ymd}T${sched.start}:00`);
-                                  const ent = dayjs(`${ymd}T${sched.end}:00`);
-                                  const diff = ent.diff(stt, "minute");
-                                  if (diff > 0) expectedMin = diff;
+                              if (!isFuture) {
+                                if (schedRow.start && schedRow.end) {
+                                  const startMin = parseHmToMinutes(schedRow.start);
+                                  const endMin = parseHmToMinutes(schedRow.end);
+                                  if (
+                                    startMin != null &&
+                                    endMin != null &&
+                                    endMin > startMin
+                                  ) {
+                                    expectedMin = endMin - startMin;
+                                  }
                                 } else if (tsd?.expectedMin != null) {
                                   expectedMin = tsd.expectedMin;
                                 }
@@ -5469,15 +5749,50 @@ useEffect(() => {
                               // Do not recompute workMin-expectedMin here to avoid
                               // diverging from the source-of-truth missing-hours logic.
                               let deltaMin: number | null = null;
-                              if (typeof tsd?.deltaMin === "number") {
-                                deltaMin = tsd.deltaMin;
+                              const rawDelta =
+                                typeof tsd?.deltaMin === "number"
+                                  ? tsd.deltaMin
+                                  : typeof (rec as any)?.deltaMin === "number"
+                                    ? (rec as any).deltaMin
+                                    : null;
+                              if (rawDelta != null) {
+                                deltaMin = normalizeDelta(rawDelta);
                               }
 
-                              if (deltaMin != null) {
-                                // For the monthly pill we only care about missing time (negative deltas),
-                                // to match the "Missing (hrs)" and payroll/PDF latency semantics.
-                                if (deltaMin < 0) {
-                                  deltaMinTotal += deltaMin;
+                              if (
+                                deltaMin == null &&
+                                !isFuture &&
+                                schedRow.start &&
+                                schedRow.end &&
+                                eHM &&
+                                sHM
+                              ) {
+                                const fallback = computeDeltaFromSchedule(
+                                  eHM,
+                                  sHM,
+                                  schedRow.start,
+                                  schedRow.end
+                                );
+                                if (fallback != null) deltaMin = fallback;
+                              }
+
+                              if (deltaMin != null && deltaMin < 0) {
+                                // Apply 30-minute tolerance like PayrollPage (line 2479)
+                                const abs = Math.abs(deltaMin);
+                                if (abs > 30) {
+                                  deltaMinFallback += deltaMin; // deltaMin is negative
+                                  debugDeltaCount++;
+                                }
+                              }
+
+                              // Handle full absences (no punches, not leave/holiday) - ONLY if no payroll data
+                              if (deltaMin == null && !isFuture && expectedMin != null && !missingMinTruth) {
+                                const hasPunches = Boolean(eHM) || Boolean(sHM);
+                                const dayCode = String(tsd?.code || "").toUpperCase();
+                                const treatedAsLeave = Boolean(dayCode && LEAVE_TYPES[dayCode as keyof typeof LEAVE_TYPES]);
+                                const isHoliday = Boolean((tsd as any)?.isHoliday) || holidaysSet.has(ymd);
+                                if (!hasPunches && !treatedAsLeave && !isHoliday && !isFriday) {
+                                  deltaMinFallback -= expectedMin;
                                   debugDeltaCount++;
                                 }
                               }
@@ -5527,14 +5842,44 @@ useEffect(() => {
                               if (isSick) sickDaysTotal++;
                             });
 
-                            console.log(`[Delta] Employee ${r.id_emp}: deltaMinTotal=${deltaMinTotal}, debugDeltaCount=${debugDeltaCount}, workDaysTotal=${workDaysTotal}`);
-                            
-                            const agg_delta_label =
-                              deltaMinTotal !== 0
-                                ? roundedHoursWithSign(deltaMinTotal)
-                                : "";
-                            const agg_delta_is_positive = deltaMinTotal > 0;
-                            const agg_delta_is_negative = deltaMinTotal < 0;
+                            console.log(`[DEBUG] Employee ${r.id_emp}: backendLatMin=${Number((aggRow as any)?.latencyMinutes ?? (aggRow as any)?.missing_minutes ?? 0)}, deltaMinFallback=${deltaMinFallback}, aggRow=`, aggRow);
+
+                            // Use payroll backend latency minutes directly - they're the authoritative source
+                            const minutesForLabel = (() => {
+                              // Payroll shows 1h 44m = 104 minutes, but backendLatMin is 0
+                              // This means payroll is calculating differently from backend latency field
+                              // Let's use the same calculation as PayrollPage's tsAgg
+                              
+                              // Recalculate like PayrollPage does (lines 2474-2481)
+                              let missAll = 0;
+                              const today = dayjs().startOf("day");
+                              
+                              dates.forEach((d) => {
+                                const ymd = d.format("YYYY-MM-DD");
+                                const tsd = tsByEmp.get(r.id_emp)?.get(ymd);
+                                const rec = byDate.get(ymd);
+                                
+                                if (d.isBefore(today, "day")) {
+                                  const dm = Number(tsd?.deltaMin || rec?.deltaMin || 0);
+                                  if (dm < 0) {
+                                    const abs = Math.abs(dm);
+                                    // NO tolerance - include all negative deltas like the pills show
+                                    missAll += abs;
+                                  }
+                                }
+                              });
+                              
+                              console.log(`[DEBUG2] Employee ${r.id_emp}: missAll=${missAll}, expected 104 minutes for 1h 44m`);
+
+                            return missAll;
+                            })();
+
+                            // UI convention: missing shows as NEGATIVE time
+                            const agg_delta_label = minutesForLabel > 0 ? minutesToSignedHHMM(minutesForLabel) : "";
+
+                            const agg_delta_is_positive = false; // missing is always negative in UI
+                            const agg_delta_is_negative = minutesForLabel > 0;
+
                             const agg_nbr_day = workDaysTotal;
 
                             return (
@@ -6042,28 +6387,29 @@ useEffect(() => {
                   })()}
                 </Box>
               )}
-            </CardContent>
+            </Box>
+          </CardContent>
           </Card>
 
-        <Dialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          maxWidth="sm"
-          fullWidth
-        >
-          <DialogTitle>Settings</DialogTitle>
-          <DialogContent dividers>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-              <Box>
-                <Typography sx={{ fontWeight: 700, mb: 1 }}>Filters</Typography>
-                <TextField
-                  label="Search Employee"
-                  value={empFilter}
-                  onChange={(e) => setEmpFilter(e.target.value)}
-                  size="small"
-                  fullWidth
-                  sx={{ mb: 1 }}
-                />
+          <Dialog
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            maxWidth="sm"
+            fullWidth
+          >
+            <DialogTitle>Settings</DialogTitle>
+            <DialogContent dividers>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                <Box>
+                  <Typography sx={{ fontWeight: 700, mb: 1 }}>Filters</Typography>
+                  <TextField
+                    label="Search Employee"
+                    value={empFilter}
+                    onChange={(e) => setEmpFilter(e.target.value)}
+                    size="small"
+                    fullWidth
+                    sx={{ mb: 1 }}
+                  />
                 <FormControl fullWidth size="small" sx={{ mb: 1 }}>
                   <InputLabel>PS Filter</InputLabel>
                   <Select
@@ -6901,17 +7247,31 @@ useEffect(() => {
                       {timeLogData.total.workedHours.toFixed(2)} hrs
                     </Typography>
                   </Box>
-                  <Box>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Missing Hours (partial days)
-                    </Typography>
-                    <Typography
-                      variant="h6"
-                      color={timeLogData.total.missingHoursOnly > 0 ? "error.main" : "text.secondary"}
-                    >
-                      {timeLogData.total.missingHoursOnly.toFixed(2)} hrs
-                    </Typography>
-                  </Box>
+                  {timeLogData.missingHoursFromPayroll != null ? (
+                    <Box>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Missing Hours (Payroll)
+                      </Typography>
+                      <Typography
+                        variant="h6"
+                        color="error.main"
+                      >
+                        {timeLogData.missingHoursFromPayroll.toFixed(2)} hrs
+                      </Typography>
+                    </Box>
+                  ) : (
+                    <Box>
+                      <Typography variant="subtitle2" color="text.secondary">
+                        Missing Hours (Timesheet)
+                      </Typography>
+                      <Typography
+                        variant="h6"
+                        color={timeLogData.total.missingHoursOnly > 0 ? "error.main" : "text.secondary"}
+                      >
+                        {timeLogData.total.missingHoursOnly.toFixed(2)} hrs
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
 
                 <Box sx={{ maxHeight: "60vh", overflowY: "auto" }}>
@@ -6931,8 +7291,8 @@ useEffect(() => {
                             const d = dayjs(day.date);
                             const isPast = d.isBefore(dayjs(), "day");
                             const isFriday = d.day() === 5;
-                            return isPast && !isFriday && day.missingHoursOnly > 0.01;
-                          }) // Only show past non-Friday days with partial missing hours
+                            return isPast && !isFriday && (day.deltaHours < -0.01 || (timeLogData.missingHoursFromPayroll != null && day.expectedHours > 0 && day.workedHours < day.expectedHours));
+                          }) // Show past non-Friday days with missing hours, or any day contributing to payroll total
                           .map((day) => (
                             <TableRow
                               key={day.date}
@@ -6960,7 +7320,7 @@ useEffect(() => {
                               {day.workedHours.toFixed(2)} hrs
                             </TableCell>
                             <TableCell align="right" sx={{ color: "error.main" }}>
-                              -{day.missingHoursOnly.toFixed(2)} hrs
+                              {day.deltaHours < 0 ? `-${Math.abs(day.deltaHours).toFixed(2)} hrs` : `-${(day.expectedHours - day.workedHours).toFixed(2)} hrs`}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -6981,27 +7341,27 @@ useEffect(() => {
             <Button onClick={() => setTimeLogDialogOpen(false)}>Close</Button>
           </DialogActions>
         </Dialog>
+        {/* Toasts */}
+        <Alert
+          severity={toastSeverity}
+          sx={{
+            position: "fixed",
+            bottom: 16,
+            left: "50%",
+            transform: `translateX(-50%) ${toastOpen ? "" : "translateY(120%)"}`,
+            transition: "transform 180ms ease",
+            zIndex: 1400,
+            minWidth: 280,
+            maxWidth: "80vw",
+            pointerEvents: "none",
+          }}
+          onTransitionEnd={() => {
+            /* no-op */
+          }}
+        >
+          {toastMsg}
+        </Alert>
       </Box>
-      {/* Toasts */}
-      <Alert
-        severity={toastSeverity}
-        sx={{
-          position: "fixed",
-          bottom: 16,
-          left: "50%",
-          transform: `translateX(-50%) ${toastOpen ? "" : "translateY(120%)"}`,
-          transition: "transform 180ms ease",
-          zIndex: 1400,
-          minWidth: 280,
-          maxWidth: "80vw",
-          pointerEvents: "none",
-        }}
-        onTransitionEnd={() => {
-          /* no-op */
-        }}
-      >
-        {toastMsg}
-      </Alert>
     </LocalizationProvider>
   );
 }

@@ -31,7 +31,7 @@ interface AttchWatchFilesProps {
   onUploadSuccess: () => void;
   token: string;
 }
-const apiUrl = "https://system.gaja.ly/api";
+const apiUrl = "http://localhost:9000/api";
 const AttchWatchFiles: React.FC<AttchWatchFilesProps> = ({
   open,
   onClose,

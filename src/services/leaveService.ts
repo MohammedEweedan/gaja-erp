@@ -1,5 +1,6 @@
-import axios from 'axios';
-import { getAuthHeader } from '../utils/auth';
+import axios from "axios";
+import dayjs, { Dayjs } from "dayjs";
+import { getAuthHeader } from "../utils/auth";
 
 const API_URL = process.env.REACT_APP_API_IP;
 const baseUrl = () => {
@@ -58,13 +59,74 @@ export const getLeaveBalance = async (employeeId: string) => {
     status: (x.STATUS ?? x.state ?? x.status ?? 'approved').toLowerCase(),
   }));
 
+  const toIso = (value: any): string | null => {
+    if (!value) return null;
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return dayjs(value).format("YYYY-MM-DD");
+    }
+    const s = String(value).trim();
+    if (!s) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const dmY = s.match(/^([0-3]?\d)[\/-]([0-1]?\d)[\/-](\d{4})/);
+    if (dmY) {
+      const dd = dmY[1].padStart(2, "0");
+      const mm = dmY[2].padStart(2, "0");
+      return `${dmY[3]}-${mm}-${dd}`;
+    }
+    const parsed = dayjs(s);
+    return parsed.isValid() ? parsed.format("YYYY-MM-DD") : null;
+  };
+
+  const toDay = (value: any): Dayjs | null => {
+    const iso = toIso(value);
+    if (!iso) return null;
+    const parsed = dayjs(iso);
+    return parsed.isValid() ? parsed : null;
+  };
+
+  const currentYear = dayjs().year();
+  const yearStart = dayjs(`${currentYear}-01-01`);
+  const yearEnd = dayjs(`${currentYear}-12-31`);
+
+  const approvedThisYear = history.reduce((sum: number, entry: typeof history[number]) => {
+    if (entry.status && entry.status !== "approved") return sum;
+    const start = toDay(entry.startDate);
+    const end = toDay(entry.endDate) || start;
+    if (!start) return sum;
+    const safeEnd = end && end.isValid() ? end : start;
+    if (safeEnd.isBefore(yearStart) || start.isAfter(yearEnd)) {
+      return sum;
+    }
+    const clampedStart = start.isBefore(yearStart) ? yearStart : start;
+    const clampedEnd = safeEnd.isAfter(yearEnd) ? yearEnd : safeEnd;
+    if (clampedEnd.isBefore(clampedStart)) return sum;
+
+    const spanFromSource = safeEnd.diff(start, "day") + 1;
+    const overlapSpan = clampedEnd.diff(clampedStart, "day") + 1;
+
+    const reportedDays = Number(entry.effectiveDays ?? entry.days ?? 0);
+    let portion = reportedDays && spanFromSource > 0
+      ? (reportedDays * overlapSpan) / spanFromSource
+      : overlapSpan;
+
+    if (!Number.isFinite(portion)) portion = 0;
+    return sum + Math.max(0, portion);
+  }, 0);
+
+  const accrualBaseRaw = d.currentYearAccrued ?? d.accruedToDate ?? total;
+  const accrualBase = Number.isFinite(Number(accrualBaseRaw))
+    ? Number(accrualBaseRaw)
+    : total;
+  const usedThisYear = Math.max(0, Number(approvedThisYear.toFixed(2)));
+  const adjustedRemaining = Math.max(0, Number((accrualBase - usedThisYear).toFixed(2)));
+
   return {
     entitlement: total,
-    used,
-    remaining: rem,
-    accruedToDate,
-    carryForward,
-    currentYearAccrued,
+    used: usedThisYear,
+    remaining: adjustedRemaining,
+    accruedToDate: accrualBase,
+    carryForward: 0,
+    currentYearAccrued: accrualBase,
     monthlyRate: d.monthlyRate ?? 0,
     lastUpdated: d.lastUpdated ?? d.LAST_LEAVE_CALCULATION ?? null,
     leaveHistory: history,

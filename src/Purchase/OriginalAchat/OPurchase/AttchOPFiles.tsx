@@ -30,7 +30,7 @@ interface AttchOPFilesProps {
   onUploaded?: () => void | Promise<void>;
 }
 
-const apiUrl = "https://system.gaja.ly/api";
+const apiUrl = "http://localhost:9000/api";
 
 // Note: Opurchases upload endpoint is `POST /Opurchases/upload-attachment`
 // and the server stores attachment URLs on the purchase record. We list

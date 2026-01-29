@@ -710,7 +710,7 @@ const WInventory = (props: Props) => {
                   if (watch) {
                     const original = urls[idx] || blobList[idx];
                     const fileName = (original || '').split('?')[0].split('/').pop() || '';
-                    const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || 'https://system.gaja.ly/api').replace(/\/+$/, '');
+                    const apiBaseRaw = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || 'http://localhost:9000/api').replace(/\/+$/, '');
                     let origin = '';
                     try { origin = new URL(apiBaseRaw).origin; } catch { origin = window.location.origin; }
                     const originHttps = origin.replace(/^http:\/\//i, 'https://');

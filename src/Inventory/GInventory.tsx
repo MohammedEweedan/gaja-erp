@@ -169,7 +169,7 @@ const GInventory = (props: Props) => {
       } catch {
         // Not a URL; if it looks like images/<path>, force absolute on prod host
         const rel = s.replace(/^\/+/, "");
-        if (/^images\//i.test(rel)) return `https://system.gaja.ly/${rel}`;
+        if (/^images\//i.test(rel)) return `http://localhost:9000/${rel}`;
         return s;
       }
 
@@ -180,7 +180,7 @@ const GInventory = (props: Props) => {
 
       // If this is an images or uploads route, always pin to prod host over https
       if (/^\/(images|uploads)\//i.test(pathname)) {
-        return `https://system.gaja.ly${pathAndQuery}`;
+        return `http://localhost:9000${pathAndQuery}`;
       }
       // If host already system.gaja.ly, ensure https
       if (/^system\.gaja\.ly$/i.test(hostLower)) {
@@ -231,7 +231,7 @@ const GInventory = (props: Props) => {
     try {
       setGoldLoading(true);
       // Use backend proxy to avoid CORS and centralize fallbacks
-      const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "https://system.gaja.ly/api").replace(/\/+$/,'');
+      const base = (process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_IP || "http://localhost:9000/api").replace(/\/+$/,'');
       let success = false;
       let lastErr: any = null;
       const results: Array<{usdPerOz:number;usdPerGram:number;source:string;updatedAt:Date}> = [];
@@ -584,11 +584,11 @@ const GInventory = (props: Props) => {
       const hostLower = parsed.hostname.toLowerCase();
       const pathAndQuery = parsed.pathname + (parsed.search || "") + (parsed.hash || "");
       if (/^system\.gaja\.ly$/i.test(hostLower)) return `https://${parsed.host}${pathAndQuery}`;
-      if (/^\/(images|uploads)\//i.test(parsed.pathname)) return `https://system.gaja.ly${pathAndQuery}`;
+      if (/^\/(images|uploads)\//i.test(parsed.pathname)) return `http://localhost:9000${pathAndQuery}`;
       return parsed.toString();
     } catch {
       const rel = String(u).replace(/^\/+/, "");
-      if (/^images\//i.test(rel)) return `https://system.gaja.ly/${rel}`;
+      if (/^images\//i.test(rel)) return `http://localhost:9000/${rel}`;
       return String(u);
     }
   };
