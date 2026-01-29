@@ -1,0 +1,29 @@
+{
+  "name": "node",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.13.1",
+    "bcrypt": "^5.1.1",
+    "canvas": "^3.2.0",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.19",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jspdf": "^3.0.4",
+    "mssql": "^11.0.1",
+    "multer": "^2.0.0",
+    "nodemailer": "^6.10.1",
+    "pdfkit": "^0.17.2",
+    "sequelize": "^6.37.7",
+    "tedious": "^16.6.1",
+    "telegraf": "^4.16.3"
+  }
+}
