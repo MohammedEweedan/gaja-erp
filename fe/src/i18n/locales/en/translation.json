@@ -1,0 +1,872 @@
+{
+  "app": {
+    "title": "GAJA ERP"
+  },
+  "login": {
+    "welcome": "Welcome Back",
+    "signInToContinue": "Sign in to continue to GAJA ERP",
+    "email": "Email address",
+    "password": "Password",
+    "rememberMe": "Remember me",
+    "forgotPassword": "Forgot password?",
+    "signIn": "Sign in",
+    "redirecting": "Redirecting to your dashboard...",
+    "signingIn": "Signing in...",
+    "togglePassword": "Toggle password visibility",
+    "loginFailed": "Login or Password is wrong. Please try again!",
+    "tokenMissing": "Login failed: Token is missing!",
+    "privacyNotice": "We'll never share your email and password with anyone else.",
+    "logOut": "Log out"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "watchesCash": "Watches Cash",
+    "currencyBalance": "Currency Balance",
+    "lydBalance": "LYD Balance"
+  },
+  "notFound": {
+    "title": "Oops! Page Not Found",
+    "description": "The page you are looking for might have been removed, had its name changed, or is temporarily unavailable.",
+    "goBack": "Go Back",
+    "goHome": "Go to Home"
+  },
+  "header": {
+    "profile": "Profile",
+    "currentTheme": "Current Theme",
+    "currentLanguage": "Current Language",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
+    "settings": "Settings",
+    "messages": "Messages",
+    "notifications": "Notifications",
+    "accountOfUser": "Account of current user",
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode",
+    "help": "Help",
+    "search": "Search..."
+  },
+  "footer": {
+    "createdBy": "This Portal was created by IT Dept.",
+    "copyright": "©2025 Copyright:"
+  },
+  "tooltip": {
+    "lightMode": "Light Mode",
+    "darkMode": "Dark Mode",
+    "logout": "Log out",
+    "hideDock": "Hide dock",
+    "showDock": "Show dock"
+  },
+  "aria": {
+    "toggleTheme": "Toggle theme",
+    "logout": "Log out"
+  },
+  "toast": {
+    "currentTheme": "Current Theme",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode"
+  },
+  "nav": {
+    "headers": {
+      "main": "Main Items",
+      "actions": "Actions"
+    },
+    "dashboard": "Dashboard",
+    "setting": {
+      "root": "Settings",
+      "general": "General",
+      "hr": "HR",
+      "finance": "Finance",
+      "sales": "Sales"
+    },
+    "purchase": {
+      "root": "Procurement",
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches"
+    },
+    "receive": {
+      "root": "Allocation",
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches",
+      "boxes": "Boxes"
+    },
+    "invoice": {
+      "root": "Sales & Invoices",
+      "createNew": "Create New Invoice",
+      "salesReports": "Sales Report",
+      "otherReports": "Product Reports",
+      "customersReports": "Customers Reports",
+      "sellerReports": "Seller Reports",
+      "commissions": "Commission Settings"
+    },
+    "inventory": {
+      "root": "Inventory",
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches",
+      "boxes": "Boxes"
+    },
+    "cashbook": {
+      "root": "Cash Book",
+      "deposit": "Cash Deposit",
+      "expenses": "Cash Expenses",
+      "buyCurrency": "Buy Currency",
+      "sellCurrency": "Sell Currency",
+      "reports": "Cash Book Reports"
+    },
+    "hr": {
+      "root": "Human Resources",
+      "compensations": {
+        "root": "Compensations",
+        "vacations": "Vacations",
+        "timesheets": "Time Sheets",
+        "payroll": "Payroll",
+        "promotions": "Promotions",
+        "warningLetter": "Warning Letter",
+        "productivity": "Productivity",
+        "transfer": "Transfer",
+        "evaluation": "Evaluation",
+        "missions": "Missions",
+        "loanEquipment": "Loan Equipment",
+        "delegation": "Delegation"
+      }
+    },
+    "logout": "Log out"
+  },
+  "analytics": {
+    "title": "Analytics Overview",
+    "sales": "Sales",
+    "revenue": "Revenue",
+    "expenses": "Expenses",
+    "purchases": "Purchases",
+    "markets": "Markets",
+    "noData": "No Data",
+    "inventory": "Inventory",
+    "salesTrend": "Sales Trend (Last 30 days)",
+    "revVsExp": "Revenue vs Expenses",
+    "posRealtime": "Point of Sale (Today)",
+    "posTodayTotal": "Today's POS Total",
+    "posTodayCount": "Today's Receipts",
+    "lyd": "LYD",
+    "posSelect": "Point of Sale",
+    "noAccessTitle": "No dashboard sections available",
+    "noAccessBody": "Your account does not have access to any analytics sections. Please contact an administrator if you believe this is an error.",
+    "noAccessButton": "Contact Administrator",
+    "posAll": "All POS (Overall)",
+    "sales30": "Sales (Last 30 days)",
+    "purchases30": "Purchases (Last 30 days)",
+    "revenue30": "Revenue (Last 30 days)",
+    "expenses30": "Expenses (Last 30 days)",
+    "profit30": "Profit (Last 30 days)",
+    "profit": "Profit",
+    "profitTrend": "Profit Trend (30 days)",
+    "stockComposition": "Stock Composition (by qty/items)",
+    "inventoryItems": "Inventory items",
+    "lowStock": "Low Stock Alerts",
+    "sku": "SKU",
+    "item": "Item",
+    "category": "Category",
+    "qty": "Qty",
+    "min": "Min",
+    "storePerformance": "Store Performance (30 days)",
+    "storeLeaderboard": "Store Leaderboard",
+    "store": "Store",
+    "topStores": "Top Stores",
+    "balances": "Balances",
+    "cash": "Cash",
+    "bank": "Bank",
+    "other": "Other",
+    "avgTicket": "Avg. ticket",
+    "insights": "Insights",
+    "ins": {
+      "profit": "Profit",
+      "salesMomentum": "Sales momentum",
+      "topStore": "Top store",
+      "stockFocus": "Stock focus",
+      "restock": "Restock",
+      "itemsBelowMin": "items below min"
+    }
+  },
+  "scs": {
+    "settings": {
+      "comingSoon": "This section is coming soon.",
+      "products": {
+        "title": "Products",
+        "desc": "Configure your products database and related settings."
+      },
+      "boxes": {
+        "title": "Boxes",
+        "desc": "Configure your Boxes database and related settings."
+      },
+      "customers": {
+        "title": "Customers",
+        "desc": "Configure your customer database and related settings."
+      },
+      "brands": {
+        "title": "Brands",
+        "desc": "Manage brand associations and brand details."
+      },
+      "itemsTypes": {
+        "title": "Items Types",
+        "desc": "Group item types logically for easier management."
+      },
+      "pos": {
+        "title": "Point of Sale",
+        "desc": "Configure Point of Sale terminals and behavior."
+      },
+      "marketingSource": {
+        "title": "Marketing Source",
+        "desc": "Configure marketing sources and attribution."
+      },
+      "sellerBonus": {
+        "title": "Seller Bonus Settings",
+        "desc": "Define rules for rewarding sellers."
+      },
+      "salesShifts": {
+        "title": "Sales Shifts",
+        "desc": "Configure work shift parameters for sales staff."
+      },
+      "tempReservations": {
+        "title": "Temporary Reservation Sessions",
+        "desc": "Generate and manage temporary routing reservations."
+      },
+      "salesApproval": {
+        "title": "Sales Approval Rules",
+        "desc": "Set conditions for validating and approving sales."
+      },
+      "discountTypes": {
+        "title": "Sales Discount Types",
+        "desc": "Configure discount categories and rules."
+      },
+      "chiraApproval": {
+        "title": "Chira Approval Conditions",
+        "desc": "Set validation rules for Chira-related transactions."
+      },
+      "reportsConfig": {
+        "title": "Reports Configuration",
+        "desc": "Customize reports and analytics settings."
+      },
+      "vendors": {
+        "title": "Vendors",
+        "desc": "Manage vendor directory and settings."
+      }
+    }
+  },
+  "common": {
+    "back": "Back",
+    "purchases": "Purchases",
+    "selectAll": "Select All",
+    "clear": "Clear",
+    "select": "Select",
+    "save": "Save",
+    "selected": "Selected",
+    "apply": "Apply",
+    "edit": "Edit",
+    "vendors": "Vendors",
+    "createdBy": "Created By",
+    "comment": "Comment",
+    "purchaseDate": "Purchase Date",
+    "today": "Today",
+    "previous": "Previous",
+    "close": "Close",
+    "next": "Next",
+    "month": "Month",
+    "week": "Week",
+    "day": "Day",
+    "agenda": "Agenda",
+    "date": "Date",
+    "time": "Time",
+    "event": "Event",
+    "noEventsInRange": "No events in this range",
+    "view": "View",
+    "showing": "Showing",
+    "to": "to",
+    "of": "of",
+    "entries": "entries",
+    "rowsPerPage": "Rows per page",
+    "cancel": "Cancel",
+    "submit": "Submit",
+    "purchaseSummary": "Purchase Summary",
+    "isClosed": "Closed?",
+    "yes": "Yes",
+    "no": "No",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "approve": "Approve",
+    "reject": "Reject",
+    "warningIncoming": "New arrival has come and will be received soon. Please check the distribution list.",
+    "status": "Status",
+    "received": "Received",
+    "notReceived": "Not Received",
+    "weight": "Weight",
+    "alreadyReceived": "Already Received",
+    "restToBeReceived": "Rest to be received",
+    "products": "Product",
+    "items": "Items",
+    "actions": {
+      "back": "Back",
+      "new": "New",
+      "newPurchase": "New Purchase",
+      "edit": "Edit",
+      "delete": "Delete",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saveChanges": "Save Changes",
+      "button": "Actions",
+      "print": "Print",
+      "receive": "Receive"
+    }
+  },
+  "actions": "Actions",
+  "settings": {
+        "worksPeriod": {
+        "title": "Works Period",
+        "desc": "Create or adjust the work period for all users."
+        },
+        "usersList": {
+        "title": "Users List",
+        "desc": "List of all users."
+        },
+        "serverMail": {
+        "title": "Mail Server",
+        "desc": "Configure server mail to send messages."
+        },
+        "coaLevels": {
+        "title": "COA Levels",
+        "desc": "Levels of the chart of accounts."
+        },
+        "fingerprint": {
+        "title": "Fingerprint",
+        "desc": "Configure fingerprint system."
+        }
+    },
+    "watches": {
+    "title": "Watches Management",
+    "cards": {
+      "purchase": {
+        "title": "Watch Purchase List",
+        "desc": "View and manage all watch purchases."
+      },
+      "payment": {
+        "title": "Make Payment",
+        "desc": "Manage vendor settlements."
+      },
+      "reports": {
+        "title": "Reports",
+        "desc": "Vendor Account Statement."
+      }
+    },
+    "iso": {
+      "purchaseVerbatim": "Watch Purchase List: All records and transactions related to watch procurement should comply with ISO 9001:2015 for quality management systems. This ensures that every purchase is traceable, auditable, and meets internationally recognized standards for documentation and process control. Maintaining detailed records of suppliers, purchase orders, and product specifications is essential for both internal audits and external regulatory compliance. Additionally, organizations should implement regular reviews and updates to procurement procedures to align with evolving best practices and legal requirements in the luxury goods sector.",
+      "paymentVerbatim": "Make Payment: All payment processes must adhere to ISO 20022 for electronic data interchange between financial institutions, ensuring secure, standardized, and efficient financial transactions. This includes the use of internationally recognized payment messaging formats, robust authentication protocols, and end-to-end encryption to protect sensitive financial data. Organizations should also comply with anti-money laundering (AML) and know your customer (KYC) regulations, maintaining comprehensive records of all payment activities and regularly auditing payment workflows to detect and prevent fraudulent activities.",
+      "reportsVerbatim": "Reports: Reporting and documentation should follow the guidelines of ISO 15489 for records management, which mandates the creation, maintenance, and secure storage of all business records. Reports should be clear, accurate, and accessible for both operational decision-making and regulatory inspections. Organizations are encouraged to implement digital archiving solutions that support long-term retention, version control, and secure access to sensitive information. Regular training on records management best practices should be provided to all staff involved in reporting and documentation processes."
+    }
+  },
+   "hr": {
+    "timesheets": {
+      "previewDate": "Preview Date",
+      "previewDay": "Preview Day",
+      "syncMonthToTimesheet": "Sync Month to Timesheet",
+      "exportAll": "Export",
+      "exportDialogTitle": "Export Timesheets",
+      "psPoint": "PS",
+      "allPs": "All PS",
+      "searchEmployee": "Search Employee",
+      "exportMode": "Please choose an export mode",
+      "exportSingle": "Single Employee",
+      "exportAllEmployees": "All Employees",
+      "export": "Export",
+      "loadMonthNoWrite": "Load Month (No Write)",
+      "onlyAbsent": "Only Absent",
+      "onlyHolidayWorked": "Only Holiday Worked",
+      "onlyOnLeave": "Only on leave",
+      "dailyPreview": "Daily Attendance Preview",
+      "employee": "Employee",
+      "date": "Date",
+      "justification": "Justification (j)",
+      "result": "Result (R)",
+      "in": "In (E)",
+      "out": "Out (S)",
+      "psWorkingHours": "PS Working Hours (P0–P4)",
+      "savePsHours": "Save PS Hours",
+      "manualPunchEntry": "Manual Punch Entry",
+      "inE": "In (E)",
+      "outS": "Out (S)",
+      "saveManualPunch": "Save Manual Punch",
+      "allEmployeesUpToToday": "All Employees — Up to Today",
+      "from": "From",
+      "toAutoToday": "To (auto today)",
+      "psOptional": "PS (optional)",
+      "filterEmployees": "Filter employees (name or #)",
+      "loadUpToToday": "Load Up To Today",
+      "psTodayTitle": "PS ${psLabel} — Today's Attendance",
+      "loading": "Loading...",
+      "noEmployeesForPs": "No employees found for this PS.",
+      "month": "Month",
+      "year": "Year"
+      },
+       "commissions": {
+          "title": "Commissions",
+          "subtitle": "Configure default commission rates for gold, diamond, and watch sales. These are used by payslip commission logic.",
+      "tabGold": "Gold",
+      "tabDiamond": "Diamond",
+      "tabWatch": "Watch",
+      "watchCommissionTitle": "Watch — Percent of final sale price (%)",
+      "watchNotWired": "Watch commission settings are not wired into the APIs or database yet. Changing these values will not affect payslips until backend support is implemented.",
+      "employeesTitle": "Employees & commission roles",
+      "employeesLoading": "Loading employees...",
+      "employeesError": "Failed to load employees.",
+      "employeesEmpty": "No employees found.",
+      "employeesName": "Employee",
+      "employeesRole": "Commission role",
+          "savedOk": "Saved successfully. These rates apply to payslip commission calculations.",
+          "savedError": "Failed to save commission settings.",
+          "goldTitle": "Gold — Per-gram (LYD/g)",
+          "goldHint": "Sales Lead/Manager use grams aggregated from their PS scope (set per employee in profile).",
+          "diamondTitle": "Diamond — Percent of final sale price (%)",
+          "watchTitle": "Current commission settings (read-only)",
+          "watchGold": "Gold: {{val}} LYD/g",
+          "watchDiamond": "Diamond: {{val}} %",
+          "watchWatch": "Watch: {{val}} %",
+          "resetDefaults": "Reset to defaults",
+          "save": "Save",
+          "notesTitle": "Notes:",
+          "noteRolePs": "Set each employee's role and PS scope in their profile (Compensation section).",
+          "notePayslip": "Payslip PDF shows commission details in Earnings and in the \"Missing Hours & Commission\" table.",
+          "noteWatchNotWired": "Watch commissions are currently front-end only and do not update anything in the database or payroll APIs.",
+          "roles": {
+            "sales_rep": "Sales Rep",
+            "senior_sales_rep": "Senior Sales Rep",
+            "sales_lead": "Sales Lead",
+            "sales_manager": "Sales Manager"
+          }
+        },
+    "jobs": {
+        "title": "Jobs",
+        "add": "Add Job",
+        "edit": "Edit Job",
+        "users": "Employees",
+        "noEmployees": "No employees assigned",
+        "job_name": "Job Name",
+        "Job_title": "Job Title",
+        "Job_code": "Job Code",
+        "job_categories": "Job Categories",
+        "NBR_YEAR_FOR_JOB": "Years of Experience",
+        "table": {
+          "id": "ID",
+          "job_name": "Job Name",
+          "title": "Title",
+          "code": "Code",
+          "category": "Category",
+          "years": "Years",
+          "employees": "Employees"
+        },
+        "required": {
+          "job_name": "Job name is required",
+          "Job_title": "Job title is required",
+          "Job_code": "Job code is required",
+          "job_categories": "Job category is required",
+          "NBR_YEAR_FOR_JOB": "Years of experience is required"
+        }
+      },
+    "specialities": {
+      "title": "Specialities",
+      "add": "Add Speciality",
+      "edit": "Edit Speciality",
+      "name": "Speciality Name",
+      "empty": "No specialities found",
+      "table": {
+        "id": "ID",
+        "name": "Name"
+      },
+      "required": {
+        "name": "Speciality name is required"
+      }
+    },
+    "contractTypes": {
+      "title": "Contract Types",
+      "add": "Add Contract Type",
+      "edit": "Edit Contract Type",
+      "name": "Contract Name",
+      "code": "Contract Code",
+      "description": "Description",
+      "empty": "No contract types found",
+      "confirmDelete": "Are you sure you want to delete this contract type?",
+      "table": {
+        "id": "ID",
+        "name": "Name",
+        "code": "Code",
+        "description": "Description"
+      },
+      "required": {
+        "name": "Contract name is required"
+      }
+    },
+    "settings": {
+      "positions": {
+        "title": "Positions",
+        "desc": "Set up the positions for all employees."
+      },
+      "employeeProfile": {
+        "title": "Employee Profile",
+        "desc": "Set up the employee profile."
+      },
+      "bankAccounts": {
+        "title": "Bank Accounts",
+        "desc": "Set up the bank accounts for all employees."
+      },
+      "certificates": {
+        "title": "Certificates",
+        "desc": "Set up the certificates for all employees."
+      },
+      "specialities": {
+        "title": "Specialities",
+        "desc": "Set up the specialities for all employees."
+      },
+      "contractsTypes": {
+        "title": "Contracts Types",
+        "desc": "Set up the contracts types for all employees."
+      },
+      "leave": {
+    "vacations": {
+      "title": "Vacations",
+      "subtitle": "Company calendar and leave tools",
+      "employee": "Employee",
+      "allEmployees": "All employees",
+      "selected": "Showing data for",
+      "tools": "Leave Tools"
+    },
+    "pending": {
+      "title": "Review Leave Requests",
+      "tooltipOne": "Pending for this employee",
+      "tooltipAll": "Pending for all employees",
+      "open": "Open pending requests"
+    },
+        "title": "Leave",
+        "desc": "Set up the leave for all employees."
+      },
+      "positionsLevels": {
+        "title": "Positions Levels",
+        "desc": "Set up the positions levels."
+      },
+      "costCenters": {
+        "title": "Cost Centers",
+        "desc": "Set up the cost centers for all employees."
+      }
+    }
+  },
+  "leave": {
+    "status": {
+      "title": "Leave Status",
+      "searchPlaceholder": "Search by type or comment",
+      "filter": "Filter by status",
+      "all": "All",
+      "pending": "Pending",
+      "approved": "Approved",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled",
+      "type": "Leave Type",
+      "period": "Period",
+      "days": "Days",
+      "status": "Status",
+      "submitted": "Submitted Date",
+      "actions": "Actions",
+      "noRequests": "No leave requests found",
+      "fetchError": "Error fetching leave requests",
+      "actionFailed": "Action failed",
+      "noPending": "No pending requests"
+    },
+    "calendar": {
+      "title": "Leave Calendar",
+      "today": "Go to Today",
+      "dayView": "Day View",
+      "legend": "Legend appears when events load",
+      "weekView": "Week View",
+      "cancelLeave": "Cancel Leave",
+      "monthView": "Month View",
+      "requestLeave": "Request Leave",
+      "filters": "Filters",
+      "showLeaves": "Show leaves",
+      "showHolidays": "Show holidays",
+      "fetchError": "Error fetching calendar data",
+      "noEvents": "No events in this range"
+    },
+    "request": {
+      "title": "Leave Request",
+      "leaveType": "Leave Type",
+      "startDate": "Start Date",
+      "endDate": "End Date",
+      "contactNumber": "Contact Number",
+      "reason": "Reason for Leave",
+      "daysRequested": "Days Requested",
+      "submit": "Submit Leave Request",
+      "submitError": "Error submitting leave request",
+      "fetchError": "Error fetching leave types",
+      "success": "Leave request submitted successfully",
+      "validation": {
+        "required": "All fields are required",
+        "invalidDateRange": "End date must be after start date"
+      }
+    },
+    "balance": {
+      "title": "Leave Balance",
+      "totalLeaves": "Total Leaves",
+      "usedLeaves": "Used Leaves",
+      "remainingLeaves": "Remaining Leaves",
+      "accrued": "Accrued this year",
+      "accruedDays": "Accrued days",
+      "leaveHistory": "Leave History",
+      "type": "Type",
+      "status": "Status",
+      "fetchError": "Error fetching leave balance",
+      "employeeDetails": "Employee Details",
+      "employeeId": "Employee ID",
+      "department": "Department",
+      "costCenter": "Cost Center",
+      "monthlyLedger": "Monthly Leave Ledger",
+      "exportExcel": "Export to Excel",
+      "exportCsv": "Export CSV",
+      "month": "Month",
+      "credit": "Credit",
+      "debit": "Debit",
+      "balance": "Balance",
+      "details": "Details",
+      "noLedger": "No ledger to show",
+      "zeroedDueToYearlyLimit": "<< ZEROED DUE TO YEARLY LIMIT >>",
+      "rule45": "Using 45 days/year (age>=50 or exp>=20).",
+      "rule30": "Using 30 days/year (age<50 and exp<20).",
+      "turns50": "Turns 50 on",
+      "exp20": "20 years experience on",
+      "period": "Period",
+      "to": "TO",
+      "reportTitle": "Leave Balance Report",
+      "employeeInfo": "Employee Information",
+      "name": "Name:",
+      "empId": "Employee ID:",
+      "jobTitle": "Job Title:",
+      "ps": "PS:",
+      "approvedSection": "Approved Leave (Period)",
+      "approvedTotal": "Approved total in period",
+      "days": "days",
+      "distributionTitle": "Leave Distribution & Balance (Working Year)",
+      "noApprovedWorkingYear": "No approved leave found in the working year."
+    },
+    "codes": {
+      "title": "Code Management"
+    },
+    "holidays": {
+      "title": "Public Holidays",
+      "date": "Date",
+      "name": "Name",
+      "type": "Type",
+      "flags": "Flags",
+      "none": "No holidays in this view",
+      "addGlobal": "Add Holiday",
+      "pto": "PTO",
+      "doublePay": "Double Pay"
+    },
+    "types": {
+      "title": "Leave Types",
+      "annual": "Annual Leave",
+      "sick": "Sick Leave",
+      "personal": "Personal Leave",
+      "maternity": "Maternity Leave",
+      "paternity": "Paternity Leave",
+      "unpaid": "Unpaid Leave"
+    },
+    "vacations": {
+      "title": "Vacations",
+      "subtitle": "Company calendar and leave tools",
+      "employee": "Employee",
+      "allEmployees": "All employees",
+      "selected": "Showing data for",
+      "tools": "Leave Tools"
+    },
+    "pending": {
+      "title": "Review Leave Requests",
+      "tooltipOne": "Pending for this employee",
+      "tooltipAll": "Pending for all employees",
+      "open": "Open pending requests"
+    }
+  },
+  "finance": {
+    "settings": {
+      "currency": {
+        "title": "Currency",
+        "desc": "Configure system currency."
+      },
+      "coa": {
+        "title": "Chart of Accounts",
+        "desc": "Configure the company chart of accounts."
+      },
+      "accountsDistribution": {
+        "title": "Account Distribution",
+        "desc": "Configure account distributions."
+      },
+      "assetsTypes": {
+        "title": "Assets Types",
+        "desc": "Configure types of assets."
+      }
+    }
+  },
+  "sales": {
+    "cards": {
+      "products": {
+        "title": "Products",
+        "desc": "Set up product database and related settings."
+      },
+      "boxes": {
+        "title": "Boxes",
+        "desc": "Set up boxes database and related settings."
+      },
+      "customers": {
+        "title": "Customers",
+        "desc": "Set up customer database."
+      },
+      "brands": {
+        "title": "Brands",
+        "desc": "Manage brands and their details."
+      },
+      "itemTypes": {
+        "title": "Item Types",
+        "desc": "Organize item types for easier management."
+      },
+      "pos": {
+        "title": "POS",
+        "desc": "Configure POS devices and behaviors."
+      },
+      "marketingSource": {
+        "title": "Marketing Source",
+        "desc": "Configure marketing sources and their behavior."
+      },
+      "sellerBonus": {
+        "title": "Seller Bonus",
+        "desc": "Define seller bonus rules."
+      },
+      "salesShifts": {
+        "title": "Sales Shifts",
+        "desc": "Configure sales staff shifts."
+      },
+      "tempReservation": {
+        "title": "Temporary Reservations",
+        "desc": "Create and manage temporary reservations."
+      },
+      "salesApproval": {
+        "title": "Sales Approval Rules",
+        "desc": "Define sales approval conditions."
+      },
+      "salesDiscount": {
+        "title": "Discount Types",
+        "desc": "Configure discount categories and rules."
+      },
+      "chiraApproval": {
+        "title": "Chira Approval",
+        "desc": "Define rules for chira approvals."
+      },
+      "reportsConfig": {
+        "title": "Reports Config",
+        "desc": "Customize analytics reports."
+      },
+      "vendors": {
+        "title": "Vendors",
+        "desc": "List of vendors"
+      }
+    }
+  },
+  "purchases": {
+    "headers": {
+      "vendors": "Vendors",
+      "purchaseRef": "Purchase Ref. No",
+      "purchaseSysNo": "Purchase Sys. No",
+      "purchaseSummary": "Purchase Summary",
+      "purchaseDate": "Purchase Date",
+      "createdBy": "Created By",
+      "isClosed": "Closed?",
+      "comment": "Comment"
+    },
+    "labels": {
+      "gold": "Gold",
+      "diamond": "Diamond",
+      "watches": "Watches",
+      "boxes": "Boxes",
+      "distributionWarning": "New arrival has come and will be received soon. Please check the distribution list.",
+      "distributionNo": "Distribution No:",
+      "date": "Date:",
+      "brand": "Brand:",
+      "status": "Status:",
+      "received": "Received",
+      "notReceived": "Not Received",
+      "alreadyReceived": "Already Received:",
+      "rest": "Rest:",
+      "products": "Product",
+      "items": "Items",
+      "newPurchase": "New Purchase",
+      "back": "Back",
+      "editPurchase": "Edit Purchase No:",
+      "newPurchaseNo": "New Purchase No:",
+      "referencePurchase": "Reference Purchase",
+      "dateLabel": "Date",
+      "vendor": "Choose Vendor",
+      "fullWeight": "Full Weight",
+      "netWeight": "Net Weight",
+      "productName": "Product Name",
+      "stoneColor": "Stone Color",
+      "goldColor": "Gold Color",
+      "sellingPrice": "Selling Price",
+      "currency": "Currency",
+      "exchangeRate": "Exchange Rate",
+      "costLYD": "Cost (LYD)",
+      "total": "Total",
+      "receivedShort": "Received",
+      "restShort": "Rest",
+      "numberOfItems": "Number Of Items",
+      "stickerPreview": "Sticker Preview",
+      "confirmDeletion": "Confirm Deletion",
+      "confirmDeletionMsg": "Are you sure you want to delete this product #{{num}}?",
+      "irreversible": "This action cannot be undone!"
+    }
+  },
+  "Breakdown": "Breakdown",
+  "Reimbursements": "Reimbursements",
+  "Actions": "Actions",
+  "Export CSV": "Export CSV",
+  "Export PDF": "Export PDF",
+  "Save Month": "Save Month",
+  "Close Month": "Close Month",
+  "Profile Picture": "Profile Picture",
+  "Employees": "Employees",
+  "Employee": "Employee",
+  "Period": "Period",
+  "Working Days": "Working Days",
+  "Deduction Days": "Deduction Days",
+  "Present Days": "Present Days",
+  "Holidays Worked": "Holidays Worked",
+  "Absence": "Absence",
+  "Food Allowance": "Food Allowance",
+  "Fuel Allowance": "Fuel Allowance",
+  "Communication Allowance": "Communication Allowance",
+  "Base Pay": "Base Pay",
+  "Allowance Pay": "Allowance Pay",
+  "Sales Qty": "Sales Qty",
+  "Sales Total (LYD)": "Sales Total (LYD)",
+  "Gold Commission": "Gold Commission",
+  "Diamond Commission": "Diamond Commission",
+  "Total (LYD)": "Total (LYD)",
+  "Total (USD)": "Total (USD)",
+  "Gross": "Gross",
+  "Total": "Total",
+  "Totals": "Totals",
+  "Payroll": "Payroll",
+  "Salary Advance": "Salary Advance",
+  "Loans": "Loans",
+  "Settings": "Settings",
+  "Position": "Position",
+  "All Positions": "All Positions",
+  "Send Payslips": "Send Payslips",
+  "Payslip": "Payslip",
+  "Send": "Send",
+  "LYD": "LYD",
+  "Search": "Search"
+}

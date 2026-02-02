@@ -1,0 +1,15 @@
+[
+  {
+    "id": "tkt_1761139500632",
+    "status": "created",
+    "subject": "أبّي الموعد في 2025-10-22 17:00",
+    "customer": {
+      "name": "استفسار على قطعة",
+      "phone": "2025102217"
+    },
+    "message": "Price of 12345",
+    "channel": "web",
+    "consent": true,
+    "createdAt": "2025-10-22T13:25:00.633Z"
+  }
+]
