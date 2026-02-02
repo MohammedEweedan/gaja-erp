@@ -243,5 +243,57 @@
         "updatedAt": "2025-12-20T14:50:44.635Z"
       }
     ]
+  },
+  "2026-01": {
+    "16": [
+      {
+        "id": 1769872371556,
+        "type": "advance",
+        "recurring": false,
+        "amount": 600,
+        "currency": "LYD",
+        "note": "salary advance",
+        "ts": "2026-01-31T15:12:51.225Z"
+      }
+    ],
+    "74": [
+      {
+        "id": 1769873843549,
+        "type": "bonus",
+        "label": "Bonus",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 1234,
+        "currency": "LYD",
+        "note": "",
+        "ts": "2026-01-31T15:37:23.240Z"
+      }
+    ]
+  },
+  "2026-02": {
+    "74": [
+      {
+        "id": 1769960551492,
+        "type": "bonus",
+        "label": "Bonus",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 1234,
+        "currency": "LYD",
+        "note": "TEST",
+        "ts": "2026-02-01T15:42:31.068Z"
+      },
+      {
+        "id": 1769960801233,
+        "type": "eid_bonus",
+        "label": "Eid Bonus",
+        "direction": "ADD",
+        "recurring": false,
+        "amount": 100,
+        "currency": "USD",
+        "note": "ُ]",
+        "ts": "2026-02-01T15:46:40.670Z"
+      }
+    ]
   }
 }

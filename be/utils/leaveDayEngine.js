@@ -150,19 +150,7 @@ const getExpandedHolidaysBetween = async (startISO, endISO) => {
     const guess = approximateHijriYearForGregorian(y);
     const hijriYears = [guess - 1, guess, guess + 1];
     for (const hy of hijriYears) {
-      let iso = hijriToGregorianISO(hy, 1, 1);
-      addIfInRange('Islamic New Year (1 Muharram)', iso);
-      iso = hijriToGregorianISO(hy, 1, 10);
-      addIfInRange('Ashura (10 Muharram)', iso);
-      iso = hijriToGregorianISO(hy, 3, 12);
-      addIfInRange("Mawlid an-Nabi (12 Rabi' al-awwal)", iso);
-
-      for (let d = 1; d <= 30; d++) {
-        iso = hijriToGregorianISO(hy, 9, d);
-        addIfInRange('Ramadan', iso);
-      }
-
-      iso = hijriToGregorianISO(hy, 10, 1);
+      let iso = hijriToGregorianISO(hy, 10, 1);
       const ef = parseYMDToUTCDate(iso);
       if (!isNaN(ef.getTime())) {
         for (let i = 0; i < 3; i++) {

@@ -77,38 +77,8 @@ exports.getHolidays = [
             }
           }
         }
-
-        // Islamic set (civil approximation) for relevant Hijri years overlapping [s,e]
-        const addIfInRange = (name, iso) => {
-          const d = new Date(iso);
-          if (d >= s && d <= e) {
-            computed.push({ DATE_H: iso, HOLIDAY_NAME: name, HOLIDAY_TYPE: 'variable', COMMENT_H: null, PTO: true, DOUBLE_PAY: true });
-          }
-        };
-        for (let y = startYear - 1; y <= endYear + 1; y++) {
-          const guess = approximateHijriYearForGregorian(y);
-          const hijriYears = [guess - 1, guess, guess + 1];
-          for (const hy of hijriYears) {
-            // Islamic New Year (1 Muharram)
-            let iso = hijriToGregorianISO(hy, 1, 1); addIfInRange('Islamic New Year (1 Muharram)', iso);
-            // Ashura (10 Muharram)
-            iso = hijriToGregorianISO(hy, 1, 10); addIfInRange('Ashura (10 Muharram)', iso);
-            // Mawlid (12 Rabi\' al-awwal)
-            iso = hijriToGregorianISO(hy, 3, 12); addIfInRange("Mawlid an-Nabi (12 Rabi' al-awwal)", iso);
-            // Ramadan (1..30 of month 9)
-            for (let d = 1; d <= 30; d++) {
-              iso = hijriToGregorianISO(hy, 9, d); addIfInRange('Ramadan', iso);
-            }
-            // Eid al-Fitr (1 Shawwal) + 2
-            iso = hijriToGregorianISO(hy, 10, 1);
-            const ef = new Date(iso);
-            for (let i = 0; i < 3; i++) addIfInRange('Eid al-Fitr', new Date(ef.getTime() + i*86400000).toISOString().slice(0,10));
-            // Eid al-Adha (10 Dhu al-Hijjah) + 3
-            iso = hijriToGregorianISO(hy, 12, 10);
-            const ea = new Date(iso);
-            for (let i = 0; i < 4; i++) addIfInRange('Eid al-Adha', new Date(ea.getTime() + i*86400000).toISOString().slice(0,10));
-          }
-        }
+        
+        // Islamic holidays (Eid, Ramadan, etc.) are no longer auto-generated.
 
         // Merge DB expanded and computed, de-duplicate by DATE_H + name (name fallback to COMMENT_H)
         const map = new Map();
@@ -168,46 +138,10 @@ exports.seedIslamicForYear = [
     try {
       const gy = Number(req.params.year);
       if (!gy || gy < 1900 || gy > 2100) return res.status(400).json({ message: 'Invalid year' });
-      const guess = approximateHijriYearForGregorian(gy);
-      const hijriYears = [guess - 1, guess, guess + 1];
-      let created = 0;
-      for (const hy of hijriYears) {
-        // Islamic New Year (1 Muharram)
-        let iso = hijriToGregorianISO(hy, 1, 1);
-        if (iso.startsWith(String(gy))) { await ensureHolidayVariable('Islamic New Year (1 Muharram)', iso); created++; }
-        // Ashura (10 Muharram)
-        iso = hijriToGregorianISO(hy, 1, 10);
-        if (iso.startsWith(String(gy))) { await ensureHolidayVariable('Ashura (10 Muharram)', iso); created++; }
-        // Mawlid (12 Rabi' al-awwal)
-        iso = hijriToGregorianISO(hy, 3, 12);
-        if (iso.startsWith(String(gy))) { await ensureHolidayVariable("Mawlid an-Nabi (12 Rabi' al-awwal)", iso); created++; }
-        // Ramadan (month 9) — civil calendar assumes 30 days
-        for (let d = 1; d <= 30; d++) {
-          iso = hijriToGregorianISO(hy, 9, d);
-          if (iso.startsWith(String(gy))) { await ensureHolidayVariable('Ramadan', iso); created++; }
-        }
-        // Eid al-Fitr (1 Shawwal) + 2 days
-        iso = hijriToGregorianISO(hy, 10, 1);
-        if (iso.startsWith(String(gy))) {
-          const d = new Date(iso);
-          for (let i = 0; i < 3; i++) {
-            const dayIso = new Date(d.getTime() + i * 86400000).toISOString().slice(0, 10);
-            await ensureHolidayVariable('Eid al-Fitr', dayIso);
-            created++;
-          }
-        }
-        // Eid al-Adha (10 Dhu al-Hijjah) + 3 days
-        iso = hijriToGregorianISO(hy, 12, 10);
-        if (iso.startsWith(String(gy))) {
-          const d = new Date(iso);
-          for (let i = 0; i < 4; i++) {
-            const dayIso = new Date(d.getTime() + i * 86400000).toISOString().slice(0, 10);
-            await ensureHolidayVariable('Eid al-Adha', dayIso);
-            created++;
-          }
-        }
-      }
-      res.json({ message: `Islamic holidays ensured for ${gy}`, created });
+      res.json({
+        message: 'Automatic Islamic holiday seeding has been disabled. Please add desired holidays manually.',
+        created: 0,
+      });
     } catch (err) {
       console.error('seedIslamicForYear error:', err);
       res.status(500).json({ message: 'Error seeding Islamic holidays' });
