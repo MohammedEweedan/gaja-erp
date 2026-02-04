@@ -1752,21 +1752,33 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
         const emps = result?.employees || [];
         const mp: Record<number, number> = {};
         const cs: Record<number, string | null> = {};
-        for (const e of emps) {
-          try {
-            const res = await getTimesheetMonth(e.id_emp, year, month);
-            const days = res?.data || [];
-            mp[e.id_emp] = days.filter((d: any) => !!d?.present).length;
-          } catch {}
-          try {
-            const r = await fetch(`http://localhost:9000/api/employees/${e.id_emp}`, { headers: authHeader() as unknown as HeadersInit });
-            if (r.ok) {
-              const js = await r.json();
-              const obj = js?.data ?? js;
-              cs[e.id_emp] = obj?.CONTRACT_START || obj?.contract_start || obj?.contractStart || null;
-            }
-          } catch {}
-        }
+        await Promise.all(
+          (emps || []).map(async (e) => {
+            const id = Number(e.id_emp);
+            if (!Number.isFinite(id)) return;
+            await Promise.all([
+              (async () => {
+                try {
+                  const res = await getTimesheetMonth(id, year, month);
+                  const days = res?.data || [];
+                  mp[id] = days.filter((d: any) => !!d?.present).length;
+                } catch {}
+              })(),
+              (async () => {
+                try {
+                  const r = await fetch(`http://localhost:9000/api/employees/${id}`,
+                    { headers: authHeader() as unknown as HeadersInit }
+                  );
+                  if (r.ok) {
+                    const js = await r.json();
+                    const obj = js?.data ?? js;
+                    cs[id] = obj?.CONTRACT_START || obj?.contract_start || obj?.contractStart || null;
+                  }
+                } catch {}
+              })(),
+            ]);
+          })
+        );
         setPresentDaysMap(mp);
         setContractStartMap(cs);
       } catch { setPresentDaysMap({}); }
@@ -1781,122 +1793,8 @@ const computePPhPhf = (e: Payslip): PPhPhfVals => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month, ps, tab]);
 
-  // Recompute Gold commissions for all employees based on selected weight mode
-  React.useEffect(() => {
-    (async () => {
-      try {
-        if (!result || !Array.isArray(v2Rows) || v2Rows.length === 0) return;
-        const monthStartISO = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).format('YYYY-MM-DD');
-        const monthEndISO = dayjs(`${year}-${String(month).padStart(2,'0')}-01`).endOf('month').format('YYYY-MM-DD');
-
-        // Load employees to resolve seller userId, role, and PS scope
-        let empList: any[] = [];
-        try { empList = await listEmployees() as any[]; } catch {}
-        const empMeta = new Map<number, { sellerUserId: number | null; roleKey: string; psScope: number[]; psFallback: number | null }>();
-        for (const e of (empList || [])) {
-          const id = Number(e?.ID_EMP ?? e?.id_emp ?? e?.id);
-          if (!Number.isFinite(id)) continue;
-          let roleKey = '';
-          let psScope: number[] = [];
-          let sellerUserId: number | null = null;
-          try {
-            const jd = e?.JOB_DESCRIPTION ? JSON.parse(e.JOB_DESCRIPTION) : {};
-            const sid = jd?.__sales__?.userId ?? jd?.__seller__?.userId ?? null;
-            if (sid != null && !Number.isNaN(Number(sid))) sellerUserId = Number(sid);
-            roleKey = String(jd?.__commissions__?.role || '').toLowerCase();
-            const psList = jd?.__commissions__?.ps;
-            if (Array.isArray(psList)) psScope = psList.map((x:any)=>Number(x)).filter((n:number)=>Number.isFinite(n));
-          } catch {}
-          const psFallback = Number(e?.PS ?? e?.ps ?? NaN);
-          empMeta.set(id, { sellerUserId, roleKey, psScope, psFallback: Number.isFinite(psFallback) ? Number(psFallback) : null });
-        }
-
-        // Fetch all invoice details once and aggregate gold grams by user and by PS
-        let rowsAll: any[] = [];
-        try {
-          const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-          const r = await fetch(`http://localhost:9000/api/invoices/allDetailsP?${qs}`, { headers: authHeader() as unknown as HeadersInit });
-          if (r.ok) rowsAll = await r.json();
-        } catch {}
-        const gramsByUser = new Map<number, number>();
-        const gramsByPs = new Map<number, number>();
-        for (const row of (Array.isArray(rowsAll) ? rowsAll : [])) {
-          const typeRaw = String(row?.ACHATs?.[0]?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
-          if (!typeRaw.includes('gold')) continue;
-          const achats = Array.isArray(row?.ACHATs) ? row.ACHATs : [];
-          let grams = 0;
-          for (const a of achats) {
-            const st = String(a?.Fournisseur?.TYPE_SUPPLIER || '').toLowerCase();
-            if (st.includes('gold')) {
-              const q = Number(a?.qty || 0);
-              if (!Number.isNaN(q)) grams += q;
-            }
-          }
-          if (grams <= 0) continue;
-          const uid = Number(row?.Utilisateur?.id_user ?? row?.user_id ?? NaN);
-          if (Number.isFinite(uid)) gramsByUser.set(uid, (gramsByUser.get(uid) || 0) + grams);
-          const psVal = Number(row?.ps ?? row?.PS ?? NaN);
-          if (Number.isFinite(psVal)) gramsByPs.set(psVal, (gramsByPs.get(psVal) || 0) + grams);
-        }
-
-        // Load commission settings (role -> LYD/g)
-        const commissionSettings = (() => {
-          try {
-            const raw = localStorage.getItem('commissionSettingsV1');
-            if (!raw) throw new Error('no settings');
-            const cfg = JSON.parse(raw);
-            return cfg && typeof cfg === 'object' ? cfg : {};
-          } catch { return {} as any; }
-        })();
-        const goldRates: Record<string, number> = {
-          sales_rep: 1,
-          senior_sales_rep: 1.25,
-          sales_lead: 1.5,
-          sales_manager: 1.5,
-          ...(commissionSettings.gold || {}),
-        };
-
-        // Build updated rows with new gold_bonus_lyd
-        const byId = new Map<number, any>();
-        (v2Rows || []).forEach((r:any) => byId.set(Number(r.id_emp), r));
-        const changed: any[] = [];
-        for (const emp of (result?.employees || [])) {
-          const id = Number((emp as any).id_emp);
-          const base = byId.get(id) || {};
-          const meta = empMeta.get(id);
-          if (!meta || meta.sellerUserId == null) continue;
-          const roleKey = String(meta.roleKey || '').toLowerCase();
-          const goldRate = goldRates[roleKey] ?? 0;
-          if (!goldRate) continue;
-          let gramsUsed = 0;
-          if (commissionWeightMode === 'total') {
-            const scope = (meta.psScope && meta.psScope.length > 0) ? meta.psScope : (meta.psFallback != null ? [meta.psFallback] : []);
-            for (const p of scope) gramsUsed += (gramsByPs.get(Number(p)) || 0);
-          } else {
-            gramsUsed = gramsByUser.get(Number(meta.sellerUserId)) || 0;
-          }
-          const newBonus = Number((gramsUsed * goldRate).toFixed(2));
-          const oldBonus = Number(base.gold_bonus_lyd || 0);
-          if (Math.abs(newBonus - oldBonus) > 0.009) {
-            const updated = { ...base, id_emp: id, gold_bonus_lyd: newBonus };
-            changed.push(updated);
-          }
-        }
-        if (changed.length > 0) {
-          setV2Rows((prev:any[]) => {
-            const map = new Map<number, any>();
-            (prev||[]).forEach((r:any)=> map.set(Number(r.id_emp), r));
-            for (const u of changed) map.set(Number(u.id_emp), { ...map.get(Number(u.id_emp)), ...u });
-            return Array.from(map.values());
-          });
-          try {
-            if (!viewOnly) await savePayrollV2({ year, month, rows: changed });
-          } catch {}
-        }
-      } catch {}
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commissionWeightMode, year, month]);
+  // NOTE: Gold commission is computed by the backend payroll engine.
+  // Avoid recomputing it client-side (which was slow and could diverge from backend truth).
 
   // Sort/filter helpers
   const sortRows = React.useCallback((rows: Payslip[]) => {
@@ -2317,67 +2215,6 @@ const computeCommissionFromInvoicesLikePdf = (emp: any, profile: any, rowsAll: a
 const [commissionMapUI, setCommissionMapUI] = React.useState<Record<number, CommissionResult>>({});
 const [commissionLoadingUI, setCommissionLoadingUI] = React.useState(false);
 
-React.useEffect(() => {
-  let cancelled = false;
-
-  const run = async () => {
-    try {
-      const list = (displayedRows || []).map((x: any) => Number(x.id_emp)).filter(Boolean);
-      if (!list.length) {
-        setCommissionMapUI({});
-        return;
-      }
-
-      setCommissionLoadingUI(true);
-
-      const periodStart = `${year}-${String(month).padStart(2, "0")}-01`;
-      const monthStartISO = dayjs(periodStart).format("YYYY-MM-DD");
-      const monthEndISO = dayjs(periodStart).endOf("month").format("YYYY-MM-DD");
-      const qs = new URLSearchParams({ from: monthStartISO, to: monthEndISO }).toString();
-
-      const invRes = await fetch(`http://localhost:9000/api/invoices/allDetailsP?${qs}`, {
-        headers: authHeader() as unknown as HeadersInit,
-      });
-
-      const invJson = invRes.ok ? await invRes.json() : [];
-      const rowsAll: any[] = Array.isArray(invJson) ? invJson : [];
-
-      const results: Record<number, CommissionResult> = {};
-
-      await Promise.all(
-        (displayedRows || []).map(async (emp: any) => {
-          const empId = Number(emp.id_emp);
-          if (!empId) return;
-
-          let empObj: any = null;
-          try {
-            const r = await fetch(`http://localhost:9000/api/employees/${empId}`, {
-              headers: authHeader() as unknown as HeadersInit,
-            });
-            if (r.ok) {
-              const payload = await r.json();
-              empObj = payload?.data ?? payload;
-            }
-          } catch {}
-
-          const profile = parseEmployeeCommissionProfile(empObj || {}, emp);
-          results[empId] = computeCommissionFromInvoicesLikePdf(emp, profile, rowsAll);
-        })
-      );
-
-      if (!cancelled) setCommissionMapUI(results);
-    } finally {
-      if (!cancelled) setCommissionLoadingUI(false);
-    }
-  };
-
-  run();
-
-  return () => {
-    cancelled = true;
-  };
-}, [year, month, displayedRows]);
-
   // Totals for current view
   const totals = React.useMemo(() => {
     const t = {
@@ -2462,7 +2299,7 @@ React.useEffect(() => {
       // Latency minutes for totals row: use backend attendance minutes so
       // that the displayed hours match the monetary latency_lyd value.
       const backendLatMin =
-        Number((vr as any).latencyMinutes ?? (vr as any).missing_minutes ?? tsAgg?.[id]?.displayMissingMinutes ?? 0) || 0;
+        Number(tsAgg?.[id]?.displayMissingMinutes ?? (vr as any).latencyMinutes ?? (vr as any).missing_minutes ?? 0) || 0;
       t.latencyMinutes += backendLatMin;
     });
     return t;
@@ -2737,8 +2574,12 @@ React.useEffect(() => {
                 };
               });
 
-              // Use shared utility to build aggregation
-              agg[e.id_emp] = buildPayrollAggregation(e.id_emp, timesheetDays, new Set());
+              // Use shared utility to build aggregation (same tolerance logic as TimeSheetsPage)
+              agg[e.id_emp] = buildPayrollAggregation(
+                e.id_emp,
+                timesheetDays,
+                new Set<string>(Array.from(holidaySet || []))
+              );
             } catch {
               // ignore per-employee errors
             }
@@ -4873,27 +4714,22 @@ React.useEffect(() => {
 
   const resolveCommissionFigures = (emp: Payslip) => {
     const empId = Number(emp.id_emp);
-    const comm = commissionMapUI[empId];
     const vr = getVrForEmp(empId);
 
-    const goldGramsUi = Number(comm?.goldGramsUsed);
-    const goldGrams = Number.isFinite(goldGramsUi)
-      ? goldGramsUi
-      : Number(getGoldGrams(empId) || 0);
+    // Authoritative sales qty/total come from backend sales-metrics map
+    const s = sales[String(empId)] || { qty: 0, total_lyd: 0 };
+    const goldGrams = Number(s.qty || 0) || 0;
 
-    const diamondGramsUi = Number(comm?.diamondItems);
-    const diamondGrams = Number.isFinite(diamondGramsUi)
-      ? diamondGramsUi
-      : Number(getDiamondGrams(empId) || 0);
+    const diamondGrams = Number(getDiamondGrams(empId) || 0);
 
     const goldLyd = preferCommissionValue(
-      comm?.goldBonusLyd,
+      undefined,
       (vr as any)?.gold_bonus_lyd,
       (emp as any)?.gold_bonus_lyd
     );
 
     const diamondLyd = preferCommissionValue(
-      comm?.diamondBonusLyd,
+      undefined,
       (vr as any)?.diamond_bonus_lyd,
       (emp as any)?.diamond_bonus_lyd
     );
@@ -4916,7 +4752,7 @@ React.useEffect(() => {
       },
       { grams: 0, lyd: 0 }
     );
-  }, [displayedRows, commissionMapUI, v2Rows]);
+  }, [displayedRows, sales, v2Rows]);
 
   const totalsDiamond = React.useMemo(() => {
     return (displayedRows || []).reduce(
@@ -6822,6 +6658,26 @@ React.useEffect(() => {
                   </TableCell>
                 )}
 
+                {/* Sales Qty */}
+                {cols.salesQty && (
+                  <TableCell align="right" sx={{ width: 64 }}>
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
+                      <span>{t("Sales Qty") || "Sales Qty"}</span>
+                      <span style={{ fontSize: 9, color: "#999" }}>(g)</span>
+                    </Box>
+                  </TableCell>
+                )}
+
+                {/* Sales Total */}
+                {cols.salesTotal && (
+                  <TableCell align="right" sx={{ width: 84 }}>
+                    <Box display="flex" flexDirection="column" alignItems="flex-end">
+                      <span>{t("Sales Total") || "Sales Total"}</span>
+                      <span style={{ fontSize: 9, color: "#65a8bf" }}>(LYD)</span>
+                    </Box>
+                  </TableCell>
+                )}
+
                  {/* Latency/Missing Hours */}
                 {cols.latency && (
                   <TableCell align="right" sx={{ width: 90 }}>
@@ -7129,8 +6985,31 @@ React.useEffect(() => {
                     {cols.gold && (
                       <TableCell align="right" sx={{ width: 120 }}>
                         <Box component="span">
-                          {goldGrams > 0 ? <><Box component="span" sx={{ fontWeight: 700 }}>{goldGrams.toLocaleString(undefined, { maximumFractionDigits: 2 })} g</Box>{"  "}</> : null}
-                          <Box component="span" sx={{ color: "#65a8bf", fontWeight: 700 }}>{formatMoney(goldLyd)}</Box>
+                          {(() => {
+                            const s = sales[String(e.id_emp)] || { qty: 0, total_lyd: 0 };
+                            const goldSalesLyd = Number(s.total_lyd || 0) || 0;
+                            const grams = Number(s.qty || 0) || 0;
+                            return (
+                              <>
+                                {goldSalesLyd ? (
+                                  <Box component="span" sx={{ color: "#65a8bf", fontWeight: 700 }}>
+                                    {formatMoney(goldSalesLyd)}
+                                  </Box>
+                                ) : (
+                                  <Box component="span" sx={{ color: "#65a8bf", fontWeight: 700 }}>
+                                    {formatMoney(0)}
+                                  </Box>
+                                )}
+                                {(grams > 0 || Number(goldLyd || 0) > 0) ? (
+                                  <Box component="span" sx={{ display: "block", fontSize: 11, opacity: 0.85 }}>
+                                    {grams > 0 ? `${grams.toLocaleString(undefined, { maximumFractionDigits: 2 })} g` : ""}
+                                    {grams > 0 && Number(goldLyd || 0) > 0 ? " | " : ""}
+                                    {Number(goldLyd || 0) > 0 ? `Bonus: ${formatMoney(goldLyd)}` : ""}
+                                  </Box>
+                                ) : null}
+                              </>
+                            );
+                          })()}
                         </Box>
                       </TableCell>
                     )}
@@ -7177,6 +7056,26 @@ React.useEffect(() => {
                       </TableCell>
                     )}
 
+                    {cols.salesQty && (
+                      <TableCell align="right" sx={{ width: 64 }}>
+                        {(() => {
+                          const s = sales[String(e.id_emp)] || { qty: 0, total_lyd: 0 };
+                          const v = Number(s.qty || 0) || 0;
+                          return v ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "";
+                        })()}
+                      </TableCell>
+                    )}
+
+                    {cols.salesTotal && (
+                      <TableCell align="right" sx={{ width: 84 }}>
+                        {(() => {
+                          const s = sales[String(e.id_emp)] || { qty: 0, total_lyd: 0 };
+                          const v = Number(s.total_lyd || 0) || 0;
+                          return v ? <Box component="span" sx={{ color: "#65a8bf" }}>{formatMoney(v)}</Box> : "";
+                        })()}
+                      </TableCell>
+                    )}
+
                     {/* Latency/Missing Hours */}
                     {cols.latency && (
                       <TableCell align="right" sx={{ width: 90 }}>
@@ -7184,7 +7083,7 @@ React.useEffect(() => {
                           const vr = (v2Rows || []).find((x: any) => Number(x.id_emp) === Number(e.id_emp)) || {};
                           const latencyLyd = Number((vr as any).missing_lyd || (vr as any).latency_lyd || 0) || 0;
                           const latencyUsd = Number((vr as any).missing_usd || (vr as any).latency_usd || 0) || 0;
-                          const latencyMin = Number((vr as any).missing_minutes || (vr as any).latencyMinutes || tsAgg?.[Number(e.id_emp)]?.displayMissingMinutes || 0) || 0;
+                          const latencyMin = Number(tsAgg?.[Number(e.id_emp)]?.displayMissingMinutes ?? (vr as any).missing_minutes ?? (vr as any).latencyMinutes ?? 0) || 0;
                           if (!latencyLyd && !latencyUsd && !latencyMin) return "";
                           const hh = Math.floor(latencyMin / 60);
                           const mm = Math.floor(latencyMin % 60);

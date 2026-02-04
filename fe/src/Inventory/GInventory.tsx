@@ -169,7 +169,7 @@ const GInventory = (props: Props) => {
       } catch {
         // Not a URL; if it looks like images/<path>, force absolute on prod host
         const rel = s.replace(/^\/+/, "");
-        if (/^images\//i.test(rel)) return `http://localhost:9000/${rel}`;
+        if (/^images\//i.test(rel)) return `http://localhost:9000/api/${rel}`;
         return s;
       }
 
@@ -180,7 +180,7 @@ const GInventory = (props: Props) => {
 
       // If this is an images or uploads route, always pin to prod host over https
       if (/^\/(images|uploads)\//i.test(pathname)) {
-        return `http://localhost:9000${pathAndQuery}`;
+        return `http://localhost:9000/api${pathAndQuery}`;
       }
       // If host already system.gaja.ly, ensure https
       if (/^system\.gaja\.ly$/i.test(hostLower)) {
@@ -584,11 +584,11 @@ const GInventory = (props: Props) => {
       const hostLower = parsed.hostname.toLowerCase();
       const pathAndQuery = parsed.pathname + (parsed.search || "") + (parsed.hash || "");
       if (/^system\.gaja\.ly$/i.test(hostLower)) return `https://${parsed.host}${pathAndQuery}`;
-      if (/^\/(images|uploads)\//i.test(parsed.pathname)) return `http://localhost:9000${pathAndQuery}`;
+      if (/^\/(images|uploads)\//i.test(parsed.pathname)) return `http://localhost:9000/api${pathAndQuery}`;
       return parsed.toString();
     } catch {
       const rel = String(u).replace(/^\/+/, "");
-      if (/^images\//i.test(rel)) return `http://localhost:9000/${rel}`;
+      if (/^images\//i.test(rel)) return `http://localhost:9000/api/${rel}`;
       return String(u);
     }
   };

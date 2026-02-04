@@ -110,8 +110,8 @@ const allowedOrigins = [
   // file #1 (kept)
   "http://localhost:3000",
   "http://localhost:8000",
-  "http://localhost:9000",
-  "http://localhost:9000:8000",
+  "http://localhost:9000/api",
+  "http://localhost:9000/api:8000",
 
   // file #2 (kept)
   "http://102.213.182.8:3000",

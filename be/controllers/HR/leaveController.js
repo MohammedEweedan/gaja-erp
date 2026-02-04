@@ -197,61 +197,49 @@ async function buildAccrualLedger(employee) {
   const annualEnt = await computeAnnualEntitlement(employee);
   const rate = monthlyAccrualRate(annualEnt); // per month
   const today = new Date();
-  
-  // Start from contract start date (not just current year) to support carry-forward
-  const contractStart = employee.CONTRACT_START ? new Date(employee.CONTRACT_START) : null;
-  if (!contractStart) {
-    // No contract start - use current year only
-    const yearStart = new Date(`${today.getFullYear()}-01-01T00:00:00Z`);
-    const ledger = [];
-    let cursor = new Date(Date.UTC(yearStart.getUTCFullYear(), yearStart.getUTCMonth(), 1));
-    let endMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    let running = 0;
-    while (cursor <= endMonth) {
-      running += rate;
-      ledger.push({
-        month: cursor.toISOString().slice(0,7),
-        accrued: Number(rate.toFixed(2)),
-        runningTotal: Number(running.toFixed(2)),
-      });
-      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
-    }
-    return { annualEntitlement: annualEnt, monthlyRate: rate, accruedToDate: Number(running.toFixed(2)), ledger, carryForward: 0 };
-  }
+  const dailyRate = rate / 30;
 
-  // Calculate total accrued from contract start to today (supports carry-forward)
+  // Reset at year end: calculate accrual ONLY within the current calendar year
+  const yearStart = new Date(Date.UTC(today.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
+  const contractStart = employee.CONTRACT_START ? new Date(employee.CONTRACT_START) : null;
+  const windowStart = contractStart && contractStart > yearStart ? contractStart : yearStart;
+
+  const clampEarnedDays = (a, b) => {
+    const start = new Date(Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate()));
+    const end = new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate()));
+    const ms = end.getTime() - start.getTime();
+    const days = ms < 0 ? 0 : Math.floor(ms / 86400000) + 1;
+    return Math.max(0, Math.min(30, days));
+  };
+
+  const endMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const ledger = [];
-  let cursor = new Date(Date.UTC(contractStart.getUTCFullYear(), contractStart.getUTCMonth(), 1));
-  let endMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  let cursor = new Date(Date.UTC(windowStart.getUTCFullYear(), windowStart.getUTCMonth(), 1));
   let running = 0;
-  
+
   while (cursor <= endMonth) {
-    running += rate;
+    const monthStart = cursor;
+    const monthEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    const effectiveStart = windowStart > monthStart ? windowStart : monthStart;
+    const effectiveEnd = today < monthEnd ? today : monthEnd;
+    const earnedDays = clampEarnedDays(effectiveStart, effectiveEnd);
+    const accrued = dailyRate * earnedDays;
+    running += accrued;
     ledger.push({
-      month: cursor.toISOString().slice(0,7),
-      accrued: Number(rate.toFixed(2)),
+      month: cursor.toISOString().slice(0, 7),
+      accrued: Number(accrued.toFixed(2)),
       runningTotal: Number(running.toFixed(2)),
     });
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
   }
-  
-  const totalAccrued = Number(running.toFixed(2));
-  
-  // Calculate carry-forward: total accrued from previous years
-  const currentYearStart = new Date(`${today.getFullYear()}-01-01T00:00:00Z`);
-  let carryForward = 0;
-  if (contractStart < currentYearStart) {
-    // Count months from contract start to end of previous year
-    let prevCursor = new Date(Date.UTC(contractStart.getUTCFullYear(), contractStart.getUTCMonth(), 1));
-    const prevYearEnd = new Date(Date.UTC(today.getFullYear() - 1, 11, 1)); // Dec of previous year
-    while (prevCursor <= prevYearEnd) {
-      carryForward += rate;
-      prevCursor = new Date(Date.UTC(prevCursor.getUTCFullYear(), prevCursor.getUTCMonth() + 1, 1));
-    }
-    carryForward = Number(carryForward.toFixed(2));
-  }
-  
-  return { annualEntitlement: annualEnt, monthlyRate: rate, accruedToDate: totalAccrued, ledger, carryForward };
+
+  return {
+    annualEntitlement: annualEnt,
+    monthlyRate: rate,
+    accruedToDate: Number(running.toFixed(2)),
+    ledger,
+    carryForward: 0,
+  };
 }
 
 async function buildDeductionLedger(employeeId, fromContractStart = false) {
@@ -633,16 +621,14 @@ exports.getLeaveBalance = [
       // Build accrual from contract start (includes carry-forward)
       const { annualEntitlement, monthlyRate, accruedToDate, carryForward } = await buildAccrualLedger(emp);
       
-      // Get ALL deductions from contract start for accurate remaining balance
-      const { entries, deductedToDate } = await buildDeductionLedger(employeeId, true);
+      // Get deductions within the current year (balance resets on Dec 31)
+      const { entries, deductedToDate } = await buildDeductionLedger(employeeId, false);
 
       // Remaining = total accrued from contract start - total deducted from contract start
       const remaining = Number((accruedToDate - deductedToDate).toFixed(2));
       
       // Current year accrual (for display purposes)
-      const today = new Date();
-      const monthsThisYear = today.getMonth() + 1; // Jan = 1
-      const currentYearAccrued = Number((monthlyRate * monthsThisYear).toFixed(2));
+      const currentYearAccrued = accruedToDate;
 
       res.json({
         employeeId: emp.ID_EMP,

@@ -984,8 +984,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
+      const summaryTitle = Number(carryForward) > 0
+        ? "Balance Summary (with Carry-Forward)"
+        : "Balance Summary";
       doc.text(
-        "Balance Summary (with Carry-Forward)",
+        summaryTitle,
         balCard.padX,
         balCard.padY + 2
       );
@@ -1156,48 +1159,16 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
   // --- helpers: working-year window (contract anniversary -> next anniversary) ---
   const getWorkingYearWindow = () => {
     const now = new Date();
-    // Fallback: calendar year if we don't know the contract start
-    if (!contractStartDate || isNaN(contractStartDate.getTime())) {
-      return {
-        start: new Date(now.getFullYear(), 0, 1),
-        end: new Date(now.getFullYear(), 11, 31),
-      };
-    }
-
-    const annivThisYear = new Date(
-      now.getFullYear(),
-      contractStartDate.getMonth(),
-      contractStartDate.getDate(),
-      0,
-      0,
-      0,
-      0
-    );
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    const yearEnd = new Date(now.getFullYear(), 11, 31);
+    yearStart.setHours(0, 0, 0, 0);
+    yearEnd.setHours(0, 0, 0, 0);
     const start =
-      annivThisYear <= now
-        ? annivThisYear
-        : new Date(
-            now.getFullYear() - 1,
-            contractStartDate.getMonth(),
-            contractStartDate.getDate(),
-            0,
-            0,
-            0,
-            0
-          );
-    const next = new Date(
-      start.getFullYear() + 1,
-      start.getMonth(),
-      start.getDate(),
-      0,
-      0,
-      0,
-      0
-    );
-    const end = new Date(next);
-    end.setDate(end.getDate() - 1);
-    end.setHours(0, 0, 0, 0);
-    return { start, end };
+      contractStartDate && !isNaN(contractStartDate.getTime()) && contractStartDate > yearStart
+        ? new Date(contractStartDate)
+        : yearStart;
+    start.setHours(0, 0, 0, 0);
+    return { start, end: yearEnd };
   };
 
   const yyyy_mm_dd = (d: Date) => {
@@ -1435,9 +1406,9 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
   };
 
   const typeSummary = useMemo<TypeSummary[]>(() => {
-    const win = getWorkingYearWindow();
-    if (!win) return [];
-    const { start: winStart, end: winEnd } = win;
+    const yearWin = getWorkingYearWindow();
+    if (!yearWin) return [];
+    const { start: winStart, end: winEnd } = yearWin;
 
     const bucket = new Map<string, TypeSummary>();
 
@@ -1683,7 +1654,7 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
               String(v).trim?.() !== ""
           );
 
-        const win = (() => {
+        const holidayWin = (() => {
           const n = new Date();
           if (!contractStart || isNaN(contractStart.getTime())) {
             return {
@@ -1727,8 +1698,8 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           return { start, end };
         })();
 
-        let rangeStart = new Date(win.start);
-        let rangeEnd = new Date(win.end);
+        let rangeStart = new Date(holidayWin.start);
+        let rangeEnd = new Date(holidayWin.end);
         const histRows = (balance?.leaveHistory || []).map(mapRow);
         for (const h of histRows) {
           const st = h.startDate ? new Date(h.startDate) : null;
@@ -1860,22 +1831,6 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           return c;
         };
 
-        const workingYearStart = (() => {
-          if (!contractStart) return null;
-          const annivThisYear = new Date(
-            now.getFullYear(),
-            contractStart.getMonth(),
-            contractStart.getDate()
-          );
-          return annivThisYear <= now
-            ? annivThisYear
-            : new Date(
-                now.getFullYear() - 1,
-                contractStart.getMonth(),
-                contractStart.getDate()
-              );
-        })();
-
         const hist = (balance?.leaveHistory || []).map(mapRow);
 
         const isSick = (row: ReturnType<typeof mapRow>) => {
@@ -1895,14 +1850,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           );
         };
 
+        const yearWin = getWorkingYearWindow();
+        const startWindow = yearWin?.start || null;
+        const endWindow = yearWin?.end || null;
         const inWorkingYear = (st: Date, en: Date) => {
-          if (!workingYearStart) return false;
-          const startWindow = workingYearStart;
-          const endWindow = new Date(
-            workingYearStart.getFullYear() + 1,
-            workingYearStart.getMonth(),
-            workingYearStart.getDate()
-          );
+          if (!startWindow || !endWindow) return false;
           return !(en < startWindow || st > endWindow);
         };
 
@@ -1916,12 +1868,8 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
           if (!isApprovedLike(h.status || "")) return;
           if (!inWorkingYear(st, en)) return;
 
-          const wStart = workingYearStart!;
-          const wEnd = new Date(
-            wStart.getFullYear() + 1,
-            wStart.getMonth(),
-            wStart.getDate()
-          );
+          const wStart = startWindow!;
+          const wEnd = endWindow!;
           const a = st < wStart ? wStart : st;
           const b = en > wEnd ? wEnd : en;
 
@@ -1939,9 +1887,15 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
   /** ---------- Monthly ledger ---------- */
   useEffect(() => {
-    if (!contractStartDate) return;
     try {
       const now = new Date();
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      yearStart.setHours(0, 0, 0, 0);
+      const windowStart =
+        contractStartDate && !isNaN(contractStartDate.getTime()) && contractStartDate > yearStart
+          ? new Date(contractStartDate)
+          : yearStart;
+      windowStart.setHours(0, 0, 0, 0);
       const startOfMonth = (d: Date) =>
         new Date(d.getFullYear(), d.getMonth(), 1);
       const endOfMonth = (d: Date) =>
@@ -1986,10 +1940,9 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
         note?: string;
         detailsText?: string;
       }> = [];
-      const carryForward = Number(balance?.carryForward ?? 0) || 0;
-      let running = carryForward;
+      let running = 0;
 
-      let cur = startOfMonth(contractStartDate);
+      let cur = startOfMonth(windowStart);
       let first = true;
 
       const MONTH30 = 30 / 12;
@@ -2010,10 +1963,13 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
 
         // Prorate credit in first/last month so ledger doesn't jump by a full month when the working year starts mid-month
         let credit = monthlyCreditFor(monthEnd);
-        const dim = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
-        const startBoundary = monthStart.getTime() === startOfMonth(contractStartDate).getTime() ? contractStartDate : monthStart;
+        const startBoundary =
+          monthStart.getTime() === startOfMonth(windowStart).getTime()
+            ? windowStart
+            : monthStart;
         const endBoundary = monthStart.getFullYear() === now.getFullYear() && monthStart.getMonth() === now.getMonth() ? now : monthEnd;
-        const frac = Math.min(1, Math.max(0, daysBetween(startBoundary, endBoundary) / Math.max(1, dim)));
+        const earnedDays = Math.min(30, Math.max(0, daysBetween(startBoundary, endBoundary)));
+        const frac = Math.min(1, Math.max(0, earnedDays / 30));
         credit = Number((credit * frac).toFixed(4));
 
         const monthApproved = normalized.filter((h) => {
@@ -2222,31 +2178,44 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
     const ratePerMonth = entitlement >= 45 ? 3.75 : 2.5;
 
     const now = new Date();
-    const annivThisYear = new Date(
-      now.getFullYear(),
-      contractStartDate.getMonth(),
-      contractStartDate.getDate()
-    );
-    const workingYearStart =
-      annivThisYear <= now
-        ? annivThisYear
-        : new Date(
-            now.getFullYear() - 1,
-            contractStartDate.getMonth(),
-            contractStartDate.getDate()
-          );
+    const yearStart = new Date(now.getFullYear(), 0, 1);
+    yearStart.setHours(0, 0, 0, 0);
+    const windowStart =
+      contractStartDate && !isNaN(contractStartDate.getTime()) && contractStartDate > yearStart
+        ? new Date(contractStartDate)
+        : yearStart;
+    windowStart.setHours(0, 0, 0, 0);
 
-    const monthsDiff =
-      (now.getFullYear() - workingYearStart.getFullYear()) * 12 +
-      (now.getMonth() - workingYearStart.getMonth());
-    const includeThisMonth = now.getDate() >= workingYearStart.getDate();
-    const monthsElapsed = Math.min(
-      12,
-      Math.max(0, monthsDiff + (includeThisMonth ? 1 : 0))
-    );
+    const startOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+    const endOfMonth = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    const clamp = (d: Date) => {
+      const x = new Date(d);
+      x.setHours(0, 0, 0, 0);
+      return x;
+    };
+    const daysBetween = (a: Date, b: Date) => {
+      const s = clamp(a);
+      const e = clamp(b);
+      const ms = e.getTime() - s.getTime();
+      return ms < 0 ? 0 : Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
+    };
 
-    const accruedByMonth = monthsElapsed * ratePerMonth;
-    return Math.max(0, Number((accruedByMonth - approvedDaysYTD).toFixed(2)));
+    const dailyRate = ratePerMonth / 30;
+    let accrued = 0;
+    let cur = startOfMonth(windowStart);
+    const endMonth = startOfMonth(now);
+
+    while (cur <= endMonth) {
+      const mStart = cur;
+      const mEnd = endOfMonth(cur);
+      const effectiveStart = windowStart > mStart ? windowStart : mStart;
+      const effectiveEnd = now < mEnd ? now : mEnd;
+      const earnedDays = Math.min(30, Math.max(0, daysBetween(effectiveStart, effectiveEnd)));
+      accrued += earnedDays * dailyRate;
+      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+    }
+
+    return Math.max(0, Number((accrued - approvedDaysYTD).toFixed(2)));
   }, [
     contractStartDate,
     computedEntitlement,
@@ -2607,9 +2576,11 @@ const LeaveBalanceScreen: React.FC<{ employeeId?: number | string }> = ({
                 <Typography variant="h3" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
                   {(remainingDaysEffective ?? 0).toFixed(2)}
                 </Typography>
-                <Typography variant="caption" sx={{ opacity: 0.8, display: "block", mt: 1 }}>
-                  {t("leave.balance.withCarryForward", "With carry-forward from previous years")}
-                </Typography>
+                {Number(balance?.carryForward ?? 0) > 0 && (
+                  <Typography variant="caption" sx={{ opacity: 0.8, display: "block", mt: 1 }}>
+                    {t("leave.balance.withCarryForward", "With carry-forward from previous years")}
+                  </Typography>
+                )}
 
                 {/* Export to PDF (opens options dialog) */}
                 <Stack

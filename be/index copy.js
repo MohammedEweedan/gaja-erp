@@ -81,8 +81,8 @@ const allowedOrigins = [
  // "http://gaja.server.ly",
   "http://localhost:3000",
   "http://localhost:8000",
-  "http://localhost:9000",   
-  "http://localhost:9000:8000",
+  "http://localhost:9000/api",   
+  "http://localhost:9000/api:8000",
 ];
 
 

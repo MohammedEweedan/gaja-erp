@@ -38,12 +38,12 @@ export const getLeaveBalance = async (employeeId: string) => {
   // normalize - use new carry-forward fields from backend
   const total = d.annualEntitlement ?? d.entitlement ?? d.totalLeaves ?? 0;
   const used  = d.deductedToDate ?? d.used ?? d.usedLeaves ?? 0;
-  const rem   = d.remaining ?? d.remainingLeaves ?? Math.max(0, total - used);
+  const rem   = d.remaining ?? d.remainingLeaves ?? Math.max(0, Number(d.accruedToDate ?? total) - Number(used ?? 0));
   
   // New carry-forward fields
   const accruedToDate = d.accruedToDate ?? total;
   const carryForward = d.carryForward ?? 0;
-  const currentYearAccrued = d.currentYearAccrued ?? total;
+  const currentYearAccrued = d.currentYearAccrued ?? 0;
 
   const rawHistory = Array.isArray(d.deductionEntries)
     ? d.deductionEntries
@@ -84,49 +84,13 @@ export const getLeaveBalance = async (employeeId: string) => {
     return parsed.isValid() ? parsed : null;
   };
 
-  const currentYear = dayjs().year();
-  const yearStart = dayjs(`${currentYear}-01-01`);
-  const yearEnd = dayjs(`${currentYear}-12-31`);
-
-  const approvedThisYear = history.reduce((sum: number, entry: typeof history[number]) => {
-    if (entry.status && entry.status !== "approved") return sum;
-    const start = toDay(entry.startDate);
-    const end = toDay(entry.endDate) || start;
-    if (!start) return sum;
-    const safeEnd = end && end.isValid() ? end : start;
-    if (safeEnd.isBefore(yearStart) || start.isAfter(yearEnd)) {
-      return sum;
-    }
-    const clampedStart = start.isBefore(yearStart) ? yearStart : start;
-    const clampedEnd = safeEnd.isAfter(yearEnd) ? yearEnd : safeEnd;
-    if (clampedEnd.isBefore(clampedStart)) return sum;
-
-    const spanFromSource = safeEnd.diff(start, "day") + 1;
-    const overlapSpan = clampedEnd.diff(clampedStart, "day") + 1;
-
-    const reportedDays = Number(entry.effectiveDays ?? entry.days ?? 0);
-    let portion = reportedDays && spanFromSource > 0
-      ? (reportedDays * overlapSpan) / spanFromSource
-      : overlapSpan;
-
-    if (!Number.isFinite(portion)) portion = 0;
-    return sum + Math.max(0, portion);
-  }, 0);
-
-  const accrualBaseRaw = d.currentYearAccrued ?? d.accruedToDate ?? total;
-  const accrualBase = Number.isFinite(Number(accrualBaseRaw))
-    ? Number(accrualBaseRaw)
-    : total;
-  const usedThisYear = Math.max(0, Number(approvedThisYear.toFixed(2)));
-  const adjustedRemaining = Math.max(0, Number((accrualBase - usedThisYear).toFixed(2)));
-
   return {
     entitlement: total,
-    used: usedThisYear,
-    remaining: adjustedRemaining,
-    accruedToDate: accrualBase,
-    carryForward: 0,
-    currentYearAccrued: accrualBase,
+    used: Number.isFinite(Number(used)) ? Number(used) : 0,
+    remaining: Math.max(0, Number.isFinite(Number(rem)) ? Number(rem) : 0),
+    accruedToDate: Number.isFinite(Number(accruedToDate)) ? Number(accruedToDate) : 0,
+    carryForward: Number.isFinite(Number(carryForward)) ? Number(carryForward) : 0,
+    currentYearAccrued: Number.isFinite(Number(currentYearAccrued)) ? Number(currentYearAccrued) : 0,
     monthlyRate: d.monthlyRate ?? 0,
     lastUpdated: d.lastUpdated ?? d.LAST_LEAVE_CALCULATION ?? null,
     leaveHistory: history,

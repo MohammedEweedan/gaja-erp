@@ -840,6 +840,7 @@ exports.compute = async (req,res)=>{
         'T_START','T_END',
         'BASIC_SALARY','BASIC_SALARY_USD',
         'FOOD','FOOD_ALLOWANCE',
+        'GOLD_COMM',
         'GOLD_COMM_VALUE'
       ],
       raw:true,
@@ -861,7 +862,16 @@ exports.compute = async (req,res)=>{
       // sales commission (unchanged)
       const s = salesMap.get(Number(e.ID_EMP)) || { total_lyd: 0, qty: 0 };
       const goldRate = Number(e.GOLD_COMM_VALUE || 0);
-      const gold_bonus_lyd = goldRate > 0 ? Number(((s.total_lyd||0) * (goldRate/100)).toFixed(2)) : 0;
+      const goldCommType = String(e.GOLD_COMM || '').toLowerCase();
+      const gold_bonus_lyd = (() => {
+        if (!(goldRate > 0)) return 0;
+        // If configured as fixed, interpret GOLD_COMM_VALUE as LYD per gram, and use sales qty as grams
+        if (goldCommType === 'fixed') {
+          return Number((((s.qty || 0) * goldRate) || 0).toFixed(2));
+        }
+        // Default: percent of total LYD sales
+        return Number((((s.total_lyd || 0) * (goldRate / 100)) || 0).toFixed(2));
+      })();
 
       const extras = {
         gold_bonus_lyd,
